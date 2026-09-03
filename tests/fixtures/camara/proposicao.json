@@ -1,0 +1,50 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": {
+    "id": 2351249,
+    "uri": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249",
+    "siglaTipo": "PL",
+    "codTipo": 139,
+    "numero": 1106,
+    "ano": 2023,
+    "ementa": "Reconhece a Robótica como esporte de competição e de relevância educacional, na forma que especifica.",
+    "dataApresentacao": "2023-03-14T11:46",
+    "uriOrgaoNumerador": "https://dadosabertos.camara.leg.br/api/v2/orgaos/537236",
+    "statusProposicao": {
+      "dataHora": "2026-07-01T00:00",
+      "sequencia": 79,
+      "siglaOrgao": "MESA",
+      "uriOrgao": "https://dadosabertos.camara.leg.br/api/v2/orgaos/4",
+      "uriUltimoRelator": "https://dadosabertos.camara.leg.br/api/v2/deputados/226837",
+      "regime": "Urgência (Art. 155, RICD)",
+      "descricaoTramitacao": "Expedição de Documento",
+      "codTipoTramitacao": "190",
+      "descricaoSituacao": "Aguardando Apreciação pelo Senado Federal",
+      "codSituacao": 926,
+      "despacho": "Remessa ao Senado Federal por meio do Of. nº 158/2026/SGM-P.",
+      "url": "https://www.camara.leg.br/proposicoesWeb/prop_mostrarintegra?codteor=3154604",
+      "ambito": "Regimental",
+      "apreciacao": "Proposição Sujeita à Apreciação do Plenário"
+    },
+    "uriAutores": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/autores",
+    "descricaoTipo": "Projeto de Lei",
+    "ementaDetalhada": "",
+    "keywords": "Reconhecimento, robótica, esporte de competição, interesse, educação.",
+    "uriPropPrincipal": null,
+    "uriPropAnterior": null,
+    "uriPropPosterior": null,
+    "urlInteiroTeor": "https://www.camara.leg.br/proposicoesWeb/prop_mostrarintegra?codteor=2243096",
+    "urnFinal": null,
+    "texto": null,
+    "justificativa": null
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249"
+    }
+  ]
+}

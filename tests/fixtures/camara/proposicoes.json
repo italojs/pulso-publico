@@ -1,0 +1,24 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes?siglaTipo=PL&numero=1106&ano=2023",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": [
+    {
+      "id": 2351249,
+      "uri": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249",
+      "siglaTipo": "PL",
+      "codTipo": 139,
+      "numero": 1106,
+      "ano": 2023,
+      "ementa": "Reconhece a Robótica como esporte de competição e de relevância educacional, na forma que especifica.",
+      "dataApresentacao": "2023-03-14T11:46"
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes?siglaTipo=PL&numero=1106&ano=2023"
+    }
+  ]
+}

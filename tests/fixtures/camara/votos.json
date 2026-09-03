@@ -1,0 +1,29 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/votacoes/2579999-8/votos",
+    "capturedAt": "2026-09-03",
+    "note": "Campo de contato removido da fixture."
+  },
+  "dados": [
+    {
+      "tipoVoto": "Sim",
+      "dataRegistroVoto": "2025-11-03T21:04:11",
+      "deputado_": {
+        "id": 73788,
+        "uri": "https://dadosabertos.camara.leg.br/api/v2/deputados/73788",
+        "nome": "Ricardo Barros",
+        "siglaPartido": "PP",
+        "uriPartido": "https://dadosabertos.camara.leg.br/api/v2/partidos/37903",
+        "siglaUf": "PR",
+        "idLegislatura": 57,
+        "urlFoto": "https://www.camara.leg.br/internet/deputado/bandep/73788.jpg"
+      }
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/votacoes/2579999-8/votos"
+    }
+  ]
+}

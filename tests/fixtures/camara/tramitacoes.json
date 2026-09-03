@@ -1,0 +1,30 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/tramitacoes",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": [
+    {
+      "dataHora": "2026-07-01T00:00",
+      "sequencia": 79,
+      "siglaOrgao": "MESA",
+      "uriOrgao": "https://dadosabertos.camara.leg.br/api/v2/orgaos/4",
+      "uriUltimoRelator": "https://dadosabertos.camara.leg.br/api/v2/deputados/226837",
+      "regime": "Urgência (Art. 155, RICD)",
+      "descricaoTramitacao": "Expedição de Documento",
+      "codTipoTramitacao": "190",
+      "descricaoSituacao": "Aguardando Apreciação pelo Senado Federal",
+      "codSituacao": 926,
+      "despacho": "Remessa ao Senado Federal por meio do Of. nº 158/2026/SGM-P.",
+      "url": "https://www.camara.leg.br/proposicoesWeb/prop_mostrarintegra?codteor=3154604",
+      "ambito": "Regimental",
+      "apreciacao": "Proposição Sujeita à Apreciação do Plenário"
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/tramitacoes"
+    }
+  ]
+}

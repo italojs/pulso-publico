@@ -1,0 +1,19 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/temas",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": [
+    {
+      "codTema": 46,
+      "tema": "Educação",
+      "relevancia": 0
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/temas"
+    }
+  ]
+}

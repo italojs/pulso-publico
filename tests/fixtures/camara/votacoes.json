@@ -1,0 +1,27 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2379032/votacoes",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": [
+    {
+      "id": "2579999-8",
+      "uri": "https://dadosabertos.camara.leg.br/api/v2/votacoes/2579999-8",
+      "data": "2025-11-03",
+      "dataHoraRegistro": "2025-11-03T21:04:46",
+      "siglaOrgao": "PLEN",
+      "uriOrgao": "https://dadosabertos.camara.leg.br/api/v2/orgaos/180",
+      "uriEvento": "https://dadosabertos.camara.leg.br/api/v2/eventos/80157",
+      "proposicaoObjeto": "REQ 4626/2025",
+      "uriProposicaoObjeto": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2579999",
+      "descricao": "Rejeitado o Requerimento de Urgência (Art. 155 do RICD). Sim: 236; Não: 178; Total: 414.",
+      "aprovacao": 0
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2379032/votacoes"
+    }
+  ]
+}

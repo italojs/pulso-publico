@@ -1,0 +1,22 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/autores",
+    "capturedAt": "2026-09-03"
+  },
+  "dados": [
+    {
+      "uri": "https://dadosabertos.camara.leg.br/api/v2/deputados/204485",
+      "nome": "Luiz Carlos Motta",
+      "codTipo": 10000,
+      "tipo": "Deputado(a)",
+      "ordemAssinatura": 1,
+      "proponente": 1
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2351249/autores"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "_fixture": {
+    "url": "https://dadosabertos.camara.leg.br/api/v2/deputados?itens=1&ordem=ASC&ordenarPor=nome",
+    "capturedAt": "2026-09-03",
+    "note": "Campo de contato removido da fixture."
+  },
+  "dados": [
+    {
+      "id": 204379,
+      "uri": "https://dadosabertos.camara.leg.br/api/v2/deputados/204379",
+      "nome": "Acácio Favacho",
+      "siglaPartido": "MDB",
+      "uriPartido": "https://dadosabertos.camara.leg.br/api/v2/partidos/36899",
+      "siglaUf": "AP",
+      "idLegislatura": 57,
+      "urlFoto": "https://www.camara.leg.br/internet/deputado/bandep/204379.jpg"
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/deputados?itens=1&ordem=ASC&ordenarPor=nome"
+    },
+    {
+      "rel": "next",
+      "href": "https://dadosabertos.camara.leg.br/api/v2/deputados?ordem=ASC&ordenarPor=nome&pagina=2&itens=1"
+    }
+  ]
+}

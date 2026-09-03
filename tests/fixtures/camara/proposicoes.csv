@@ -1,0 +1,5 @@
+﻿"id";"uri";"siglaTipo";"numero";"ano";"codTipo";"descricaoTipo";"ementa";"dataApresentacao";"ultimoStatus_descricaoSituacao";"ultimoStatus_idSituacao";"ultimoStatus_descricaoTramitacao";"ultimoStatus_sequencia";"ultimoStatus_siglaOrgao";"ultimoStatus_url"
+"1001";"https://dadosabertos.camara.leg.br/api/v2/proposicoes/1001";"PL";"1";"2023";"139";"Projeto de Lei";"Registro anterior ao corte.";"2023-09-02T23:59:59";"Em tramitação";"100";"Apresentação";"1";"MESA";""
+"1002";"https://dadosabertos.camara.leg.br/api/v2/proposicoes/1002";"PL";"2";"2023";"139";"Projeto de Lei";"Promove educação; ciência e robótica.";"2023-09-03T00:00:00";"Em tramitação";"100";"Apresentação";"1";"MESA";""
+"1003";"https://dadosabertos.camara.leg.br/api/v2/proposicoes/1003";"PL";"3";"2023";"139";"Projeto de Lei";"Registro no limite final.";"2023-09-03T23:59:59";"Aguardando Apreciação pelo Senado Federal";"926";"Remessa ao Senado";"2";"MESA";""
+"1004";"https://dadosabertos.camara.leg.br/api/v2/proposicoes/1004";"PL";"4";"2023";"139";"Projeto de Lei";"Registro posterior ao intervalo.";"2023-09-04T00:00:00";"Em tramitação";"100";"Apresentação";"1";"MESA";""
