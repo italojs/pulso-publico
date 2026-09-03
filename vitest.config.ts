@@ -5,7 +5,9 @@ export default defineConfig({
     environment: "node",
     restoreMocks: true,
     env: {
-      DATABASE_URL: "postgres://app:app@localhost:5432/legislativo_test",
+      DATABASE_URL:
+        process.env.TEST_DATABASE_URL
+        ?? "postgres://app:app@localhost:5432/legislativo_test",
     },
   },
   resolve: {
