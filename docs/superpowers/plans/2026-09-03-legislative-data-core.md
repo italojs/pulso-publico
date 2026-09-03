@@ -6,7 +6,7 @@
 
 **Architecture:** Um único repositório TypeScript contém a futura aplicação Next.js e módulos de servidor isolados por domínio. Adaptadores específicos transformam respostas externas em um modelo canônico; repositórios persistem esse modelo no PostgreSQL; jobs idempotentes executam sincronização incremental a cada 30 minutos e reconciliação diária. Testes usam fixtures locais e nunca dependem da disponibilidade das APIs oficiais.
 
-**Tech Stack:** Node.js 26.8.1, npm 11.19, Next.js 16.3, React 19.2, TypeScript 7.0, PostgreSQL 18, Drizzle ORM 0.45, Zod 4.5, csv-parse 7.0, fast-xml-parser 5.11 e Vitest 5.
+**Tech Stack:** Node.js 26.8.1, npm 11.19, Next.js 16.3, React 19.2, TypeScript 7.0, PostgreSQL 18, Drizzle ORM 0.45, Zod 4.5, csv-parse 7.0 e Vitest 5.
 
 **Spec:** `docs/superpowers/specs/2026-09-03-acompanhamento-legislativo-mvp-design.md`
 
@@ -44,7 +44,7 @@ src/
   integrations/camara/client.ts       # Chamadas HTTP da Câmara
   integrations/camara/bootstrap.ts    # Carga inicial pelos arquivos anuais CSV
   integrations/camara/mapper.ts       # Câmara para modelo canônico
-  integrations/senado/client.ts       # Chamadas HTTP/XML do Senado
+  integrations/senado/client.ts       # API JSON de processo legislativo do Senado
   integrations/senado/mapper.ts       # Senado para modelo canônico
   jobs/sync-source.ts                 # Sincronização incremental por fonte
   jobs/reconcile.ts                   # Reconciliação diária não destrutiva
@@ -52,7 +52,7 @@ scripts/sync.ts                       # Entrada de linha de comando para cron
 scripts/reconcile.ts                  # Entrada diária de reconciliação
 tests/
   fixtures/camara/*.json              # Respostas oficiais congeladas
-  fixtures/senado/*.xml               # Respostas oficiais congeladas
+  fixtures/senado/*.json              # Respostas oficiais congeladas
   domain/legislative.test.ts
   server/http/retrying-fetch.test.ts
   server/db/repositories.test.ts
@@ -127,7 +127,6 @@ Create `package.json` with pinned runtime commands and dependencies:
   "dependencies": {
     "csv-parse": "7.0.2",
     "drizzle-orm": "0.45.2",
-    "fast-xml-parser": "5.11.1",
     "next": "16.3.4",
     "postgres": "3.4.9",
     "react": "19.2.8",
@@ -767,56 +766,32 @@ git commit -m "feat: ingest Câmara legislative data"
 **Files:**
 - Create: `src/integrations/senado/client.ts`
 - Create: `src/integrations/senado/mapper.ts`
-- Create: `tests/fixtures/senado/pesquisa-materias.xml`
-- Create: `tests/fixtures/senado/materia.xml`
-- Create: `tests/fixtures/senado/autoria.xml`
-- Create: `tests/fixtures/senado/assuntos.xml`
-- Create: `tests/fixtures/senado/movimentacoes.xml`
-- Create: `tests/fixtures/senado/votacoes.xml`
-- Create: `tests/fixtures/senado/senadores.xml`
+- Create: `tests/fixtures/senado/processos.json`
+- Create: `tests/fixtures/senado/processo.json`
+- Create: `tests/fixtures/senado/votacoes.json`
+- Create: `tests/fixtures/senado/senadores.json`
 - Test: `tests/integrations/senado/mapper.test.ts`
 
 **Interfaces:**
-- Consumes: `retryingFetch`, `fast-xml-parser` and the canonical contracts from Task 2.
-- Produces: `SenadoAdapter implements LegislativeSourceAdapter`, plus pure mappers matching the Câmara mapper return types.
+- Consumes: `retryingFetch` and the canonical contracts from Task 2.
+- Produces: `SenadoAdapter implements LegislativeSourceAdapter`, plus pure mappers for process, authorship, classifications, movements, votes and senators.
 
-- [ ] **Step 1: Capture and document Senado contracts**
+- [ ] **Step 1: Capture and document the current Senado contracts**
 
-Use the official catalog links to capture one representative response for matter search, detail, movement, vote and current senator list. The expected service route families are:
+Use the official OpenAPI catalog to capture representative JSON responses. Prefer the current Processo Legislativo API over the deprecated Matéria endpoints. The route families are:
 
 ```text
-/materia/pesquisa/lista
-/materia/{codigoMateria}
-/materia/movimentacoes/{codigoMateria}
-/materia/votacoes/{codigoMateria}
+/processo
+/processo/{idProcesso}
+/votacao?idProcesso={idProcesso}
 /senador/lista/atual
-/senador/{codigoParlamentar}/votacoes
 ```
 
-Before saving fixtures, confirm each route from the current Senado Dados Abertos catalog. Save the raw XML without reformatting under `tests/fixtures/senado/` and add a neighboring `tests/fixtures/senado/README.md` containing the confirmed URL and capture date for every file.
+Before saving fixtures, confirm each route from the current Senado Dados Abertos catalog. Save representative JSON under `tests/fixtures/senado/`, remove contact fields, and add a neighboring `README.md` containing the confirmed URL and capture date for every file.
 
-- [ ] **Step 2: Write failing XML mapper tests**
+- [ ] **Step 2: Write failing JSON mapper tests**
 
-Create `tests/integrations/senado/mapper.test.ts`:
-
-```ts
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { parseSenadoXml, mapSenadoBill } from "#/integrations/senado/mapper";
-
-const xml = readFileSync("tests/fixtures/senado/materia.xml", "utf8");
-
-describe("Senado mapper", () => {
-  it("normalizes a matter while preserving its official identity", () => {
-    const raw = parseSenadoXml(xml);
-    const bill = mapSenadoBill(raw, new Date("2026-09-03T18:00:00.000Z"));
-    expect(bill.source).toBe("senado");
-    expect(bill.originHouse).toBe("senado");
-    expect(bill.officialCode).toMatch(/^[A-Z]+ \d+\/\d{4}$/);
-    expect(bill.officialUrl).toContain("senado.leg.br");
-  });
-});
-```
+Create `tests/integrations/senado/mapper.test.ts` from the frozen JSON fixtures. Assert process identity and provenance, origin and current house, authorship, classifications, movements, vote secrecy/nominality, individual vote labels and current senator identity.
 
 - [ ] **Step 3: Run tests and verify failure**
 
@@ -824,14 +799,13 @@ Run: `npm test -- tests/integrations/senado/mapper.test.ts`
 
 Expected: FAIL because the Senado mapper does not exist.
 
-- [ ] **Step 4: Implement defensive XML normalization**
+- [ ] **Step 4: Implement defensive JSON normalization**
 
-Configure `XMLParser` with `ignoreAttributes: false`, `parseTagValue: false`, `trimValues: true` and `isArray` for collections that may contain one or many records. Convert empty elements to `null`, but preserve official text exactly after trimming surrounding whitespace.
+Validate every current Processo Legislativo JSON shape with Zod. Convert empty values to `null`, but preserve official text after trimming surrounding whitespace.
 
 Export:
 
 ```ts
-export function parseSenadoXml(xml: string): unknown;
 export function mapSenadoBill(raw: unknown, checkedAt: Date): Bill;
 export function mapSenadoAuthor(raw: unknown, billId: string, checkedAt: Date): BillAuthor;
 export function mapSenadoTopic(raw: unknown, billId: string, checkedAt: Date): BillTopic;
@@ -845,7 +819,7 @@ Validate parsed shapes with Zod and return canonical records through the Task 2 
 
 - [ ] **Step 5: Implement the Senado client**
 
-Create `SenadoAdapter` with `source = "senado"`. The adapter sends `Accept: application/xml`, encodes all search parameters with `URLSearchParams`, follows catalog-supported pagination, and maps every response through Step 4. `getBill` loads `/materia/{codigoMateria}`. Bound matter searches to one-day ranges so a retry does not request an unbounded historical collection.
+Create `SenadoAdapter` with `source = "senado"`. The adapter sends `Accept: application/json`, encodes all search parameters with `URLSearchParams`, and maps every response through Step 4. `getBill` loads `/processo/{idProcesso}`. Initial searches use presentation-date windows of at most one month; incremental searches use `numdias` with the official 30-day ceiling. Votes use `/votacao?idProcesso={idProcesso}`.
 
 If the confirmed catalog differs from a route family in Step 1, use the catalog URL and record it in the fixture README; the adapter tests remain based on the confirmed official response.
 

@@ -1,0 +1,82 @@
+{
+  "id": 8972241,
+  "codigoMateria": 172003,
+  "identificacao": "PL 2162/2023",
+  "sigla": "PL",
+  "descricaoSigla": "Projeto de Lei",
+  "numero": "2162",
+  "ano": 2023,
+  "objetivo": "Revisora",
+  "casaIdentificadora": "SF",
+  "siglaEnteIdentificador": "SF",
+  "conteudo": {
+    "id": 7640792,
+    "idTipo": 11,
+    "siglaTipo": "NORMA_GERAL",
+    "tipo": "Norma Geral",
+    "ementa": "Altera dispositivos da Lei nº 7.210, de 11 de julho de 1984 (Lei de Execução Penal) e do Decreto-Lei nº 2.848, de 7 de dezembro de 1940 (Código Penal).",
+    "tipoNormaIndicada": "LEI"
+  },
+  "documento": {
+    "id": 10127724,
+    "siglaTipo": "PROJETO_LEI_ORDINARIA",
+    "tipo": "Projeto de Lei Ordinária",
+    "dataApresentacao": "2025-12-10",
+    "url": "https://legis.senado.gov.br/sdleg-getter/documento?dm=10127724",
+    "autoria": [
+      {
+        "autor": "Câmara dos Deputados",
+        "siglaTipo": "CAMARA",
+        "descricaoTipo": "CAMARA",
+        "ordem": 1,
+        "outrosAutoresNaoInformados": "Não",
+        "idEnte": 2,
+        "siglaEnte": "CD",
+        "casaEnte": "CD",
+        "ente": "Câmara dos Deputados"
+      }
+    ],
+    "resumoAutoria": "Câmara dos Deputados"
+  },
+  "tramitando": "Não",
+  "dataInicioEfetivo": "2025-12-10",
+  "situacaoAtual": "VETADA",
+  "siglaSituacaoAtual": "VTDA",
+  "dataSituacaoAtual": "2026-01-08",
+  "classificacoes": [
+    {
+      "codigo": 33805617,
+      "descricao": "Direito Penal e Penitenciário",
+      "descricaoHierarquia": "Jurídico / Direito Penal e Penitenciário"
+    }
+  ],
+  "siglaCasaIniciadora": "CD",
+  "autuacoes": [
+    {
+      "numero": 1,
+      "descricao": "Autuação Principal",
+      "informesLegislativos": [
+        {
+          "id": 2268789,
+          "data": "2025-12-10 07:03:21",
+          "colegiado": {
+            "codigo": 1998,
+            "casa": "SF",
+            "sigla": "PLEN",
+            "nome": "Plenário do Senado Federal"
+          },
+          "enteAdministrativo": {
+            "id": 55312,
+            "casa": "SF",
+            "sigla": "SLSF",
+            "nome": "Secretaria Legislativa do Senado Federal"
+          },
+          "descricao": "Autuado o Projeto de Lei nº 2162/2023, proveniente da Câmara dos Deputados. O projeto vai à publicação.",
+          "idSituacaoIniciada": 175,
+          "siglaSituacaoIniciada": "AGDESP"
+        }
+      ]
+    }
+  ],
+  "dthUltimaAtualizacao": "2026-06-23T21:07:22.122000"
+}

@@ -1,0 +1,30 @@
+{
+  "ListaParlamentarEmExercicio": {
+    "Metadados": {
+      "Versao": "03/09/2026 20:01:07",
+      "VersaoServico": "4",
+      "DataVersaoServico": "2020-07-15",
+      "DescricaoDataSet": "Lista dos Parlamentares que estão atualmente em Exercício. Informações atuais sobre o Parlamentar."
+    },
+    "Parlamentares": {
+      "Parlamentar": [
+        {
+          "IdentificacaoParlamentar": {
+            "CodigoParlamentar": "5672",
+            "CodigoPublicoNaLegAtual": "800",
+            "NomeParlamentar": "Alan Rick",
+            "NomeCompletoParlamentar": "Alan Rick Miranda",
+            "SexoParlamentar": "Masculino",
+            "FormaTratamento": "Senador ",
+            "UrlFotoParlamentar": "http://www.senado.leg.br/senadores/img/fotos-oficiais/senador5672.jpg",
+            "UrlPaginaParlamentar": "http://www25.senado.leg.br/web/senadores/senador/-/perfil/5672",
+            "SiglaPartidoParlamentar": "REPUBLICANOS",
+            "UfParlamentar": "AC",
+            "MembroMesa": "Não",
+            "MembroLideranca": "Sim"
+          }
+        }
+      ]
+    }
+  }
+}
