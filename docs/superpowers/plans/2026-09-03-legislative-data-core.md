@@ -175,9 +175,9 @@ Create `tsconfig.json`:
     "rewriteRelativeImportExtensions": true,
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
     "paths": { "#/*": ["./src/*.ts"] }
   },
   "include": ["app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "*.ts"],

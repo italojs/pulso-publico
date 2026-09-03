@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "#/*": [
+        "./src/*.ts"
+      ]
+    },
+    "allowJs": true,
+    "skipLibCheck": true,
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "*.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

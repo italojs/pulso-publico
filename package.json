@@ -1,0 +1,44 @@
+{
+  "name": "acompanhamento-legislativo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=26.8.1 <27"
+  },
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "sync": "node scripts/sync.ts",
+    "reconcile": "node scripts/reconcile.ts"
+  },
+  "dependencies": {
+    "csv-parse": "7.0.2",
+    "drizzle-orm": "0.45.2",
+    "fast-xml-parser": "5.11.1",
+    "next": "16.3.4",
+    "postgres": "3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "dotenv": "17.4.2",
+    "drizzle-kit": "0.31.10",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}

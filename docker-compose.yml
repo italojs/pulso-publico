@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: legislativo
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/001-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d legislativo"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
