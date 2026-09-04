@@ -77,6 +77,42 @@ describe("Senado mapper", () => {
     });
   });
 
+  it.each(["R.C", "R.S"])("accepts the real official Senate type %s", (sigla) => {
+    const bill = mapSenadoBill({
+      ...processFixture,
+      id: `${processFixture.id}-${sigla}`,
+      codigoMateria: `${processFixture.codigoMateria}-${sigla}`,
+      identificacao: `${sigla} 1/2026`,
+      sigla,
+      numero: 1,
+      ano: 2026,
+    }, checkedAt);
+
+    expect(bill).toMatchObject({
+      officialCode: `${sigla} 1/2026`,
+      proposalType: sigla,
+      proposalNumber: 1,
+      proposalYear: 2026,
+    });
+  });
+
+  it("degrades an unrecognized structured Senate type without rejecting the process", () => {
+    const bill = mapSenadoBill({
+      ...processFixture,
+      identificacao: "TIPO/INTERNO 1/2026",
+      sigla: "TIPO/INTERNO",
+      numero: 1,
+      ano: 2026,
+    }, checkedAt);
+
+    expect(bill).toMatchObject({
+      officialCode: "TIPO/INTERNO 1/2026",
+      proposalType: null,
+      proposalNumber: 1,
+      proposalYear: 2026,
+    });
+  });
+
   it("maps institutional and parliamentary authors without guessing identities", () => {
     const institutional = mapSenadoAuthor(
       processFixture.documento.autoria[0],

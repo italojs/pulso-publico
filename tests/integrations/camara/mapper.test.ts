@@ -57,6 +57,19 @@ describe("Câmara mapper", () => {
     });
   });
 
+  it("accepts the real underscore type and degrades an unrecognized structured type", () => {
+    const official = mapCamaraBill({ ...billFixture.dados, siglaTipo: "ATA_PRE" }, checkedAt);
+    const unrecognized = mapCamaraBill({ ...billFixture.dados, siglaTipo: "TIPO/INTERNO" }, checkedAt);
+
+    expect(official.proposalType).toBe("ATA_PRE");
+    expect(unrecognized).toMatchObject({
+      officialCode: "TIPO/INTERNO 1106/2023",
+      proposalType: null,
+      proposalNumber: 1106,
+      proposalYear: 2023,
+    });
+  });
+
   it("creates a deterministic movement id", () => {
     const raw = movementFixture.dados[0];
     const movement = mapCamaraMovement(raw, "2351249", checkedAt);

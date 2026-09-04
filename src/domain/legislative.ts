@@ -23,12 +23,7 @@ const sourced = {
 export const BillRecord = z.object({
   ...sourced,
   officialCode: z.string().min(1),
-  proposalType: z.string().transform((value, context) => {
-    const normalized = normalizeProposalType(value);
-    if (normalized) return normalized;
-    context.addIssue({ code: "custom", message: "Invalid official proposal type" });
-    return z.NEVER;
-  }).nullable().optional(),
+  proposalType: z.string().transform(normalizeProposalType).nullable().optional(),
   proposalNumber: z.number().int().nonnegative().nullable().optional(),
   proposalYear: z.number().int().min(1000).max(9999).nullable().optional(),
   congressionalKey: z.string().min(1).nullable(),

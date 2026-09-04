@@ -385,6 +385,39 @@ describe("public legislative queries", () => {
     expect(crossFacetAnd.items.map((item) => item.officialCode)).toEqual(["PL 12/2024"]);
   });
 
+  it("keeps an unrecognized official type searchable through its official text", async () => {
+    await testDb.insert(bills).values({
+      id: "00000000-0000-4000-8000-000000000099",
+      source: "camara",
+      externalId: "invalid-type-search",
+      officialCode: "TIPO/INTERNO 4/2026",
+      proposalType: null,
+      proposalNumber: 4,
+      proposalYear: 2026,
+      congressionalKey: null,
+      officialTitle: "Identificação oficial incomum",
+      officialSummary: "Texto público preservado.",
+      originHouse: "camara",
+      currentHouse: "camara",
+      statusCode: null,
+      statusLabel: "Em análise",
+      simplifiedStage: "unclassified",
+      officialUrl: "https://www.camara.leg.br/propostas-legislativas/invalid-type-search",
+      presentedAt: null,
+      checkedAt,
+    });
+
+    const result = await listPublicBills(testDb, { query: "TIPO/INTERNO" });
+    const [stored] = await testDb
+      .select({ proposalType: bills.proposalType })
+      .from(bills)
+      .where(eq(bills.externalId, "invalid-type-search"));
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.officialCode).toBe("TIPO/INTERNO 4/2026");
+    expect(stored?.proposalType).toBeNull();
+  });
+
   it("treats presentation and activity date bounds as inclusive calendar days", async () => {
     const presented = await listPublicBills(testDb, {
       presentedStart: "2025-02-01",

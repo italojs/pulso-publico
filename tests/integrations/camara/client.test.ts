@@ -79,6 +79,31 @@ describe("CamaraAdapter", () => {
     expect(page.items.map((item) => item.externalId)).toEqual(["2351251"]);
   });
 
+  it("keeps mapping a batch when one structured proposal type is unrecognized", async () => {
+    const base = {
+      ...billListFixture.dados[0],
+      dataApresentacao: "2026-09-03T14:58",
+    };
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async () => jsonResponse({
+        dados: [
+          { ...base, id: 2351251, siglaTipo: "ATA_PRE" },
+          { ...base, id: 2351252, siglaTipo: "TIPO/INTERNO" },
+        ],
+        links: [],
+      }),
+    });
+
+    const page = await adapter.listBillsChangedSince(new Date("2026-09-03T17:55:00.000Z"));
+
+    expect(page.items.map(({ externalId, proposalType }) => ({ externalId, proposalType }))).toEqual([
+      { externalId: "2351251", proposalType: "ATA_PRE" },
+      { externalId: "2351252", proposalType: null },
+    ]);
+  });
+
   it("turns a malformed official payload into a bounded contract error", async () => {
     const adapter = new CamaraAdapter({
       baseUrl: "https://camara.test/api/v2",

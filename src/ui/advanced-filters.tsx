@@ -212,7 +212,7 @@ function RadioList({ label, name, onChange, options, selected }: Readonly<{
     <legend>{label}</legend>
     <div className="advancedFilters__choices">{options.map((option) => <label key={option.value}><input
       checked={selected === (option.value || undefined)}
-      name={option.value ? name : undefined}
+      name={name}
       onChange={() => onChange(option.value || undefined)}
       type="radio"
       value={option.value}

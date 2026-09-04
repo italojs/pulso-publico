@@ -15,7 +15,7 @@ export type SimplifiedStage =
 
 export type VoteResultCategory = "approved" | "rejected" | "other" | "unavailable";
 
-export const PROPOSAL_TYPE_PATTERN = /^[A-Z]{2,10}(?:-[A-Z]{1,3})?$/;
+export const PROPOSAL_TYPE_PATTERN = /^(?=.{2,20}$)[A-Z]+(?:[._-][A-Z]+)*$/;
 
 export function normalizeProposalType(value: string): string | null {
   const normalized = value.trim().toUpperCase();
@@ -25,7 +25,7 @@ export function normalizeProposalType(value: string): string | null {
 const fold = (value: string) => value.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export function parseProposalIdentity(officialCode: string): ProposalIdentity {
-  const match = officialCode.toUpperCase().match(/^([A-Z]{2,10}(?:-[A-Z]{1,3})?)\s+(?:N[º°O]?\s*)?(\d{1,9})(?:\s*[/,]\s*(?:DE\s*)?(\d{4})(?!\d))?/);
+  const match = officialCode.toUpperCase().match(/^([A-Z]+(?:[._-][A-Z]+)*)\s+(?:N[º°O]?\s*)?(\d{1,9})(?:\s*[/,]\s*(?:DE\s*)?(\d{4})(?!\d))?/);
   const proposalYear = match?.[3] ? Number(match[3]) : null;
 
   return match

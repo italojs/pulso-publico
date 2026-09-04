@@ -129,14 +129,16 @@ describe("feed search params", () => {
 
   it("accepts new proposal type tokens, non-nominal votes, and the region sentinel", () => {
     const filters = parseFeedSearchParams({
-      tipo: ["PLX", "plx", "SBT-A", "EMC-A", "SBE-A", "not a type"], tipoVotacao: ["non_nominal", "secret"],
+      tipo: ["PLX", "plx", "SBT-A", "EMC-A", "SBE-A", "ATA_PRE", "R.C", "R.S", "not a type", "TIPO/INTERNO"], tipoVotacao: ["non_nominal", "secret"],
       uf: ["nao_informada", "SP", "ZZ"],
     });
-    expect(filters.proposalTypes).toEqual(["PLX", "SBT-A", "EMC-A", "SBE-A"]);
+    expect(filters.proposalTypes).toEqual(["PLX", "SBT-A", "EMC-A", "SBE-A", "ATA_PRE", "R.C", "R.S"]);
     expect(filters.voteKinds).toEqual(["non_nominal", "secret"]);
     expect(filters.regions).toEqual(["nao_informada", "SP"]);
     expect(buildFeedHref(filters, 1)).toContain("tipo=PLX");
     expect(buildFeedHref(filters, 1)).toContain("tipo=SBT-A&tipo=EMC-A&tipo=SBE-A");
+    expect(buildFeedHref(filters, 1)).toContain("tipo=ATA_PRE&tipo=R.C&tipo=R.S");
+    expect(buildFeedHref(filters, 1)).not.toContain("TIPO%2FINTERNO");
     expect(buildFeedHref(filters, 1)).toContain("tipoVotacao=non_nominal");
     expect(buildFeedHref(filters, 1)).toContain("uf=nao_informada&uf=SP");
   });

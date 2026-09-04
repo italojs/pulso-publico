@@ -438,9 +438,19 @@ describe("advanced feed filters", () => {
     await act(async () => vi.advanceTimersByTimeAsync(300));
     const body = JSON.parse(String((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body));
     expect(body.filters).toEqual({ voteKinds: ["nominal"] });
+    const votePresenceGroup = within(dialog).getByRole("group", { name: "Há votação registrada?" });
+    const individualVotesGroup = within(dialog).getByRole("group", { name: "Votos individuais" });
+    expect(within(votePresenceGroup).getAllByRole("radio").map((radio) => radio.getAttribute("name"))).toEqual([
+      "votacao", "votacao", "votacao",
+    ]);
+    expect(within(individualVotesGroup).getAllByRole("radio").map((radio) => radio.getAttribute("name"))).toEqual([
+      "votosIndividuais", "votosIndividuais", "votosIndividuais",
+    ]);
     const data = new FormData(dialog.querySelector("form")!);
-    expect(data.has("votacao")).toBe(false);
-    expect(data.has("votosIndividuais")).toBe(false);
+    expect(data.get("votacao")).toBe("");
+    expect(data.get("votosIndividuais")).toBe("");
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(routerPush).toHaveBeenCalledWith("/?tipoVotacao=nominal");
   });
 
   it("offers source, status and topic multi-selects and exactly the approved activity choices", () => {
