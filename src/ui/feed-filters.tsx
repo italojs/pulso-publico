@@ -23,11 +23,8 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
       <fieldset className="quickFilters">
         <legend className="srOnly">Filtros rápidos</legend>
         <label>Casa legislativa<select defaultValue={sources[0] ?? ""} name="fonte"><option value="">Todas</option>{options.sources.map((source) => <option key={source} value={source}>{source === "camara" ? "Câmara" : "Senado"}</option>)}</select></label>
-        {sources.slice(1).map((source) => <input key={source} name="fonte" type="hidden" value={source} />)}
         <label>Situação atual<select defaultValue={statuses[0] ?? ""} name="situacao"><option value="">Todas</option>{options.statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
-        {statuses.slice(1).map((status) => <input key={status} name="situacao" type="hidden" value={status} />)}
         <label>Tema<select defaultValue={topics[0] ?? ""} name="tema"><option value="">Todos</option>{options.topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}</select></label>
-        {topics.slice(1).map((topic) => <input key={topic} name="tema" type="hidden" value={topic} />)}
         <AdvancedFilters filters={filters} options={options} />
         <button className="quickFilters__apply" type="submit">Aplicar</button>
       </fieldset>

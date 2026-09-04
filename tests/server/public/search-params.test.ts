@@ -156,4 +156,29 @@ describe("feed search params", () => {
     expect(countActiveFilters(filters)).toBe(3);
     expect(buildFeedHref(filters, 1)).not.toContain("pagina=");
   });
+
+  it.each(["24h", "7d", "30d"] as const)("round-trips the canonical %s recent-activity preset", (recentActivity) => {
+    const filters = parseFeedSearchParams({
+      atividadeRecente: recentActivity,
+      atividadeInicio: "2026-01-01",
+      atividadeFim: "2026-02-01",
+      fonte: "camara",
+      pagina: "4",
+    });
+
+    expect(filters).toMatchObject({ recentActivity, sources: ["camara"], page: 4 });
+    expect(filters).not.toHaveProperty("activityStart");
+    expect(filters).not.toHaveProperty("activityEnd");
+    expect(countActiveFilters(filters)).toBe(2);
+
+    const href = buildFeedHref(filters, 1);
+    expect(href).toContain(`atividadeRecente=${recentActivity}`);
+    expect(href).not.toContain("atividadeInicio");
+    expect(href).not.toContain("atividadeFim");
+    expect(href).not.toContain("pagina=");
+  });
+
+  it("ignores an unknown recent-activity preset", () => {
+    expect(parseFeedSearchParams({ atividadeRecente: "365d" })).not.toHaveProperty("recentActivity");
+  });
 });

@@ -398,6 +398,30 @@ describe("public legislative queries", () => {
     expect(activity.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
   });
 
+  it("uses PostgreSQL server time for canonical recent-activity presets and ignores custom bounds", async () => {
+    const now = Date.now();
+    await testDb.insert(bills).values([
+      ["00000000-0000-4000-8000-000000000010", "recent-12h", "Relógio 12h", 12],
+      ["00000000-0000-4000-8000-000000000011", "recent-3d", "Relógio 3d", 72],
+      ["00000000-0000-4000-8000-000000000012", "recent-15d", "Relógio 15d", 360],
+      ["00000000-0000-4000-8000-000000000013", "recent-40d", "Relógio 40d", 960],
+    ].map(([id, externalId, officialCode, hours]) => ({
+      id: String(id), source: "camara" as const, externalId: String(externalId), officialCode: String(officialCode),
+      officialTitle: String(officialCode), officialSummary: "Teste do relógio do servidor", originHouse: "camara" as const,
+      currentHouse: "camara" as const, statusLabel: "Em análise", officialUrl: `https://example.test/${externalId}`,
+      presentedAt: new Date(now - Number(hours) * 60 * 60 * 1_000), checkedAt,
+    })));
+
+    const codes = async (filters: PublicBillFilters) => (await listPublicBills(testDb, filters)).items
+      .map((item) => item.officialCode).filter((code) => code.startsWith("Relógio"));
+
+    expect(await codes({ recentActivity: "24h" })).toEqual(["Relógio 12h"]);
+    expect(await codes({ recentActivity: "7d" })).toEqual(["Relógio 12h", "Relógio 3d"]);
+    expect(await codes({ recentActivity: "30d" })).toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
+    expect(await codes({ recentActivity: "30d", activityStart: "2099-01-01", activityEnd: "2099-01-02" }))
+      .toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
+  });
+
   it("ignores impossible calendar dates in list and count queries", async () => {
     const [result, total] = await Promise.all([
       listPublicBills(testDb, { presentedStart: "2026-02-30" }),

@@ -253,6 +253,32 @@ describe("advanced public filter routes", () => {
     }
   });
 
+  it.each(["24h", "7d", "30d"] as const)("accepts the canonical %s recent-activity preset", async (recentActivity) => {
+    const response = await countPost(post("/api/projects/filter-count", {
+      filters: { recentActivity },
+    }));
+
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects an unknown recent-activity preset", async () => {
+    const response = await countPost(post("/api/projects/filter-count", {
+      filters: { recentActivity: "365d" },
+    }));
+
+    expect(response.status).toBe(400);
+  });
+
+  it("clears custom activity bounds when a canonical preset is present", async () => {
+    const parsed = await readPublicFilterRequest(post("/api/projects/filter-count", {
+      filters: { recentActivity: "7d", activityStart: "2099-01-02", activityEnd: "2099-01-01" },
+    }), new UserRepository(testDb));
+
+    expect(parsed).toMatchObject({ filters: { recentActivity: "7d" } });
+    expect("filters" in parsed && parsed.filters).not.toHaveProperty("activityStart");
+    expect("filters" in parsed && parsed.filters).not.toHaveProperty("activityEnd");
+  });
+
   it("rejects unknown root and bill-reference keys", async () => {
     const root = await countPost(post("/api/projects/filter-count", {
       filters: {},

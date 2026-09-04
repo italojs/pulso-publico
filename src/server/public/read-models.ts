@@ -144,6 +144,7 @@ export type PublicVotePresence = "with" | "without";
 export type PublicVoteKind = "nominal" | "secret" | "non_nominal";
 export type PublicIndividualVoteAvailability = "available" | "unavailable";
 export type PublicVoteResult = "approved" | "rejected" | "other" | "unavailable";
+export type PublicRecentActivity = "24h" | "7d" | "30d";
 export type PublicBillOrder =
   | "updated"
   | "presented_desc"
@@ -168,6 +169,7 @@ export interface PublicBillFilters {
   presentedEnd?: string;
   activityStart?: string;
   activityEnd?: string;
+  recentActivity?: PublicRecentActivity;
   votePresence?: PublicVotePresence;
   voteKinds?: PublicVoteKind[];
   individualVoteAvailability?: PublicIndividualVoteAvailability;

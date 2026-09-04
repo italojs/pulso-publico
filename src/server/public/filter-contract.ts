@@ -59,6 +59,7 @@ export const publicBillFiltersSchema = z.object({
   presentedEnd: date.optional(),
   activityStart: date.optional(),
   activityEnd: date.optional(),
+  recentActivity: z.enum(["24h", "7d", "30d"]).optional(),
   votePresence: z.enum(["with", "without"]).optional(),
   voteKinds: filterValues(z.enum(voteKindValues)).optional(),
   individualVoteAvailability: z.enum(["available", "unavailable"]).optional(),
@@ -79,9 +80,13 @@ export const publicBillFiltersSchema = z.object({
   if (filters.presentedStart && filters.presentedEnd && filters.presentedStart > filters.presentedEnd) {
     context.addIssue({ code: "custom", message: "presentedStart must not be after presentedEnd", path: ["presentedEnd"] });
   }
-  if (filters.activityStart && filters.activityEnd && filters.activityStart > filters.activityEnd) {
+  if (!filters.recentActivity && filters.activityStart && filters.activityEnd && filters.activityStart > filters.activityEnd) {
     context.addIssue({ code: "custom", message: "activityStart must not be after activityEnd", path: ["activityEnd"] });
   }
+}).transform((filters) => {
+  if (!filters.recentActivity) return filters;
+  const { activityStart: _activityStart, activityEnd: _activityEnd, ...withoutCustomActivity } = filters;
+  return withoutCustomActivity;
 });
 
 const billReference = z.object({

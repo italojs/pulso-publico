@@ -102,12 +102,20 @@ function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {})
 
   const presentedStart = brazilianDateBoundary(filters.presentedStart, false);
   const presentedEnd = brazilianDateBoundary(filters.presentedEnd, true);
-  const activityStart = brazilianDateBoundary(filters.activityStart, false);
-  const activityEnd = brazilianDateBoundary(filters.activityEnd, true);
   if (presentedStart) conditions.push(gte(bills.presentedAt, presentedStart));
   if (presentedEnd) conditions.push(lt(bills.presentedAt, presentedEnd));
-  if (activityStart) conditions.push(gte(latestActivityExpression, activityStart));
-  if (activityEnd) conditions.push(lt(latestActivityExpression, activityEnd));
+  if (filters.recentActivity === "24h") {
+    conditions.push(gte(latestActivityExpression, sql`now() - interval '24 hours'`));
+  } else if (filters.recentActivity === "7d") {
+    conditions.push(gte(latestActivityExpression, sql`now() - interval '7 days'`));
+  } else if (filters.recentActivity === "30d") {
+    conditions.push(gte(latestActivityExpression, sql`now() - interval '30 days'`));
+  } else {
+    const activityStart = brazilianDateBoundary(filters.activityStart, false);
+    const activityEnd = brazilianDateBoundary(filters.activityEnd, true);
+    if (activityStart) conditions.push(gte(latestActivityExpression, activityStart));
+    if (activityEnd) conditions.push(lt(latestActivityExpression, activityEnd));
+  }
 
   const topics = selectedValues(filters.topics, filters.topic);
   if (topics.length > 0) {

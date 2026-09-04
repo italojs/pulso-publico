@@ -13,21 +13,6 @@ function dateLabel(value: string) {
   return `${day}/${month}/${year}`;
 }
 
-function daysBefore(value: string, days: number) {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
-function activityPreset(filters: PublicBillFilters) {
-  const today = new Date().toISOString().slice(0, 10);
-  if (filters.activityEnd !== today || !filters.activityStart) return undefined;
-  if (filters.activityStart === daysBefore(today, 6)) return "7 dias";
-  if (filters.activityStart === daysBefore(today, 29)) return "30 dias";
-  if (filters.activityStart === daysBefore(today, 364)) return "12 meses";
-  return undefined;
-}
-
 function withoutArrayValue(
   filters: PublicBillFilters,
   key: keyof PublicBillFilters,
@@ -74,7 +59,7 @@ const sourceLabels: Record<string, string> = { camara: "Câmara", senado: "Senad
 const houseLabels: Record<string, string> = {
   camara: "Câmara dos Deputados",
   congresso: "Congresso Nacional",
-  nao_informada: "Casa não informada",
+  nao_informada: "Não informada",
   senado: "Senado Federal",
 };
 const stageLabels: Record<string, string> = {
@@ -123,15 +108,15 @@ export function ActiveFilterChips({ filters }: Readonly<{ filters: PublicBillFil
     addScalarChip(chips, filters, "presentedEnd", `Apresentação até: ${readable}`, `Remover apresentação até ${readable}`);
   }
 
-  const preset = activityPreset(filters);
-  if (preset) {
+  if (filters.recentActivity) {
+    const presetLabels = { "24h": "últimas 24 horas", "7d": "últimos 7 dias", "30d": "últimos 30 dias" } as const;
+    const readable = presetLabels[filters.recentActivity];
     addScalarChip(
       chips,
       filters,
-      "activityStart",
-      `Atividade nos últimos ${preset}`,
-      `Remover atividade nos últimos ${preset}`,
-      { activityStart: undefined, activityEnd: undefined },
+      "recentActivity",
+      `Atividade: ${readable}`,
+      `Remover atividade ${readable}`,
     );
   } else {
     if (filters.activityStart) {
@@ -158,7 +143,7 @@ export function ActiveFilterChips({ filters }: Readonly<{ filters: PublicBillFil
   addArrayChips(chips, filters, "topics", topics, "tema", undefined, "topic");
   addArrayChips(chips, filters, "authors", authors, "autor", undefined, "author");
   addArrayChips(chips, filters, "parties", parties, "partido", undefined, "party");
-  addArrayChips(chips, filters, "regions", filters.regions, "UF");
+  addArrayChips(chips, filters, "regions", filters.regions, "UF", (value) => value === "nao_informada" ? "Não informada" : value);
   if (filters.followedOnly) addScalarChip(chips, filters, "followedOnly", "Só acompanhados", "Remover só acompanhados");
 
   if (chips.length === 0) return null;

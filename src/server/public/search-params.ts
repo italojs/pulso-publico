@@ -2,6 +2,7 @@ import type {
   PublicBillFilters,
   PublicBillOrder,
   PublicIndividualVoteAvailability,
+  PublicRecentActivity,
   PublicVoteKind,
   PublicVotePresence,
   PublicVoteResult,
@@ -27,6 +28,7 @@ const STAGE_VALUES = [
 ] as const;
 const VOTE_KIND_VALUES = ["nominal", "secret", "non_nominal"] as const;
 const VOTE_RESULT_VALUES = ["approved", "rejected", "other", "unavailable"] as const;
+const RECENT_ACTIVITY_VALUES = ["24h", "7d", "30d"] as const;
 const UF_VALUES = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
   "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
@@ -157,11 +159,16 @@ export function parseFeedSearchParams(params: RawSearchParams): PublicBillFilter
     if (presentedStart) filters.presentedStart = presentedStart;
     if (presentedEnd) filters.presentedEnd = presentedEnd;
   }
-  const activityStart = isoDate(params.atividadeInicio);
-  const activityEnd = isoDate(params.atividadeFim);
-  if (!(activityStart && activityEnd && activityStart > activityEnd)) {
-    if (activityStart) filters.activityStart = activityStart;
-    if (activityEnd) filters.activityEnd = activityEnd;
+  const recentActivity = enumValues(params.atividadeRecente, RECENT_ACTIVITY_VALUES)[0] as PublicRecentActivity | undefined;
+  if (recentActivity) {
+    filters.recentActivity = recentActivity;
+  } else {
+    const activityStart = isoDate(params.atividadeInicio);
+    const activityEnd = isoDate(params.atividadeFim);
+    if (!(activityStart && activityEnd && activityStart > activityEnd)) {
+      if (activityStart) filters.activityStart = activityStart;
+      if (activityEnd) filters.activityEnd = activityEnd;
+    }
   }
 
   const votePresence = enumValues(params.votacao, ["with", "without"] as const)[0] as PublicVotePresence | undefined;
@@ -229,7 +236,11 @@ export function buildFeedHref(filters: Partial<PublicBillFilters>, page: number)
   appendAll(params, "fase", filters.stages);
   appendAll(params, "situacao", filters.statuses ?? (filters.status ? [filters.status] : undefined));
   appendDateRange(params, "apresentadaInicio", "apresentadaFim", filters.presentedStart, filters.presentedEnd);
-  appendDateRange(params, "atividadeInicio", "atividadeFim", filters.activityStart, filters.activityEnd);
+  if (filters.recentActivity && RECENT_ACTIVITY_VALUES.includes(filters.recentActivity)) {
+    params.set("atividadeRecente", filters.recentActivity);
+  } else {
+    appendDateRange(params, "atividadeInicio", "atividadeFim", filters.activityStart, filters.activityEnd);
+  }
   if (filters.votePresence) params.set("votacao", filters.votePresence);
   appendAll(params, "tipoVotacao", filters.voteKinds);
   if (filters.individualVoteAvailability) params.set("votosIndividuais", filters.individualVoteAvailability);
@@ -263,7 +274,7 @@ export function countActiveFilters(filters: PublicBillFilters): number {
     filters.stages,
     filters.statuses ?? (filters.status ? [filters.status] : undefined),
     filters.presentedStart ?? filters.presentedEnd,
-    filters.activityStart ?? filters.activityEnd,
+    filters.recentActivity ?? filters.activityStart ?? filters.activityEnd,
     filters.votePresence,
     filters.voteKinds,
     filters.individualVoteAvailability,
