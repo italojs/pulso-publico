@@ -4,6 +4,7 @@ import type { LegislativeSourceName } from "#/domain/legislative";
 import { db } from "#/server/db/client";
 import { getPublicBill } from "#/server/public/queries";
 import { formatDateTime, houseLabel } from "#/ui/format";
+import { FollowButton } from "#/ui/follow-button";
 import { ExternalIcon } from "#/ui/icons";
 import { ProjectTimeline } from "#/ui/project-timeline";
 import { SourceBadge } from "#/ui/source-badge";
@@ -30,7 +31,7 @@ export default async function ProjectPage({ params }: Readonly<{ params: Promise
         <StatusRail source={project.source} status={project.statusLabel} />
         {project.friendlyTitle || project.shortDescription ? <section className="aiSummary" aria-labelledby="ai-summary-title"><span className="aiLabel">Gerado por IA</span>{project.friendlyTitle ? <h1 id="ai-summary-title">{project.friendlyTitle}</h1> : null}{project.shortDescription ? <p>{project.shortDescription}</p> : null}<small>Uma explicação curta baseada somente no título e na ementa oficiais abaixo.</small></section> : null}
         <div className="officialBlock"><span className="officialLabel">Título e ementa oficiais</span><h1>{project.officialTitle}</h1>{project.officialSummary ? <p>{project.officialSummary}</p> : null}</div>
-        <div className="projectHero__actions"><button className="followPlaceholder" type="button" disabled>Seguir projeto</button><a href={project.officialUrl} rel="noreferrer" target="_blank">Abrir na fonte oficial <ExternalIcon /></a></div>
+        <div className="projectHero__actions"><FollowButton kind="bill" source={project.source} externalId={project.externalId} label={project.officialCode} href={`/projetos/${project.source}/${project.externalId}`} subtitle={project.statusLabel} /><a href={project.officialUrl} rel="noreferrer" target="_blank">Abrir na fonte oficial <ExternalIcon /></a></div>
       </header>
 
       <section className="factsBar" aria-label="Informações principais">

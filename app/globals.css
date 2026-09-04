@@ -194,6 +194,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   background: #f9fbfa;
 }
 .projectCard__topline time { color: var(--ink-soft); font-size: 13px; }
+.projectCard__topActions { display: flex; align-items: center; gap: 12px; }
 .projectCard > .statusRail { margin: 18px 20px 0; }
 .projectCard__content { padding: 18px 20px 20px; }
 .projectCard h2 { margin: 10px 0 10px; font-family: var(--display); font-size: clamp(28px, 3vw, 34px); line-height: 1.02; }
@@ -262,6 +263,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .projectHero__actions { display: flex; margin-top: 30px; align-items: center; gap: 18px; }
 .projectHero__actions a { display: inline-flex; align-items: center; gap: 6px; color: var(--green-dark); font-size: 14px; font-weight: 750; }
 .followPlaceholder { min-height: 44px; padding: 9px 18px; border: 1px solid #b8c4bf; border-radius: 10px; color: #78837f; background: #eef1f0; font-weight: 700; }
+.followActions { display: flex; align-items: center; gap: 9px; }
+.followButton, .alertButton { display: inline-flex; min-height: 44px; padding: 9px 14px; border: 1px solid #9eafa8; border-radius: 10px; align-items: center; gap: 7px; color: var(--ink); background: white; cursor: pointer; font-weight: 750; }
+.followButton[aria-pressed="true"] { border-color: var(--green); color: var(--green-dark); background: #e2f3ed; }
+.alertButton { border-color: var(--green); color: white; background: var(--green); }
+.alertButton:disabled { border-color: #8bb8a8; color: #285b49; background: #dceee8; cursor: default; }
+.followActions--compact .followButton { min-height: 34px; padding: 5px 9px; border-radius: 8px; font-size: 12px; }
+.followActions--compact svg { width: 16px; height: 16px; }
 .factsBar { padding: 24px 0; border-bottom: 1px solid var(--line); }
 .factsBar dl { display: grid; margin: 0; grid-template-columns: repeat(4, 1fr); gap: 24px; }
 .factsBar dt, .lawmakerVote dt { color: var(--ink-soft); font-size: 11px; font-weight: 750; text-transform: uppercase; }
@@ -350,6 +358,24 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .authAside strong { font-family: var(--display); font-size: 28px; }
 .authAside ul { padding-left: 20px; margin-bottom: 0; color: #565037; }
 .authAside li + li { margin-top: 10px; }
+.collectionPage { width: min(980px, calc(100% - 40px)); min-height: calc(100vh - 210px); margin: 0 auto; }
+.collectionHero { display: grid; padding: 72px 0 42px; grid-template-columns: 1fr minmax(260px, .5fr); align-items: end; gap: 40px; border-bottom: 1px solid var(--line); }
+.collectionHero .eyebrow { grid-column: 1 / -1; }
+.collectionHero h1 { margin: 0; font-family: var(--display); font-size: clamp(64px, 10vw, 112px); line-height: .78; }
+.collectionHero p { margin: 0; color: var(--ink-soft); font-size: 19px; }
+.followingAccount { display: flex; padding: 20px 0; align-items: center; gap: 14px; color: var(--ink-soft); font-size: 13px; }
+.followingAccount strong { color: var(--ink); }
+.followingAccount a { color: var(--green-dark); font-weight: 750; }
+.followingAccount form { margin-left: auto; }
+.followingAccount button, .followingList article > button { padding: 7px 10px; border: 1px solid #aebcb7; border-radius: 8px; color: var(--ink-soft); background: transparent; cursor: pointer; font-size: 12px; }
+.followingList { display: grid; gap: 12px; }
+.followingList article { display: flex; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-md); align-items: center; justify-content: space-between; gap: 20px; background: white; }
+.followingList article > div { display: grid; min-width: 0; gap: 5px; }
+.followingList .sourceBadge { margin-bottom: 4px; }
+.followingList h2 { margin: 0; font-family: var(--display); font-size: 30px; line-height: 1; }
+.followingList h2 a { text-decoration: none; }
+.followingList p { margin: 0; color: var(--ink-soft); font-size: 14px; }
+.alertOn { width: fit-content; padding: 3px 7px; border-radius: 999px; color: var(--green-dark); background: #dceee8; font-size: 11px; font-weight: 750; text-transform: uppercase; }
 
 @media (max-width: 720px) {
   body { font-size: 16px; }
@@ -361,6 +387,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .siteNav__account span { position: static !important; width: auto !important; height: auto !important; clip: auto !important; }
   .siteFooter { width: calc(100% - 32px); flex-direction: column; }
   .projectCard__topline { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .projectCard__topActions { width: 100%; align-items: center; justify-content: space-between; }
   .projectCard__facts { grid-template-columns: 1fr 1fr; }
   .projectCard__facts div:last-child { grid-column: 1 / -1; }
   .feedPage { width: calc(100% - 24px); }
@@ -395,6 +422,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .lawmakerHero .projectHero__actions { grid-column: 1 / -1; }
   .lawmakerVoteGrid { grid-template-columns: 1fr; }
   .authPage { width: calc(100% - 24px); padding: 36px 0; grid-template-columns: 1fr; gap: 24px; }
+  .followActions { align-items: stretch; flex-direction: column; }
+  .followActions--compact { align-items: center; flex-direction: row; }
+  .collectionPage { width: calc(100% - 24px); }
+  .collectionHero { padding: 48px 0 30px; grid-template-columns: 1fr; gap: 20px; }
+  .collectionHero .eyebrow { grid-column: auto; }
+  .followingAccount { align-items: flex-start; flex-direction: column; }
+  .followingAccount form { margin-left: 0; }
+  .followingList article { align-items: flex-start; flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {
