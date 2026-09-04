@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import {
   billAuthors,
@@ -231,6 +232,23 @@ describe("public legislative queries", () => {
       latestActivityAt: "2026-08-31T18:00:00.000Z",
     });
   });
+
+  it.each(["presented_desc", "presented"] as const)(
+    "sorts by presentedAt for order %s",
+    async (order) => {
+      await testDb
+        .update(bills)
+        .set({ presentedAt: new Date("2026-09-02T12:00:00.000Z") })
+        .where(eq(bills.externalId, "601"));
+
+      const result = await listPublicBills(testDb, { order });
+
+      expect(result.items.map((item) => item.officialCode)).toEqual([
+        "PL 12/2024",
+        "PEC 8/2025",
+      ]);
+    },
+  );
 
   it("combines text, source, topic, party, author and status filters", async () => {
     const result = await listPublicBills(testDb, {
