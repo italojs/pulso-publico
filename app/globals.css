@@ -393,6 +393,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .alertCard__actions { display: flex; margin-top: 16px; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
 .alertCard__actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--green-dark); font-weight: 700; }
 .alertCard__actions svg { width: 15px; height: 15px; }
+.pushOptIn { display: grid; padding: 18px; margin-top: 20px; border: 1px solid #b9c9c3; border-radius: 12px; align-items: center; grid-template-columns: auto 1fr auto; gap: 14px; background: white; }
+.pushOptIn > svg { width: 24px; height: 24px; color: var(--green); }
+.pushOptIn strong { display: block; }
+.pushOptIn p { margin: 2px 0 0; color: var(--ink-soft); font-size: 13px; }
+.pushOptIn button { min-height: 40px; padding: 7px 12px; border: 0; border-radius: 8px; color: white; background: var(--green); cursor: pointer; font-weight: 700; }
+.pushOptIn--error { border-color: #d6aaa4; background: #fdf4f2; }
 
 @media (max-width: 720px) {
   body { font-size: 16px; }
@@ -449,6 +455,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .followingList article { align-items: flex-start; flex-direction: column; }
   .alertsToolbar, .alertCard__meta, .alertCard__actions { align-items: flex-start; flex-direction: column; }
   .alertCard__meta time { margin-left: 0; }
+  .pushOptIn { grid-template-columns: auto 1fr; }
+  .pushOptIn button { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

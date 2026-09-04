@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { formatDateTime } from "#/ui/format";
 import { ExternalIcon } from "#/ui/icons";
 import { SourceBadge } from "#/ui/source-badge";
+import { PushOptIn } from "#/ui/push-opt-in";
 
 type AlertView = {
   id: string;
@@ -58,6 +59,7 @@ export function AlertsPage() {
   const unread = items.filter((item) => !item.readAt).length;
   return (
     <>
+      <PushOptIn />
       <div className="alertsToolbar"><p><strong>{unread}</strong> {unread === 1 ? "alerta não lido" : "alertas não lidos"}</p>{unread ? <button onClick={() => markRead("all")} type="button">Marcar todos como lidos</button> : null}</div>
       <div className="alertsList">{items.map((item) => <article className={item.readAt ? "alertCard alertCard--read" : "alertCard"} key={item.id}><span className="alertCard__marker" aria-label={item.readAt ? "Lido" : "Não lido"} /><div><div className="alertCard__meta"><SourceBadge source={item.source} /><span>{labels[item.type]}</span><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time></div><h2><a href={item.projectHref}>{item.title}</a></h2><p>{item.officialDescription}</p><div className="alertCard__actions"><a href={item.officialUrl} rel="noreferrer" target="_blank">Conferir registro oficial <ExternalIcon /></a>{!item.readAt ? <button onClick={() => markRead(item.id)} type="button">Marcar como lido</button> : null}</div></div></article>)}</div>
     </>

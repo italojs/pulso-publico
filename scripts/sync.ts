@@ -60,6 +60,20 @@ try {
         console.log(JSON.stringify(report));
         failed ||= report.failed;
       }
+      const [{ WebPushProvider }, { PushRepository }, { dispatchPendingPush }] = await Promise.all([
+        import("#/alerts/push-provider"),
+        import("#/alerts/push-repository"),
+        import("#/jobs/dispatch-push"),
+      ]);
+      const pushReport = await dispatchPendingPush(
+        new PushRepository(databaseModule.db),
+        new WebPushProvider({
+          subject: env.VAPID_SUBJECT,
+          publicKey: env.VAPID_PUBLIC_KEY,
+          privateKey: env.VAPID_PRIVATE_KEY,
+        }),
+      );
+      console.log(JSON.stringify({ notifications: pushReport }));
       return { failed };
     },
   );

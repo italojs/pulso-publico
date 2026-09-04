@@ -21,7 +21,8 @@
     "db:migrate": "drizzle-kit migrate",
     "sync": "node scripts/sync.ts",
     "reconcile": "node scripts/reconcile.ts",
-    "summaries": "node scripts/generate-summaries.ts"
+    "summaries": "node scripts/generate-summaries.ts",
+    "alerts:dispatch": "node scripts/dispatch-push.ts"
   },
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
@@ -32,6 +33,7 @@
     "postgres": "3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "web-push": "^3.6.7",
     "zod": "4.5.4"
   },
   "devDependencies": {
@@ -41,6 +43,7 @@
     "@types/node": "26.4.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
+    "@types/web-push": "^3.6.4",
     "dotenv": "17.4.2",
     "drizzle-kit": "0.31.10",
     "jsdom": "^30.0.1",

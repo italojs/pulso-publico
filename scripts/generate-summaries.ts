@@ -1,12 +1,18 @@
-import { AiSummaryRepository } from "#/ai/repository";
-import { OpenAiSummaryProvider } from "#/ai/openai-provider";
-import { generateSummaryBatch } from "#/jobs/generate-summaries";
-import { env } from "#/server/config";
-import { db, sql } from "#/server/db/client";
+import { loadEnvFile } from "node:process";
+
+try { loadEnvFile(".env"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+
+const [{ AiSummaryRepository }, { OpenAiSummaryProvider }, { generateSummaryBatch }, { env }, database] = await Promise.all([
+  import("#/ai/repository"),
+  import("#/ai/openai-provider"),
+  import("#/jobs/generate-summaries"),
+  import("#/server/config"),
+  import("#/server/db/client"),
+]);
 
 if (!env.OPENAI_API_KEY || !env.OPENAI_MODEL) {
   console.log("Geração ignorada: configure OPENAI_API_KEY e OPENAI_MODEL no .env.");
-  await sql.end();
+  await database.sql.end();
   process.exit(0);
 }
 
@@ -15,6 +21,6 @@ const provider = new OpenAiSummaryProvider({
   model: env.OPENAI_MODEL,
   baseUrl: env.OPENAI_BASE_URL,
 });
-const result = await generateSummaryBatch(new AiSummaryRepository(db), provider, Number(process.argv[2] ?? 20));
+const result = await generateSummaryBatch(new AiSummaryRepository(database.db), provider, Number(process.argv[2] ?? 20));
 console.log(JSON.stringify(result));
-await sql.end();
+await database.sql.end();
