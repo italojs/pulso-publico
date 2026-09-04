@@ -25,22 +25,17 @@ const STAGE_VALUES = [
   "closed",
   "unclassified",
 ] as const;
-const VOTE_KIND_VALUES = ["nominal", "secret"] as const;
+const VOTE_KIND_VALUES = ["nominal", "secret", "non_nominal"] as const;
 const VOTE_RESULT_VALUES = ["approved", "rejected", "other", "unavailable"] as const;
 const UF_VALUES = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
   "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
 ] as const;
+const REGION_VALUES = [...UF_VALUES, "nao_informada"] as const;
 
 // These are the proposal abbreviations used by the Câmara and Senado feeds. The
 // database still keeps the original code, so adding a new official abbreviation
 // here is a backwards-compatible contract change.
-const PROPOSAL_TYPE_VALUES = [
-  "PEC", "PL", "PLP", "MPV", "PDL", "PRC", "PLV", "REQ", "RIC", "PFC", "PDC", "DLG",
-  "MSC", "OFC", "SUG", "INC", "EMR", "RQS", "RCP", "TVR", "AVN", "AVC", "PLN", "PLS",
-  "PDS", "PRS", "PRN", "PRL", "MP", "AVULSO",
-] as const;
-
 const isRecordValue = (value: string | string[] | undefined): value is string | string[] => value !== undefined;
 
 /** Read, trim, deduplicate and cap one repeated query-string parameter. */
@@ -65,6 +60,18 @@ function enumValues<const T extends string>(
 ): T[] {
   const allowedSet = new Set<string>(allowed);
   return values(value).filter((item): item is T => allowedSet.has(item));
+}
+
+function proposalTypeValues(value: string | string[] | undefined): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of values(value)) {
+    const normalized = item.toUpperCase();
+    if (!/^[A-Z]{2,10}$/.test(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }
 
 function text(value: string | string[] | undefined): string | undefined {
@@ -115,7 +122,9 @@ export function parseFeedSearchParams(params: RawSearchParams): PublicBillFilter
   const query = text(params.q);
   if (query) filters.query = query;
 
-  setArray(filters, "proposalTypes", enumValues(params.tipo, PROPOSAL_TYPE_VALUES));
+  const proposalTypes = proposalTypeValues(params.tipo);
+  setArray(filters, "proposalTypes", proposalTypes);
+  if (proposalTypes[0]) filters.proposalType = proposalTypes[0];
   const proposalNumber = positiveInteger(params.numero);
   if (proposalNumber !== undefined) filters.proposalNumber = proposalNumber;
 
@@ -129,11 +138,18 @@ export function parseFeedSearchParams(params: RawSearchParams): PublicBillFilter
     if (yearTo !== undefined) filters.yearTo = yearTo;
   }
 
-  setArray(filters, "sources", enumValues(params.fonte, SOURCE_VALUES));
-  setArray(filters, "originHouses", enumValues(params.origem, ORIGIN_HOUSE_VALUES));
-  setArray(filters, "currentHouses", enumValues(params.casaAtual, CURRENT_HOUSE_VALUES));
-  setArray(filters, "stages", enumValues(params.fase, STAGE_VALUES));
-  setArray(filters, "statuses", textValues(params.situacao));
+  const sources = enumValues(params.fonte, SOURCE_VALUES);
+  setArray(filters, "sources", sources);
+  if (sources[0]) filters.source = sources[0];
+  const originHouses = enumValues(params.origem, ORIGIN_HOUSE_VALUES);
+  setArray(filters, "originHouses", originHouses);
+  const currentHouses = enumValues(params.casaAtual, CURRENT_HOUSE_VALUES);
+  setArray(filters, "currentHouses", currentHouses);
+  const stages = enumValues(params.fase, STAGE_VALUES);
+  setArray(filters, "stages", stages);
+  const statuses = textValues(params.situacao);
+  setArray(filters, "statuses", statuses);
+  if (statuses[0]) filters.status = statuses[0];
 
   const presentedStart = isoDate(params.apresentadaInicio);
   const presentedEnd = isoDate(params.apresentadaFim);
@@ -156,13 +172,20 @@ export function parseFeedSearchParams(params: RawSearchParams): PublicBillFilter
   setArray(filters, "voteResults", enumValues(params.resultado, VOTE_RESULT_VALUES) as PublicVoteResult[]);
   setArray(filters, "voteHouses", enumValues(params.casaVotacao, ORIGIN_HOUSE_VALUES));
 
-  setArray(filters, "topics", textValues(params.tema));
-  setArray(filters, "authors", textValues(params.autor));
-  setArray(filters, "parties", textValues(params.partido));
-  setArray(filters, "regions", enumValues(params.uf, UF_VALUES));
+  const topics = textValues(params.tema);
+  setArray(filters, "topics", topics);
+  if (topics[0]) filters.topic = topics[0];
+  const authors = textValues(params.autor);
+  setArray(filters, "authors", authors);
+  if (authors[0]) filters.author = authors[0];
+  const parties = textValues(params.partido);
+  setArray(filters, "parties", parties);
+  if (parties[0]) filters.party = parties[0];
+  setArray(filters, "regions", enumValues(params.uf, REGION_VALUES));
 
   if (first(params.acompanhando) === "1") filters.followedOnly = true;
-  const order = enumValues(params.ordem, [
+  const rawOrder = first(params.ordem);
+  const order = rawOrder === "presented" ? "presented_desc" : enumValues(rawOrder, [
     "updated", "presented_desc", "presented_asc", "most_movements", "most_votes",
   ] as const)[0] as PublicBillOrder | undefined;
   if (order) filters.order = order;
@@ -217,7 +240,7 @@ export function buildFeedHref(filters: Partial<PublicBillFilters>, page: number)
   appendAll(params, "partido", filters.parties ?? (filters.party ? [filters.party] : undefined));
   appendAll(params, "uf", filters.regions);
   if (filters.followedOnly) params.set("acompanhando", "1");
-  if (filters.order && filters.order !== "presented") params.set("ordem", filters.order);
+  if (filters.order) params.set("ordem", filters.order);
   if (Number.isSafeInteger(page) && page > 1) params.set("pagina", String(page));
   const queryString = params.toString();
   return queryString ? `/?${queryString}` : "/";

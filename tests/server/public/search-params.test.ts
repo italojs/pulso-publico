@@ -5,6 +5,7 @@ import {
   countActiveFilters,
   parseFeedSearchParams,
 } from "#/server/public/search-params";
+import type { RawSearchParams } from "#/server/public/search-params";
 
 describe("feed search params", () => {
   it("parses the complete public filter contract", () => {
@@ -43,6 +44,12 @@ describe("feed search params", () => {
       regions: ["SP"],
       followedOnly: true,
       order: "most_votes",
+      source: "camara",
+      status: "Em análise",
+      topic: "Trabalho",
+      party: "ABC",
+      author: "Ana",
+      proposalType: "PEC",
       page: 3,
       pageSize: 20,
     });
@@ -68,20 +75,18 @@ describe("feed search params", () => {
     expect(href).not.toContain("followedBillKeys");
 
     const search = new URL(href, "https://example.test").searchParams;
-    const roundTrip = parseFeedSearchParams({
-      q: search.get("q") ?? undefined,
-      tipo: search.getAll("tipo"),
-      fonte: search.getAll("fonte"),
-      casaAtual: search.getAll("casaAtual"),
-      pagina: search.get("pagina") ?? undefined,
-    });
-    expect(roundTrip).toMatchObject({
-      query: "jornada",
-      proposalTypes: ["PEC", "PL"],
-      sources: ["camara", "senado"],
-      currentHouses: ["senado", "nao_informada"],
-      page: 4,
-    });
+    const shareableKeys = [
+      "q", "tipo", "numero", "anoInicio", "anoFim", "fonte", "origem", "casaAtual", "fase",
+      "situacao", "apresentadaInicio", "apresentadaFim", "atividadeInicio", "atividadeFim", "votacao",
+      "tipoVotacao", "votosIndividuais", "resultado", "casaVotacao", "tema", "autor", "partido", "uf",
+      "acompanhando", "ordem", "pagina",
+    ];
+    const roundTripParams = Object.fromEntries(
+      shareableKeys.map((key) => [key, search.getAll(key)]),
+    ) as RawSearchParams;
+    const roundTrip = parseFeedSearchParams(roundTripParams);
+    const withoutPaging = ({ page: _page, pageSize: _pageSize, ...rest }: typeof filters) => rest;
+    expect(roundTrip).toEqual({ ...withoutPaging(filters), page: 4, pageSize: 20 });
   });
 
   it("rejects unknown enums, invalid dates, and reversed intervals", () => {
@@ -99,6 +104,39 @@ describe("feed search params", () => {
       .not.toHaveProperty("presentedStart");
     expect(parseFeedSearchParams({ anoInicio: "2026", anoFim: "2024" }))
       .not.toHaveProperty("yearFrom");
+  });
+
+  it("keeps legacy scalar consumers in sync with the first selected value", () => {
+    const filters = parseFeedSearchParams({
+      fonte: ["senado", "camara"], situacao: ["Em análise", "Pronta para pauta"],
+      tema: ["Trabalho", "Saúde"], partido: ["ABC", "XYZ"], autor: ["Ana", "Bia"],
+      ordem: "presented",
+    });
+
+    expect(filters).toMatchObject({
+      sources: ["senado", "camara"], source: "senado",
+      statuses: ["Em análise", "Pronta para pauta"], status: "Em análise",
+      topics: ["Trabalho", "Saúde"], topic: "Trabalho",
+      parties: ["ABC", "XYZ"], party: "ABC",
+      authors: ["Ana", "Bia"], author: "Ana",
+      order: "presented_desc",
+    });
+    expect(buildFeedHref(filters, 1)).toContain("ordem=presented_desc");
+    expect(buildFeedHref({ source: "senado", status: "Em análise", topic: "Trabalho", party: "ABC", author: "Ana", order: "presented" }, 1))
+      .toContain("fonte=senado");
+  });
+
+  it("accepts new proposal type tokens, non-nominal votes, and the region sentinel", () => {
+    const filters = parseFeedSearchParams({
+      tipo: ["PLX", "plx", "not a type"], tipoVotacao: ["non_nominal", "secret"],
+      uf: ["nao_informada", "SP", "ZZ"],
+    });
+    expect(filters.proposalTypes).toEqual(["PLX"]);
+    expect(filters.voteKinds).toEqual(["non_nominal", "secret"]);
+    expect(filters.regions).toEqual(["nao_informada", "SP"]);
+    expect(buildFeedHref(filters, 1)).toContain("tipo=PLX");
+    expect(buildFeedHref(filters, 1)).toContain("tipoVotacao=non_nominal");
+    expect(buildFeedHref(filters, 1)).toContain("uf=nao_informada&uf=SP");
   });
 
   it("caps repeated groups at twenty unique values and truncates text", () => {

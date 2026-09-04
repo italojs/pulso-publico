@@ -127,7 +127,7 @@ export type PublicBillStage =
   | "closed"
   | "unclassified";
 export type PublicVotePresence = "with" | "without";
-export type PublicVoteKind = "nominal" | "secret";
+export type PublicVoteKind = "nominal" | "secret" | "non_nominal";
 export type PublicIndividualVoteAvailability = "available" | "unavailable";
 export type PublicVoteResult = "approved" | "rejected" | "other" | "unavailable";
 export type PublicBillOrder =
