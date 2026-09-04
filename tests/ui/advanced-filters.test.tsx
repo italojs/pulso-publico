@@ -46,10 +46,56 @@ describe("advanced feed filters", () => {
     expect(html).toContain("<dialog");
     expect(html).toContain('command="show-modal"');
     expect(html).toMatch(/commandfor="([^"]+)"[^>]*>[\s\S]*<dialog[^>]*id="\1"/);
+    expect(html).toContain('command="close"');
+    expect(html).not.toContain("aria-expanded");
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('class="advancedFilters__clear" href="/"');
     for (const name of ["tipo", "numero", "anoInicio", "anoFim", "fonte", "situacao", "tema", "origem", "casaAtual", "fase", "apresentadaInicio", "apresentadaFim", "atividadeRecente", "atividadeInicio", "atividadeFim", "votacao", "tipoVotacao", "votosIndividuais", "resultado", "casaVotacao", "autor", "partido", "uf", "acompanhando", "ordem"]) {
       expect(html).toContain(`name="${name}"`);
     }
-    expect(html).not.toMatch(/type="hidden"[^>]+name="(tipo|fonte|situacao|tema)"/);
+    const dialogHtml = html.slice(html.indexOf("<dialog"));
+    expect(dialogHtml).not.toMatch(/type="hidden"[^>]+name="(tipo|fonte|situacao|tema)"/);
+    expect(html.match(/<form/g)).toHaveLength(2);
+  });
+
+  it("submits quick and advanced filters through separate forms without duplicate dimensions", () => {
+    const view = renderFilters({
+      query: "jornada", sources: ["camara", "senado"], statuses: ["Em análise", "Pronta para pauta"],
+      topics: ["Educação", "Trabalho e Emprego"], proposalTypes: ["PEC", "PL"], page: 8,
+    });
+    const quickForm = view.container.querySelector<HTMLFormElement>('form[aria-label="Filtros rápidos"]');
+    const advancedForm = view.container.querySelector<HTMLFormElement>("dialog form");
+    expect(quickForm).not.toBeNull();
+    expect(advancedForm).not.toBeNull();
+
+    const quickInitial = new FormData(quickForm!);
+    expect([...quickInitial.entries()]).toEqual([
+      ["q", "jornada"], ["fonte", "camara"], ["situacao", "Em análise"], ["tema", "Educação"],
+      ["tipo", "PEC"], ["tipo", "PL"],
+    ]);
+    expect(quickInitial.getAll("fonte")).toEqual(["camara"]);
+    expect(quickInitial.getAll("situacao")).toEqual(["Em análise"]);
+    expect(quickInitial.getAll("tema")).toEqual(["Educação"]);
+    expect(quickInitial.getAll("tipo")).toEqual(["PEC", "PL"]);
+    expect(quickInitial.has("pagina")).toBe(false);
+
+    fireEvent.change(within(quickForm!).getByRole("combobox", { name: "Casa legislativa" }), { target: { value: "senado" } });
+    expect([...new FormData(quickForm!).entries()]).toEqual([
+      ["q", "jornada"], ["fonte", "senado"], ["situacao", "Em análise"], ["tema", "Educação"],
+      ["tipo", "PEC"], ["tipo", "PL"],
+    ]);
+    fireEvent.change(within(quickForm!).getByRole("combobox", { name: "Casa legislativa" }), { target: { value: "" } });
+    expect([...new FormData(quickForm!).entries()]).toEqual([
+      ["q", "jornada"], ["fonte", ""], ["situacao", "Em análise"], ["tema", "Educação"],
+      ["tipo", "PEC"], ["tipo", "PL"],
+    ]);
+
+    const advanced = new FormData(advancedForm!);
+    expect(advanced.getAll("fonte")).toEqual(["camara", "senado"]);
+    expect(advanced.getAll("situacao")).toEqual(["Em análise", "Pronta para pauta"]);
+    expect(advanced.getAll("tema")).toEqual(["Educação", "Trabalho e Emprego"]);
+    expect(advanced.getAll("q")).toEqual(["jornada"]);
+    expect(advanced.has("pagina")).toBe(false);
   });
 
   it("uses regions for section headings and fieldset/legend groups with named radios", () => {
@@ -59,7 +105,11 @@ describe("advanced feed filters", () => {
     for (const name of ["Identificação", "Tramitação", "Votações", "Autoria e representação", "Ordem dos resultados"]) {
       expect(within(dialog).getByRole("region", { name })).toBeInTheDocument();
     }
-    for (const name of ["Tipo de projeto", "Casa legislativa", "Situação atual", "Tema", "Há votação registrada?", "Votos individuais"]) {
+    for (const name of [
+      "Tipo de projeto", "Casa legislativa", "Situação atual", "Tema", "Casa de origem", "Casa atual", "Fase geral",
+      "Há votação registrada?", "Tipo de votação", "Votos individuais", "Resultado", "Casa da votação",
+      "Autoria", "Partido", "Estado ou região", "Projetos acompanhados",
+    ]) {
       expect(within(dialog).getByRole("group", { name })).toBeInstanceOf(HTMLFieldSetElement);
     }
     expect(within(dialog).getAllByRole("radio", { name: /votação/i }).map((radio) => radio.getAttribute("name"))).toEqual(["votacao", "votacao"]);
@@ -100,8 +150,22 @@ describe("advanced feed filters", () => {
     expect(within(within(dialog).getByRole("group", { name: "Casa legislativa" })).getByRole("checkbox", { name: "Senado Federal" })).toBeChecked();
     expect(within(within(dialog).getByRole("group", { name: "Situação atual" })).getByRole("checkbox", { name: "Pronta para pauta" })).toBeChecked();
     expect(within(within(dialog).getByRole("group", { name: "Tema" })).getByRole("checkbox", { name: "Trabalho e Emprego" })).toBeChecked();
+    expect(within(within(dialog).getByRole("group", { name: "Casa legislativa" })).getAllByRole("checkbox").every((checkbox) => !checkbox.hasAttribute("disabled"))).toBe(true);
     expect(within(dialog).getByRole("combobox", { name: "Período de atividade" })).toHaveTextContent("Últimas 24 horasÚltimos 7 diasÚltimos 30 diasPeríodo personalizado");
     expect(within(dialog).queryByText("Últimos 12 meses")).not.toBeInTheDocument();
+  });
+
+  it("keeps an empty custom activity mode selected", () => {
+    renderFilters();
+    const dialog = openDialog();
+    const activityMode = within(dialog).getByRole("combobox", { name: "Período de atividade" });
+    const optionValues = within(activityMode).getAllByRole("option").map((option) => (option as HTMLOptionElement).value);
+    expect(optionValues).toEqual(["", "24h", "7d", "30d", "custom"]);
+
+    fireEvent.change(activityMode, { target: { value: "custom" } });
+    expect(activityMode).toHaveValue("custom");
+    expect(within(dialog).getByLabelText("Atividade desde")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Atividade até")).toHaveValue("");
   });
 
   it("caps each repeated group at twenty and disables unchecked choices at the limit", () => {
@@ -115,6 +179,21 @@ describe("advanced feed filters", () => {
     expect(within(group).getByRole("checkbox", { name: types[0] })).not.toBeDisabled();
   });
 
+  it("sends exactly twenty selected values and prevents a twenty-first preview value", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ total: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const types = Array.from({ length: 21 }, (_, index) => `T${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + (index % 26))}`);
+    renderFilters({ proposalTypes: types.slice(0, 20) }, { ...options, proposalTypes: types });
+    const dialog = openDialog();
+    expect(within(dialog).getByRole("checkbox", { name: types[20] })).toBeDisabled();
+
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.filters.proposalTypes).toEqual(types.slice(0, 20));
+    expect(body.filters.proposalTypes).toHaveLength(20);
+  });
+
   it("shows Portuguese interval errors, disables Apply and skips the count preview", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn();
@@ -126,6 +205,9 @@ describe("advanced feed filters", () => {
     expect(within(dialog).getByText("A data inicial de apresentação deve ser anterior ou igual à data final.")).toHaveRole("alert");
     expect(within(dialog).getByText("A data inicial de atividade deve ser anterior ou igual à data final.")).toHaveRole("alert");
     expect(within(dialog).getByRole("button", { name: /aplicar filtros/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Aplicar", exact: true })).not.toBeDisabled();
+    expect(new FormData(screen.getByRole("button", { name: "Aplicar", exact: true }).closest("form")!).has("pagina")).toBe(false);
+    expect(new FormData(within(dialog).getByRole("button", { name: /aplicar filtros/i }).closest("form")!).has("pagina")).toBe(false);
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -196,7 +278,10 @@ describe("advanced feed filters", () => {
 
   it("keeps full-screen mobile and reduced-motion CSS rules", () => {
     const css = readFileSync("app/globals.css", "utf8");
-    expect(css).toMatch(/@media \(max-width: 720px\)[\s\S]*\.advancedFilters \{ width: 100vw; \}/);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration/);
+    expect(css).toMatch(/\.advancedFiltersTrigger strong \{[^}]*display: grid;/);
+    expect(css).toMatch(/\.advancedFilters \{[^}]*display: block;/);
+    expect(css).toMatch(/\.advancedFilters__form \{[^}]*display: grid;[^}]*grid-template-rows:/);
+    expect(css).toMatch(/@media \(max-width: 720px\) \{[\s\S]*?\.advancedFilters \{ width: 100vw; \}/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.advancedFilters, \.advancedFilters::backdrop \{[^}]*animation-duration/);
   });
 });

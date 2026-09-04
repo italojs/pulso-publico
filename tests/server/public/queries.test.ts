@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 
 import {
@@ -399,7 +399,9 @@ describe("public legislative queries", () => {
   });
 
   it("uses PostgreSQL server time for canonical recent-activity presets and ignores custom bounds", async () => {
-    const now = Date.now();
+    const [clock] = await testSql<{ serverNow: string }[]>`select now() as "serverNow"`;
+    if (!clock) throw new Error("database clock unavailable");
+    const now = new Date(clock.serverNow).getTime();
     await testDb.insert(bills).values([
       ["00000000-0000-4000-8000-000000000010", "recent-12h", "Relógio 12h", 12],
       ["00000000-0000-4000-8000-000000000011", "recent-3d", "Relógio 3d", 72],
@@ -412,14 +414,20 @@ describe("public legislative queries", () => {
       presentedAt: new Date(now - Number(hours) * 60 * 60 * 1_000), checkedAt,
     })));
 
-    const codes = async (filters: PublicBillFilters) => (await listPublicBills(testDb, filters)).items
-      .map((item) => item.officialCode).filter((code) => code.startsWith("Relógio"));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("1900-01-01T00:00:00.000Z"));
+    try {
+      const codes = async (filters: PublicBillFilters) => (await listPublicBills(testDb, filters)).items
+        .map((item) => item.officialCode).filter((code) => code.startsWith("Relógio"));
 
-    expect(await codes({ recentActivity: "24h" })).toEqual(["Relógio 12h"]);
-    expect(await codes({ recentActivity: "7d" })).toEqual(["Relógio 12h", "Relógio 3d"]);
-    expect(await codes({ recentActivity: "30d" })).toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
-    expect(await codes({ recentActivity: "30d", activityStart: "2099-01-01", activityEnd: "2099-01-02" }))
-      .toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
+      expect(await codes({ recentActivity: "24h" })).toEqual(["Relógio 12h"]);
+      expect(await codes({ recentActivity: "7d" })).toEqual(["Relógio 12h", "Relógio 3d"]);
+      expect(await codes({ recentActivity: "30d" })).toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
+      expect(await codes({ recentActivity: "30d", activityStart: "2099-01-01", activityEnd: "2099-01-02" }))
+        .toEqual(["Relógio 12h", "Relógio 3d", "Relógio 15d"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores impossible calendar dates in list and count queries", async () => {

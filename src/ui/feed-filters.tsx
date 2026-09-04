@@ -1,4 +1,5 @@
 import type { PublicBillFilters, PublicFilterOptions } from "#/server/public/read-models";
+import { buildFeedHref } from "#/server/public/search-params";
 import { ActiveFilterChips } from "#/ui/active-filter-chips";
 import { AdvancedFilters } from "#/ui/advanced-filters";
 import { SearchIcon } from "#/ui/icons";
@@ -12,8 +13,11 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
   const sources = filters.sources ?? (filters.source ? [filters.source] : []);
   const statuses = filters.statuses ?? (filters.status ? [filters.status] : []);
   const topics = filters.topics ?? (filters.topic ? [filters.topic] : []);
+  const preserved = new URL(buildFeedHref(filters, 1), "https://local.invalid").searchParams;
+  for (const quickDimension of ["q", "fonte", "situacao", "tema", "pagina"]) preserved.delete(quickDimension);
   return (
-    <form action="/" className="feedFilters" method="get">
+    <div className="feedFilters">
+      <form action="/" aria-label="Filtros rápidos" className="feedFilters__quick" method="get">
       <div className="searchField">
         <SearchIcon />
         <label className="srOnly" htmlFor="feed-search">Buscar projetos</label>
@@ -25,10 +29,12 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
         <label>Casa legislativa<select defaultValue={sources[0] ?? ""} name="fonte"><option value="">Todas</option>{options.sources.map((source) => <option key={source} value={source}>{source === "camara" ? "Câmara" : "Senado"}</option>)}</select></label>
         <label>Situação atual<select defaultValue={statuses[0] ?? ""} name="situacao"><option value="">Todas</option>{options.statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
         <label>Tema<select defaultValue={topics[0] ?? ""} name="tema"><option value="">Todos</option>{options.topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}</select></label>
-        <AdvancedFilters filters={filters} options={options} />
         <button className="quickFilters__apply" type="submit">Aplicar</button>
       </fieldset>
+      {[...preserved.entries()].map(([name, value], index) => <input key={`${name}-${value}-${index}`} name={name} type="hidden" value={value} />)}
+      </form>
+      <AdvancedFilters filters={filters} options={options} />
       <ActiveFilterChips filters={filters} />
-    </form>
+    </div>
   );
 }

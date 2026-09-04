@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { PublicBillFilters, PublicFilterOption, PublicFilterOptions } from "#/server/public/read-models";
+import type { PublicBillFilters, PublicFilterOption, PublicFilterOptions, PublicRecentActivity } from "#/server/public/read-models";
 import { countActiveFilters } from "#/server/public/search-params";
 
 type AnonymousBillKey = { externalId: string; source: "camara" | "senado" };
 type PreviewState = "idle" | "loading" | "ready" | "error";
+type ActivityMode = "" | PublicRecentActivity | "custom";
 const EMPTY_BILL_KEYS: AnonymousBillKey[] = [];
 const MAX_SELECTED_VALUES = 20;
 const focusableSelector = "button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
@@ -86,25 +87,7 @@ function strictPreviewFilters(filters: PublicBillFilters): PublicBillFilters {
   });
 }
 
-function currentQuickFilters(draft: PublicBillFilters, form: HTMLFormElement | null): PublicBillFilters {
-  if (!form) return strictPreviewFilters(draft);
-  const data = new FormData(form);
-  const text = (name: string) => {
-    const value = data.get(name);
-    return typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : undefined;
-  };
-  const values = (name: string) => capped(data.getAll(name).flatMap((value) => typeof value === "string" && value.trim() ? [value] : []));
-  return strictPreviewFilters({
-    ...draft,
-    query: text("q"),
-    sources: values("fonte").filter((value): value is "camara" | "senado" => value === "camara" || value === "senado"),
-    statuses: values("situacao"),
-    topics: values("tema"),
-  });
-}
-
-function ChoiceList({ disabledValues = [], label, name, onChange, options, selected }: Readonly<{
-  disabledValues?: readonly string[];
+function ChoiceList({ label, name, onChange, options, selected }: Readonly<{
   label: string;
   name: string;
   onChange: (values: string[]) => void;
@@ -125,7 +108,7 @@ function ChoiceList({ disabledValues = [], label, name, onChange, options, selec
           const checked = values.includes(value);
           return <label key={value}><input
             checked={checked}
-            disabled={disabledValues.includes(value) || (atLimit && !checked)}
+            disabled={atLimit && !checked}
             name={name}
             onChange={(event) => onChange(event.currentTarget.checked ? capped([...values, value]) : values.filter((item) => item !== value))}
             type="checkbox"
@@ -167,6 +150,7 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
   const [draft, setDraft] = useState(() => canonicalFilters(filters));
   const [lastValidCount, setLastValidCount] = useState<number>();
   const [previewState, setPreviewState] = useState<PreviewState>("idle");
+  const [activityMode, setActivityMode] = useState<ActivityMode>(() => filters.recentActivity ?? (filters.activityStart || filters.activityEnd ? "custom" : ""));
   const dialogId = useId();
   const titleId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -215,7 +199,7 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
     const timeout = window.setTimeout(async () => {
       try {
         const response = await fetch("/api/projects/filter-count", {
-          body: JSON.stringify({ filters: currentQuickFilters(draft, triggerRef.current?.form ?? null), anonymousBillKeys }),
+          body: JSON.stringify({ filters: strictPreviewFilters(draft), anonymousBillKeys }),
           headers: { "content-type": "application/json" }, method: "POST", signal: controller.signal,
         });
         if (!response.ok) throw new Error("Count request failed");
@@ -229,7 +213,6 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
     return () => { window.clearTimeout(timeout); controller.abort(); };
   }, [anonymousBillKeys, draft, isOpen, rangeInvalid]);
 
-  const clearAdvanced = () => setDraft((current) => compactFilters({ query: current.query, sources: current.sources, statuses: current.statuses, topics: current.topics }));
   const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDialogElement>) => {
     if (event.key === "Escape") { event.preventDefault(); closeDialog(); return; }
     if (event.key !== "Tab") return;
@@ -245,25 +228,25 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
     ? "Não foi possível atualizar a contagem"
     : previewState === "ready" && lastValidCount !== undefined
       ? `${lastValidCount.toLocaleString("pt-BR")} ${lastValidCount === 1 ? "projeto encontrado" : "projetos encontrados"}` : "Atualizando contagem…";
-  const currentSources = filters.sources ?? (filters.source ? [filters.source] : []);
-  const currentStatuses = filters.statuses ?? (filters.status ? [filters.status] : []);
-  const currentTopics = filters.topics ?? (filters.topic ? [filters.topic] : []);
   const nativeInvoker = { command: "show-modal", commandfor: dialogId };
+  const nativeCloser = { command: "close", commandfor: dialogId };
 
   return <>
-    <button {...nativeInvoker} aria-controls={dialogId} aria-expanded={isOpen} className="advancedFiltersTrigger" onClick={openDialog} ref={triggerRef} type="button">
+    <button {...nativeInvoker} aria-controls={dialogId} aria-haspopup="dialog" className="advancedFiltersTrigger" onClick={openDialog} ref={triggerRef} type="button">
       <span>Filtros avançados</span>{activeCount > 0 && <strong aria-label={`${activeCount} ${activeCount === 1 ? "ativo" : "ativos"}`}>{activeCount}</strong>}
     </button>
     <dialog aria-labelledby={titleId} className="advancedFilters" id={dialogId} onCancel={(event) => { event.preventDefault(); closeDialog(); }} onClose={() => setIsOpen(false)} onKeyDown={handleDialogKeyDown} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }} ref={dialogRef}>
-      <header className="advancedFilters__header"><div><span className="eyebrow">Refine sua busca</span><h2 id={titleId}>Filtros avançados</h2></div><button aria-label="Fechar filtros avançados" onClick={closeDialog} ref={closeRef} type="button">×</button></header>
+      <form action="/" className="advancedFilters__form" method="get">
+      {draft.query && <input name="q" type="hidden" value={draft.query} />}
+      <header className="advancedFilters__header"><div><span className="eyebrow">Refine sua busca</span><h2 id={titleId}>Filtros avançados</h2></div><button {...nativeCloser} aria-label="Fechar filtros avançados" onClick={closeDialog} ref={closeRef} type="button">×</button></header>
       <div className="advancedFilters__body">
         <p className="advancedFilters__intro">Combine informações oficiais para chegar aos projetos que você procura.</p>
         <section aria-labelledby={`${titleId}-identificacao`} className="advancedFilters__section">
           <h3 id={`${titleId}-identificacao`}>Identificação</h3>
           <ChoiceList label="Tipo de projeto" name="tipo" onChange={(value) => update("proposalTypes", value)} options={options.proposalTypes} selected={draft.proposalTypes} />
-          <ChoiceList disabledValues={currentSources.slice(0, 1)} label="Casa legislativa" name="fonte" onChange={(value) => update("sources", value as PublicBillFilters["sources"])} options={sourceOptions.filter((option) => options.sources.includes(option.value as "camara" | "senado"))} selected={draft.sources} />
-          <ChoiceList disabledValues={currentStatuses.slice(0, 1)} label="Situação atual" name="situacao" onChange={(value) => update("statuses", value)} options={options.statuses} selected={draft.statuses} />
-          <ChoiceList disabledValues={currentTopics.slice(0, 1)} label="Tema" name="tema" onChange={(value) => update("topics", value)} options={options.topics} selected={draft.topics} />
+          <ChoiceList label="Casa legislativa" name="fonte" onChange={(value) => update("sources", value as PublicBillFilters["sources"])} options={sourceOptions.filter((option) => options.sources.includes(option.value as "camara" | "senado"))} selected={draft.sources} />
+          <ChoiceList label="Situação atual" name="situacao" onChange={(value) => update("statuses", value)} options={options.statuses} selected={draft.statuses} />
+          <ChoiceList label="Tema" name="tema" onChange={(value) => update("topics", value)} options={options.topics} selected={draft.topics} />
           <div className="advancedFilters__fields">
             <label>Número do projeto<input min="1" name="numero" onChange={(event) => update("proposalNumber", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.proposalNumber ?? ""} /></label>
             <label>Ano inicial<select aria-invalid={yearRangeInvalid} name="anoInicio" onChange={(event) => update("yearFrom", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} value={draft.yearFrom ?? ""}><option value="">Qualquer ano</option>{options.years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
@@ -281,10 +264,17 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
             <label>Apresentada até<input aria-invalid={presentedRangeInvalid} name="apresentadaFim" onChange={(event) => update("presentedEnd", event.currentTarget.value || undefined)} type="date" value={draft.presentedEnd ?? ""} /></label>
             <label>Atividade recente<select aria-label="Período de atividade" name="atividadeRecente" onChange={(event) => {
               const value = event.currentTarget.value;
-              setDraft((current) => compactFilters({ ...current, recentActivity: value === "24h" || value === "7d" || value === "30d" ? value : undefined, activityStart: undefined, activityEnd: undefined }));
-            }} value={draft.recentActivity ?? (draft.activityStart || draft.activityEnd ? "custom" : "")}><option value="">Qualquer período</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="custom">Período personalizado</option></select></label>
-            <label>Atividade desde<input aria-invalid={activityRangeInvalid} name="atividadeInicio" onChange={(event) => setDraft((current) => ({ ...current, recentActivity: undefined, activityStart: event.currentTarget.value || undefined }))} type="date" value={draft.activityStart ?? ""} /></label>
-            <label>Atividade até<input aria-invalid={activityRangeInvalid} name="atividadeFim" onChange={(event) => setDraft((current) => ({ ...current, recentActivity: undefined, activityEnd: event.currentTarget.value || undefined }))} type="date" value={draft.activityEnd ?? ""} /></label>
+              const mode = value as ActivityMode;
+              setActivityMode(mode);
+              setDraft((current) => compactFilters({
+                ...current,
+                recentActivity: value === "24h" || value === "7d" || value === "30d" ? value : undefined,
+                activityStart: value === "custom" ? current.activityStart : undefined,
+                activityEnd: value === "custom" ? current.activityEnd : undefined,
+              }));
+            }} value={activityMode}><option value="">Qualquer período</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="custom">Período personalizado</option></select></label>
+            <label>Atividade desde<input aria-invalid={activityRangeInvalid} name="atividadeInicio" onChange={(event) => { setActivityMode("custom"); setDraft((current) => ({ ...current, recentActivity: undefined, activityStart: event.currentTarget.value || undefined })); }} type="date" value={draft.activityStart ?? ""} /></label>
+            <label>Atividade até<input aria-invalid={activityRangeInvalid} name="atividadeFim" onChange={(event) => { setActivityMode("custom"); setDraft((current) => ({ ...current, recentActivity: undefined, activityEnd: event.currentTarget.value || undefined })); }} type="date" value={draft.activityEnd ?? ""} /></label>
           </div>
           {presentedRangeInvalid && <p className="advancedFilters__error" role="alert">A data inicial de apresentação deve ser anterior ou igual à data final.</p>}
           {activityRangeInvalid && <p className="advancedFilters__error" role="alert">A data inicial de atividade deve ser anterior ou igual à data final.</p>}
@@ -302,14 +292,18 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
           <ChoiceList label="Autoria" name="autor" onChange={(value) => update("authors", value)} options={options.authors} selected={draft.authors} />
           <ChoiceList label="Partido" name="partido" onChange={(value) => update("parties", value)} options={options.parties} selected={draft.parties} />
           <ChoiceList label="Estado ou região" name="uf" onChange={(value) => update("regions", value)} options={options.regions.map((option) => option.value === "nao_informada" ? { ...option, label: "Não informada" } : option)} selected={draft.regions} />
-          <label className="advancedFilters__standaloneChoice"><input checked={draft.followedOnly ?? false} name="acompanhando" onChange={(event) => update("followedOnly", event.currentTarget.checked || undefined)} type="checkbox" value="1" /><span>Mostrar somente projetos que acompanho</span></label>
+          <fieldset className="advancedFilters__choiceGroup advancedFilters__followedGroup">
+            <legend>Projetos acompanhados</legend>
+            <label className="advancedFilters__standaloneChoice"><input checked={draft.followedOnly ?? false} name="acompanhando" onChange={(event) => update("followedOnly", event.currentTarget.checked || undefined)} type="checkbox" value="1" /><span>Mostrar somente projetos que acompanho</span></label>
+          </fieldset>
         </section>
         <section aria-labelledby={`${titleId}-ordem`} className="advancedFilters__section">
           <h3 id={`${titleId}-ordem`}>Ordem dos resultados</h3>
           <label className="advancedFilters__selectLabel">Ordenar por<select name="ordem" onChange={(event) => update("order", event.currentTarget.value as PublicBillFilters["order"])} value={draft.order ?? "updated"}><option value="updated">Atividade mais recente</option><option value="presented_desc">Apresentação mais recente</option><option value="presented_asc">Apresentação mais antiga</option><option value="most_movements">Mais movimentações</option><option value="most_votes">Mais votações</option></select></label>
         </section>
       </div>
-      <footer className="advancedFilters__footer"><p aria-live="polite" role="status">{countMessage}</p><div><button className="advancedFilters__clear" onClick={clearAdvanced} type="button">Limpar seleção</button><button className="advancedFilters__apply" disabled={rangeInvalid} type="submit">{lastValidCount === undefined ? "Aplicar filtros" : `Ver ${lastValidCount.toLocaleString("pt-BR")} ${lastValidCount === 1 ? "projeto" : "projetos"}`}</button></div></footer>
+      <footer className="advancedFilters__footer"><p aria-live="polite" role="status">{countMessage}</p><div><a className="advancedFilters__clear" href="/">Limpar tudo</a><button className="advancedFilters__apply" disabled={rangeInvalid} type="submit">{lastValidCount === undefined ? "Aplicar filtros" : `Ver ${lastValidCount.toLocaleString("pt-BR")} ${lastValidCount === 1 ? "projeto" : "projetos"}`}</button></div></footer>
+      </form>
     </dialog>
   </>;
 }
