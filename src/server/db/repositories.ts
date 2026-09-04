@@ -57,11 +57,14 @@ function boundedErrorCode(value: string) {
 }
 
 function billValues(bill: Bill) {
+  const parsedIdentity = parseProposalIdentity(bill.officialCode);
   return {
     source: bill.source,
     externalId: bill.externalId,
     officialCode: bill.officialCode,
-    ...parseProposalIdentity(bill.officialCode),
+    proposalType: bill.proposalType ?? parsedIdentity.proposalType,
+    proposalNumber: bill.proposalNumber ?? parsedIdentity.proposalNumber,
+    proposalYear: bill.proposalYear ?? parsedIdentity.proposalYear,
     congressionalKey: bill.congressionalKey,
     officialTitle: bill.officialTitle,
     officialSummary: bill.officialSummary,

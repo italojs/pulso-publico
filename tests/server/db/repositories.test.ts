@@ -150,6 +150,22 @@ describe("LegislativeRepository", () => {
       .toEqual([{ category: "approved" }]);
   });
 
+  it("prefers structured proposal identity and falls back field by field", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph({
+      officialCode: "PRL 1/0",
+      proposalType: "EMC-A",
+      proposalNumber: 14,
+      proposalYear: null,
+    } as never));
+
+    expect(await testDb.select({
+      type: bills.proposalType,
+      number: bills.proposalNumber,
+      year: bills.proposalYear,
+    }).from(bills)).toEqual([{ type: "EMC-A", number: 14, year: null }]);
+  });
+
   it("updates official status while preserving the original row identity", async () => {
     await repository.upsertLawmakers([lawmaker]);
     await repository.upsertBillGraph(graph());

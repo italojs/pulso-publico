@@ -16,6 +16,7 @@ import {
   countPublicBills,
   getPublicBill,
   getPublicLawmaker,
+  hasPublicBillFollows,
   listPublicBills,
   listPublicFilterOptions,
 } from "#/server/public/queries";
@@ -486,6 +487,17 @@ describe("public legislative queries", () => {
     expect(authenticated.items.map((item) => item.officialCode)).toEqual(["PL 12/2024"]);
     expect(anonymous.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
     expect(empty).toMatchObject({ items: [], total: 0 });
+  });
+
+  it("distinguishes an account with no follows from zero matches inside its followed projects", async () => {
+    expect(await hasPublicBillFollows(testDb, seeded.userId)).toBe(true);
+    expect(await hasPublicBillFollows(testDb, "00000000-0000-4000-8000-000000000099")).toBe(false);
+
+    const filtered = await listPublicBills(testDb, {
+      followedOnly: true,
+      proposalTypes: ["PEC"],
+    }, { userId: seeded.userId });
+    expect(filtered.total).toBe(0);
   });
 
   it("paginates anonymous followed projects within their filtered scope", async () => {

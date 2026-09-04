@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { LOCAL_FOLLOWS_KEY, parseLocalFollows } from "#/follows/local";
+import { LOCAL_FOLLOWS_CHANGED_EVENT, LOCAL_FOLLOWS_KEY, parseLocalBillReferences } from "#/follows/local";
 import type { PublicBillFilters, PublicBillPage } from "#/server/public/read-models";
 import { publicFilterRequestFilters } from "#/ui/advanced-filters";
 import { ProjectResults } from "#/ui/project-results";
@@ -35,9 +35,14 @@ function AnonymousFollowedResultsSession({ filters, requestIdentity }: Readonly<
   }), [baseRequestFilters, page]);
 
   useEffect(() => {
-    setBillKeys(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY))
-      .filter((item) => item.kind === "bill")
-      .map(({ source, externalId }) => ({ source, externalId })));
+    const readKeys = () => setBillKeys(parseLocalBillReferences(localStorage.getItem(LOCAL_FOLLOWS_KEY)));
+    const refreshKeys = () => {
+      setPage(1);
+      readKeys();
+    };
+    readKeys();
+    window.addEventListener(LOCAL_FOLLOWS_CHANGED_EVENT, refreshKeys);
+    return () => window.removeEventListener(LOCAL_FOLLOWS_CHANGED_EVENT, refreshKeys);
   }, []);
 
   useEffect(() => {

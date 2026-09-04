@@ -28,6 +28,9 @@ describe("Câmara mapper", () => {
       source: "camara",
       externalId: "2351249",
       officialCode: "PL 1106/2023",
+      proposalType: "PL",
+      proposalNumber: 1106,
+      proposalYear: 2023,
       congressionalKey: "pl:1106:2023",
       currentHouse: "senado",
       statusCode: "926",
@@ -36,6 +39,22 @@ describe("Câmara mapper", () => {
       "https://www.camara.leg.br/propostas-legislativas/2351249",
     );
     expect(result.presentedAt).toBe("2023-03-14T14:46:00.000Z");
+  });
+
+  it("keeps official structured identity when its type has an adopted-text suffix", () => {
+    const result = mapCamaraBill({
+      ...billFixture.dados,
+      siglaTipo: "SBT-A",
+      numero: 3,
+      ano: 2026,
+    }, checkedAt);
+
+    expect(result).toMatchObject({
+      officialCode: "SBT-A 3/2026",
+      proposalType: "SBT-A",
+      proposalNumber: 3,
+      proposalYear: 2026,
+    });
   });
 
   it("creates a deterministic movement id", () => {

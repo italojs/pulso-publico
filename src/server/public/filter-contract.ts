@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { currentUserFromCookie } from "#/auth/current-user";
 import type { UserRepository } from "#/auth/user-repository";
+import { normalizeProposalType } from "#/domain/bill-facets";
 import type { PublicBillScope } from "#/server/public/queries";
 import type { PublicBillFilters } from "#/server/public/read-models";
 
@@ -46,7 +47,7 @@ const filterValues = <T extends z.ZodType>(schema: T) => z.array(schema).min(1).
 
 export const publicBillFiltersSchema = z.object({
   query: text.optional(),
-  proposalTypes: filterValues(z.string().regex(/^[A-Z]{2,10}$/)).optional(),
+  proposalTypes: filterValues(z.string().max(20).refine((value) => normalizeProposalType(value) === value)).optional(),
   proposalNumber: positiveInteger.optional(),
   yearFrom: positiveInteger.optional(),
   yearTo: positiveInteger.optional(),

@@ -8,6 +8,7 @@ import type {
   PublicVoteResult,
 } from "#/server/public/read-models";
 import type { LegislativeSourceName } from "#/domain/legislative";
+import { normalizeProposalType } from "#/domain/bill-facets";
 
 export type RawSearchParams = Record<string, string | string[] | undefined>;
 
@@ -68,8 +69,8 @@ function proposalTypeValues(value: string | string[] | undefined): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const item of values(value)) {
-    const normalized = item.toUpperCase();
-    if (!/^[A-Z]{2,10}$/.test(normalized) || seen.has(normalized)) continue;
+    const normalized = normalizeProposalType(item);
+    if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     result.push(normalized);
   }
@@ -220,7 +221,7 @@ export function buildFeedHref(filters: Partial<PublicBillFilters>, page: number)
   const params = new URLSearchParams();
   const query = filters.query ?? undefined;
   if (query?.trim()) params.set("q", query.trim().slice(0, MAX_TEXT_LENGTH));
-  appendAll(params, "tipo", filters.proposalTypes ?? (filters.proposalType ? [filters.proposalType] : undefined));
+  appendAll(params, "tipo", proposalTypeValues(filters.proposalTypes ?? (filters.proposalType ? [filters.proposalType] : undefined)));
   if (filters.proposalNumber && Number.isSafeInteger(filters.proposalNumber) && filters.proposalNumber > 0) {
     params.set("numero", String(filters.proposalNumber));
   }

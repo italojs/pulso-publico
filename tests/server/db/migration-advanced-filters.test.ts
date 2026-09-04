@@ -19,6 +19,46 @@ async function applyMigration(
 }
 
 describe("advanced filters migration", () => {
+  it("forward-fills type and number without requiring a valid four-digit year", async () => {
+    const schemaName = `migration_${randomUUID().replaceAll("-", "")}`;
+    const database = postgres(process.env.DATABASE_URL!, { max: 1 });
+
+    try {
+      await database.unsafe(`CREATE SCHEMA "${schemaName}"`);
+      await database.unsafe(`SET search_path TO "${schemaName}"`);
+      await applyMigration(database, "../../../drizzle/0000_icy_prodigy.sql", schemaName);
+      await applyMigration(database, "../../../drizzle/0001_left_wallflower.sql", schemaName);
+      await applyMigration(database, "../../../drizzle/0002_futuristic_venom.sql", schemaName);
+      await database`
+        INSERT INTO bills (
+          id, source, external_id, official_code, official_title, origin_house,
+          status_label, official_url, checked_at
+        ) VALUES
+          ('00000000-0000-0000-0000-000000000011', 'camara', 'legacy-sbt', 'SBT-A 3/2026', 'Substitutivo', 'camara', 'Em análise', 'https://example.test/sbt', now()),
+          ('00000000-0000-0000-0000-000000000012', 'camara', 'legacy-emc', 'EMC-A 14/2025', 'Emenda', 'camara', 'Em análise', 'https://example.test/emc', now()),
+          ('00000000-0000-0000-0000-000000000013', 'camara', 'legacy-sbe', 'SBE-A 7/2024', 'Subemenda', 'camara', 'Em análise', 'https://example.test/sbe', now()),
+          ('00000000-0000-0000-0000-000000000014', 'camara', 'legacy-prl', 'PRL 1/0', 'Parecer', 'camara', 'Em análise', 'https://example.test/prl', now())
+      `;
+
+      await applyMigration(database, "../../../drizzle/0003_advanced_filters.sql", schemaName);
+      await applyMigration(database, "../../../drizzle/0004_proposal_identity_backfill.sql", schemaName);
+
+      expect(await database<{ code: string; type: string | null; number: number | null; year: number | null }[]>`
+        SELECT official_code AS code, proposal_type AS type, proposal_number AS number, proposal_year AS year
+        FROM bills
+        ORDER BY external_id
+      `).toEqual([
+        { code: "EMC-A 14/2025", type: "EMC-A", number: 14, year: 2025 },
+        { code: "PRL 1/0", type: "PRL", number: 1, year: null },
+        { code: "SBE-A 7/2024", type: "SBE-A", number: 7, year: 2024 },
+        { code: "SBT-A 3/2026", type: "SBT-A", number: 3, year: 2026 },
+      ]);
+    } finally {
+      await database.unsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+      await database.end({ timeout: 5 });
+    }
+  }, 30_000);
+
   it("backfills negated historical vote results as other", async () => {
     const schemaName = `migration_${randomUUID().replaceAll("-", "")}`;
     const database = postgres(process.env.DATABASE_URL!, { max: 1 });

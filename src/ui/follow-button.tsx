@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { LocalFollow } from "#/follows/local";
-import { LOCAL_FOLLOWS_KEY, localFollowKey, parseLocalFollows, toggleLocalFollow } from "#/follows/local";
+import { LOCAL_FOLLOWS_CHANGED_EVENT, LOCAL_FOLLOWS_KEY, localFollowKey, parseLocalFollows, toggleLocalFollow } from "#/follows/local";
 import { BellIcon, BookmarkIcon } from "#/ui/icons";
 
 type FollowButtonProps = LocalFollow & { compact?: boolean };
@@ -33,7 +33,7 @@ export function FollowButton(props: Readonly<FollowButtonProps>) {
   function persistLocal(value: boolean) {
     const next = toggleLocalFollow(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY)), props, value);
     localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify(next));
-    window.dispatchEvent(new Event("pulso:follows-changed"));
+    window.dispatchEvent(new Event(LOCAL_FOLLOWS_CHANGED_EVENT));
   }
 
   async function toggle() {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const LOCAL_FOLLOWS_KEY = "pulso:follows:v1";
+export const LOCAL_FOLLOWS_CHANGED_EVENT = "pulso:follows-changed";
 
 const localFollow = z.object({
   kind: z.enum(["bill", "lawmaker"]),
@@ -30,6 +31,12 @@ export function parseLocalFollows(value: string | null): LocalFollow[] {
   } catch {
     return [];
   }
+}
+
+export function parseLocalBillReferences(value: string | null) {
+  return parseLocalFollows(value)
+    .filter((item) => item.kind === "bill")
+    .map(({ source, externalId }) => ({ source, externalId }));
 }
 
 export function toggleLocalFollow(current: LocalFollow[], item: LocalFollow, followed: boolean) {

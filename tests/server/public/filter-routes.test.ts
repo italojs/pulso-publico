@@ -116,6 +116,14 @@ describe("advanced public filter routes", () => {
     expect(invalid.status).toBe(400);
   });
 
+  it.each(["SBT-A", "EMC-A", "SBE-A"])("accepts the official %s proposal type", async (proposalType) => {
+    const response = await countPost(post("/api/projects/filter-count", {
+      filters: { proposalTypes: [proposalType] },
+    }));
+
+    expect(response.status).toBe(200);
+  });
+
   it("rejects more than two hundred anonymous bill references", async () => {
     const response = await countPost(post("/api/projects/filter-count", {
       filters: { followedOnly: true },

@@ -15,16 +15,24 @@ export type SimplifiedStage =
 
 export type VoteResultCategory = "approved" | "rejected" | "other" | "unavailable";
 
+export const PROPOSAL_TYPE_PATTERN = /^[A-Z]{2,10}(?:-[A-Z]{1,3})?$/;
+
+export function normalizeProposalType(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  return PROPOSAL_TYPE_PATTERN.test(normalized) ? normalized : null;
+}
+
 const fold = (value: string) => value.normalize("NFD").replaceAll(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export function parseProposalIdentity(officialCode: string): ProposalIdentity {
-  const match = officialCode.toUpperCase().match(/^([A-Z]{2,10})\s*(?:N[º°O]?\s*)?(\d{1,9})(?:\s*[/,]\s*(?:DE\s*)?(\d{4}))?/);
+  const match = officialCode.toUpperCase().match(/^([A-Z]{2,10}(?:-[A-Z]{1,3})?)\s+(?:N[º°O]?\s*)?(\d{1,9})(?:\s*[/,]\s*(?:DE\s*)?(\d{4})(?!\d))?/);
+  const proposalYear = match?.[3] ? Number(match[3]) : null;
 
   return match
     ? {
-        proposalType: match[1] ?? null,
+        proposalType: match[1] ? normalizeProposalType(match[1]) : null,
         proposalNumber: Number(match[2]),
-        proposalYear: match[3] ? Number(match[3]) : null,
+        proposalYear: proposalYear !== null && proposalYear >= 1000 ? proposalYear : null,
       }
     : { proposalType: null, proposalNumber: null, proposalYear: null };
 }

@@ -355,6 +355,15 @@ export async function countPublicBills(
   return rows[0]?.value ?? 0;
 }
 
+export async function hasPublicBillFollows(database: Database, userId: string): Promise<boolean> {
+  const rows = await database
+    .select({ id: followedBills.id })
+    .from(followedBills)
+    .where(eq(followedBills.userId, userId))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function listPublicBills(
   database: Database,
   filters: PublicBillFilters,
