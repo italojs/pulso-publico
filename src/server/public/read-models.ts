@@ -117,14 +117,62 @@ export interface PublicFilterOptions {
   authors: string[];
 }
 
+export type PublicHouse = "camara" | "senado" | "congresso" | "nao_informada";
+export type PublicBillStage =
+  | "presented"
+  | "committees"
+  | "ready_for_vote"
+  | "voted"
+  | "sanction_or_veto"
+  | "closed"
+  | "unclassified";
+export type PublicVotePresence = "with" | "without";
+export type PublicVoteKind = "nominal" | "secret";
+export type PublicIndividualVoteAvailability = "available" | "unavailable";
+export type PublicVoteResult = "approved" | "rejected" | "other" | "unavailable";
+export type PublicBillOrder =
+  | "updated"
+  | "presented_desc"
+  | "presented_asc"
+  | "most_movements"
+  | "most_votes"
+  /** @deprecated Kept while the existing feed UI is migrated to the advanced order values. */
+  | "presented";
+
 export interface PublicBillFilters {
   query?: string;
+  proposalTypes?: string[];
+  proposalNumber?: number;
+  yearFrom?: number;
+  yearTo?: number;
+  sources?: LegislativeSourceName[];
+  originHouses?: Exclude<PublicHouse, "nao_informada">[];
+  currentHouses?: PublicHouse[];
+  stages?: PublicBillStage[];
+  statuses?: string[];
+  presentedStart?: string;
+  presentedEnd?: string;
+  activityStart?: string;
+  activityEnd?: string;
+  votePresence?: PublicVotePresence;
+  voteKinds?: PublicVoteKind[];
+  individualVoteAvailability?: PublicIndividualVoteAvailability;
+  voteResults?: PublicVoteResult[];
+  voteHouses?: Exclude<PublicHouse, "nao_informada">[];
+  topics?: string[];
+  authors?: string[];
+  parties?: string[];
+  regions?: string[];
+  followedOnly?: boolean;
+  page?: number;
+  pageSize?: number;
+  order?: PublicBillOrder;
+
+  /** @deprecated Legacy scalar aliases removed by the advanced feed UI. */
+  proposalType?: string;
   source?: LegislativeSourceName;
   status?: string;
   topic?: string;
   party?: string;
   author?: string;
-  page?: number;
-  pageSize?: number;
-  order?: "updated" | "presented";
 }
