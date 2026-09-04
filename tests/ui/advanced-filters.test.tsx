@@ -119,6 +119,43 @@ describe("advanced feed filters", () => {
     expect(window.location.search).toBe("?acompanhando=1&tema=Trabalho");
   });
 
+  it("resets anonymous pagination before searching with changed URL filters", async () => {
+    window.history.replaceState(null, "", "/?acompanhando=1&tema=Trabalho");
+    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill]));
+    const searchRequests: PublicBillFilters[] = [];
+    const healthProject = {
+      ...project,
+      source: "senado" as const,
+      externalId: "601",
+      officialCode: "PL 12/2024",
+      officialTitle: "Projeto de Lei nº 12, de 2024",
+      topics: ["Saúde"],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/projects/search") return new Response(null, { status: 401 });
+      const body = JSON.parse(String(init?.body)) as { filters: PublicBillFilters };
+      searchRequests.push(body.filters);
+      const item = body.filters.topics?.includes("Saúde") ? healthProject : project;
+      return new Response(JSON.stringify({
+        items: [item], page: body.filters.page, pageSize: 1, total: 2, totalPages: 2,
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    }));
+
+    const view = render(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] }} />);
+    await screen.findByRole("link", { name: /PEC 8\/2025/ });
+    fireEvent.click(screen.getByRole("button", { name: "Próxima página" }));
+    await waitFor(() => expect(searchRequests).toHaveLength(2));
+    expect(searchRequests[1]?.page).toBe(2);
+
+    window.history.replaceState(null, "", "/?acompanhando=1&tema=Sa%C3%BAde");
+    view.rerender(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Saúde"] }} />);
+
+    expect(await screen.findByRole("link", { name: /PL 12\/2024/ })).toHaveAttribute("href", "/projetos/senado/601");
+    expect(searchRequests).toHaveLength(3);
+    expect(searchRequests[2]).toEqual({ followedOnly: true, page: 1, pageSize: 1, topics: ["Saúde"] });
+    expect(new URLSearchParams(window.location.search).has("pagina")).toBe(false);
+  });
+
   it("shows how to follow a project when anonymous storage has no bill", async () => {
     localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localLawmaker]));
     const fetchMock = vi.fn();

@@ -20,16 +20,19 @@ function emptyPage(filters: PublicBillFilters): PublicBillPage {
   };
 }
 
-export function AnonymousFollowedResults({ filters }: Readonly<{ filters: PublicBillFilters }>) {
+function AnonymousFollowedResultsSession({ filters, requestIdentity }: Readonly<{
+  filters: PublicBillFilters;
+  requestIdentity: string;
+}>) {
+  const baseRequestFilters = useMemo(() => JSON.parse(requestIdentity) as PublicBillFilters, [requestIdentity]);
   const [billKeys, setBillKeys] = useState<AnonymousBillKey[] | null>(null);
-  const [page, setPage] = useState(filters.page ?? 1);
+  const [page, setPage] = useState(baseRequestFilters.page ?? 1);
   const [projects, setProjects] = useState<PublicBillPage>();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const requestFilters = useMemo(() => ({
-    ...publicFilterRequestFilters(filters),
+    ...baseRequestFilters,
     page,
-    pageSize: filters.pageSize ?? 20,
-  }), [filters, page]);
+  }), [baseRequestFilters, page]);
 
   useEffect(() => {
     setBillKeys(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY))
@@ -74,4 +77,13 @@ export function AnonymousFollowedResults({ filters }: Readonly<{ filters: Public
     return <section aria-labelledby="results-title" aria-busy="true" className="feedResults"><h2 id="results-title" className="srOnly">Projetos encontrados</h2><p className="sectionEmpty">Carregando projetos acompanhados…</p></section>;
   }
   return <ProjectResults emptyFollowed={billKeys?.length === 0} filters={filters} onPageChange={setPage} projects={projects} />;
+}
+
+export function AnonymousFollowedResults({ filters }: Readonly<{ filters: PublicBillFilters }>) {
+  const requestIdentity = JSON.stringify({
+    ...publicFilterRequestFilters(filters),
+    page: filters.page ?? 1,
+    pageSize: filters.pageSize ?? 20,
+  });
+  return <AnonymousFollowedResultsSession filters={filters} key={requestIdentity} requestIdentity={requestIdentity} />;
 }
