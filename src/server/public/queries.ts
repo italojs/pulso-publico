@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
@@ -51,13 +51,11 @@ function selectedValues<T>(canonical: T[] | undefined, legacy?: T): T[] {
   return legacy === undefined ? [] : [legacy];
 }
 
-function dateBoundary(value: string | undefined, endOfDay: boolean): Date | undefined {
-  if (!value) return undefined;
-  const candidate = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`
-    : value;
-  const date = new Date(candidate);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+function brazilianDateBoundary(value: string | undefined, nextDay: boolean): SQL | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  return nextDay
+    ? sql`((${value}::date + 1) AT TIME ZONE 'America/Sao_Paulo')`
+    : sql`(${value}::date AT TIME ZONE 'America/Sao_Paulo')`;
 }
 
 function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {}): SQL[] {
@@ -95,18 +93,14 @@ function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {})
   const statuses = selectedValues(filters.statuses, filters.status);
   if (statuses.length > 0) conditions.push(inArray(bills.statusLabel, statuses));
 
-  const presentedStart = dateBoundary(filters.presentedStart, false);
-  const presentedEnd = dateBoundary(filters.presentedEnd, true);
-  const activityStart = dateBoundary(filters.activityStart, false);
-  const activityEnd = dateBoundary(filters.activityEnd, true);
+  const presentedStart = brazilianDateBoundary(filters.presentedStart, false);
+  const presentedEnd = brazilianDateBoundary(filters.presentedEnd, true);
+  const activityStart = brazilianDateBoundary(filters.activityStart, false);
+  const activityEnd = brazilianDateBoundary(filters.activityEnd, true);
   if (presentedStart) conditions.push(gte(bills.presentedAt, presentedStart));
-  if (presentedEnd) conditions.push(lte(bills.presentedAt, presentedEnd));
-  if (activityStart) {
-    conditions.push(gte(latestActivityExpression, sql.param(activityStart, bills.presentedAt)));
-  }
-  if (activityEnd) {
-    conditions.push(lte(latestActivityExpression, sql.param(activityEnd, bills.presentedAt)));
-  }
+  if (presentedEnd) conditions.push(lt(bills.presentedAt, presentedEnd));
+  if (activityStart) conditions.push(gte(latestActivityExpression, activityStart));
+  if (activityEnd) conditions.push(lt(latestActivityExpression, activityEnd));
 
   const topics = selectedValues(filters.topics, filters.topic);
   if (topics.length > 0) {
@@ -153,7 +147,7 @@ function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {})
     const kindConditions = filters.voteKinds.map((kind): SQL => {
       if (kind === "nominal") return eq(voteEvents.isNominal, true);
       if (kind === "secret") return eq(voteEvents.isSecret, true);
-      return eq(voteEvents.isNominal, false);
+      return and(eq(voteEvents.isNominal, false), eq(voteEvents.isSecret, false)) as SQL;
     });
     voteConditions.push(or(...kindConditions) as SQL);
   }
@@ -199,10 +193,10 @@ function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {})
   return conditions;
 }
 
-const latestActivityExpression = sql<string>`greatest(
-  coalesce((select max("movements"."occurred_at") from "movements" where "movements"."bill_id" = "bills"."id"), '-infinity'::timestamptz),
-  coalesce((select max("vote_events"."occurred_at") from "vote_events" where "vote_events"."bill_id" = "bills"."id"), '-infinity'::timestamptz),
-  coalesce(${bills.presentedAt}, ${bills.updatedAt})
+const latestActivityExpression = sql<Date | null>`greatest(
+  (select max("movements"."occurred_at") from "movements" where "movements"."bill_id" = "bills"."id"),
+  (select max("vote_events"."occurred_at") from "vote_events" where "vote_events"."bill_id" = "bills"."id"),
+  ${bills.presentedAt}
 )`;
 
 const latestActivity = latestActivityExpression.as("latest_activity_at");
@@ -232,7 +226,7 @@ async function enrichBillRows(
     currentHouse: "camara" | "senado" | "congresso" | null;
     presentedAt: Date | null;
     checkedAt: Date;
-    latestActivityAt: Date | string;
+    latestActivityAt: Date | string | null;
   }>,
 ): Promise<PublicBillCard[]> {
   const billIds = rows.map((row) => row.id);
@@ -285,7 +279,7 @@ async function enrichBillRows(
     currentHouse: row.currentHouse,
     presentedAt: row.presentedAt ? iso(row.presentedAt) : null,
     checkedAt: iso(row.checkedAt),
-    latestActivityAt: iso(row.latestActivityAt),
+    latestActivityAt: row.latestActivityAt ? iso(row.latestActivityAt) : null,
     topics: (topicsByBill.get(row.id) ?? []).map((item) => item.label),
     authors: (authorsByBill.get(row.id) ?? []).map(
       (item): PublicAuthor => ({
@@ -326,13 +320,13 @@ const billListSelection = {
 };
 
 function billOrdering(order: PublicBillOrder | undefined): SQL[] {
-  if (order === "presented_asc") return [asc(bills.presentedAt), asc(bills.id)];
+  if (order === "presented_asc") return [sql`${bills.presentedAt} asc nulls last`, asc(bills.id)];
   if (order === "presented_desc" || order === "presented") {
-    return [desc(bills.presentedAt), asc(bills.id)];
+    return [sql`${bills.presentedAt} desc nulls last`, asc(bills.id)];
   }
   if (order === "most_movements") return [desc(movementCount), asc(bills.id)];
   if (order === "most_votes") return [desc(voteCount), asc(bills.id)];
-  return [desc(latestActivity), asc(bills.id)];
+  return [sql`${latestActivity} desc nulls last`, asc(bills.id)];
 }
 
 export async function countPublicBills(
@@ -475,7 +469,7 @@ export async function getPublicLawmaker(
     .from(billAuthors)
     .innerJoin(bills, eq(billAuthors.billId, bills.id))
     .where(eq(billAuthors.lawmakerId, lawmaker.id))
-    .orderBy(desc(latestActivity))
+    .orderBy(sql`${latestActivity} desc nulls last`, asc(bills.id))
     .limit(20);
   const authoredBills = await enrichBillRows(database, authoredRows);
 
@@ -620,7 +614,7 @@ export async function listPublicFilterOptions(database: Database): Promise<Publi
   for (const row of voteShapeRows) {
     if (row.nominal) availableVoteKinds.add("nominal");
     if (row.secret) availableVoteKinds.add("secret");
-    if (!row.nominal) availableVoteKinds.add("non_nominal");
+    if (!row.nominal && !row.secret) availableVoteKinds.add("non_nominal");
   }
   const voteKindOrder: PublicVoteKind[] = ["nominal", "secret", "non_nominal"];
   const regions = regionRows.flatMap((item) => item.value ? [{ value: item.value, label: item.value }] : []);

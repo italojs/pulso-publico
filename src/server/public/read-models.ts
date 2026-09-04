@@ -22,7 +22,7 @@ export interface PublicBillCard {
   currentHouse: "camara" | "senado" | "congresso" | null;
   presentedAt: string | null;
   checkedAt: string;
-  latestActivityAt: string;
+  latestActivityAt: string | null;
   topics: string[];
   authors: PublicAuthor[];
   friendlyTitle?: string | null;

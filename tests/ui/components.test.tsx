@@ -70,4 +70,11 @@ describe("civic interface components", () => {
     expect(screen.queryByText("Gerado por IA")).not.toBeInTheDocument();
     expect(screen.getByText(/Ana Cidadã/)).toBeInTheDocument();
   });
+
+  it("shows that official activity is unavailable when no official date exists", () => {
+    const view = render(<ProjectCard project={{ ...card, latestActivityAt: null }} />);
+
+    expect(view.container).toHaveTextContent("Atividade oficial não disponível");
+    expect(view.container.querySelector("time")).not.toBeInTheDocument();
+  });
 });

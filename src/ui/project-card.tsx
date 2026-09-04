@@ -19,7 +19,7 @@ export function ProjectCard({ project }: Readonly<{ project: SummarizedBillCard 
     <article className="projectCard">
       <div className="projectCard__topline">
         <SourceBadge source={project.source} />
-        <div className="projectCard__topActions"><time dateTime={project.latestActivityAt}>Atualizado em {formatDate(project.latestActivityAt)}</time><FollowButton compact kind="bill" source={project.source} externalId={project.externalId} label={project.officialCode} href={`/projetos/${project.source}/${project.externalId}`} subtitle={project.statusLabel} /></div>
+        <div className="projectCard__topActions">{project.latestActivityAt ? <time dateTime={project.latestActivityAt}>Atualizado em {formatDate(project.latestActivityAt)}</time> : <span>Atividade oficial não disponível</span>}<FollowButton compact kind="bill" source={project.source} externalId={project.externalId} label={project.officialCode} href={`/projetos/${project.source}/${project.externalId}`} subtitle={project.statusLabel} /></div>
       </div>
       <StatusRail compact source={project.source} status={project.statusLabel} />
       <div className="projectCard__content">

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import {
   billAuthors,
@@ -67,6 +67,7 @@ async function seedPublicData() {
     .insert(bills)
     .values([
       {
+        id: "00000000-0000-4000-8000-000000000002",
         source: "camara",
         externalId: "501",
         officialCode: "PEC 8/2025",
@@ -86,6 +87,7 @@ async function seedPublicData() {
         checkedAt,
       },
       {
+        id: "00000000-0000-4000-8000-000000000001",
         source: "senado",
         externalId: "601",
         officialCode: "PL 12/2024",
@@ -105,6 +107,7 @@ async function seedPublicData() {
         checkedAt,
       },
       {
+        id: "00000000-0000-4000-8000-000000000003",
         source: "camara",
         externalId: "701",
         officialCode: "Projeto sem votação",
@@ -120,7 +123,7 @@ async function seedPublicData() {
         statusLabel: "Apresentada sem classificação",
         simplifiedStage: "unclassified",
         officialUrl: "https://www.camara.leg.br/propostas-legislativas/701",
-        presentedAt: new Date("2023-01-15T12:00:00.000Z"),
+        presentedAt: null,
         checkedAt,
       },
     ])
@@ -262,13 +265,13 @@ async function seedPublicData() {
         source: "camara",
         externalId: "vote-501-2",
         billId: workBill.id,
-        occurredAt: new Date("2026-08-30T18:00:00.000Z"),
+        occurredAt: new Date("2026-09-05T02:30:00.000Z"),
         house: "senado",
-        description: "Segunda votação secreta",
+        description: "Votação não nominal no fim do dia brasileiro",
         result: null,
         resultCategory: "unavailable",
         isNominal: false,
-        isSecret: true,
+        isSecret: false,
         officialUrl: workBill.officialUrl,
         checkedAt,
       },
@@ -339,7 +342,7 @@ describe("public legislative queries", () => {
       source: "camara",
       topics: ["Trabalho e Emprego"],
       authors: [{ name: "Ana Cidadã", party: "ABC" }],
-      latestActivityAt: "2026-08-31T18:00:00.000Z",
+      latestActivityAt: "2026-09-05T02:30:00.000Z",
     });
   });
 
@@ -387,12 +390,39 @@ describe("public legislative queries", () => {
       presentedEnd: "2025-02-01",
     });
     const activity = await listPublicBills(testDb, {
-      activityStart: "2026-08-31",
-      activityEnd: "2026-08-31",
+      activityStart: "2026-09-04",
+      activityEnd: "2026-09-04",
     });
 
     expect(presented.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
     expect(activity.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
+  });
+
+  it("keeps missing official activity null and ignores the internal update timestamp", async () => {
+    await testDb
+      .update(bills)
+      .set({ updatedAt: new Date("2030-01-01T00:00:00.000Z") })
+      .where(eq(bills.externalId, "701"));
+
+    const result = await listPublicBills(testDb, {});
+    const unknownActivity = result.items.find((item) => item.externalId === "701");
+    const filtered = await listPublicBills(testDb, {
+      activityStart: "2029-12-31",
+      activityEnd: "2030-01-01",
+    });
+
+    expect(result.items.at(-1)?.externalId).toBe("701");
+    expect(unknownActivity?.latestActivityAt).toBeNull();
+    expect(filtered.items).toEqual([]);
+  });
+
+  it("does not classify secret votes as non-nominal", async () => {
+    const result = await listPublicBills(testDb, {
+      voteKinds: ["non_nominal"],
+      voteResults: ["rejected"],
+    });
+
+    expect(result.items).toEqual([]);
   });
 
   it("selects projects whose current house is not informed", async () => {
@@ -419,7 +449,7 @@ describe("public legislative queries", () => {
   it.each([
     ["updated", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
     ["presented_desc", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
-    ["presented_asc", ["Projeto sem votação", "PL 12/2024", "PEC 8/2025"]],
+    ["presented_asc", ["PL 12/2024", "PEC 8/2025", "Projeto sem votação"]],
     ["most_movements", ["PL 12/2024", "PEC 8/2025", "Projeto sem votação"]],
     ["most_votes", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
   ] as const)("orders by %s", async (order, expected) => {
@@ -454,6 +484,20 @@ describe("public legislative queries", () => {
         "PEC 8/2025",
         "Projeto sem votação",
       ]);
+    },
+  );
+
+  it.each(["presented_desc", "presented"] as const)(
+    "uses bills.id as the final tie-breaker for order %s",
+    async (order) => {
+      await testDb
+        .update(bills)
+        .set({ presentedAt: new Date("2025-01-01T12:00:00.000Z") })
+        .where(inArray(bills.externalId, ["501", "601"]));
+
+      const result = await listPublicBills(testDb, { order });
+
+      expect(result.items.map((item) => item.externalId)).toEqual(["601", "501", "701"]);
     },
   );
 
