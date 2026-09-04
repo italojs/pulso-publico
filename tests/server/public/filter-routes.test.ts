@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { UserRepository } from "#/auth/user-repository";
 import { bills, followedBills, users } from "#/server/db/schema";
+import { readPublicFilterRequest } from "#/server/public/filter-contract";
 import { POST as countPost } from "../../../app/api/projects/filter-count/route.ts";
 import { POST as searchPost } from "../../../app/api/projects/search/route.ts";
 import {
@@ -19,6 +20,22 @@ function post(path: string, body: unknown, headers: HeadersInit = {}) {
     headers: { "content-type": "application/json", origin, ...headers },
     body: JSON.stringify(body),
   });
+}
+
+function streamingPost(path: string, body: string) {
+  const bytes = new TextEncoder().encode(body);
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+    duplex: "half",
+  };
+  return new Request(`${origin}${path}`, init);
 }
 
 async function seedPublicBills() {
@@ -111,6 +128,38 @@ describe("advanced public filter routes", () => {
     expect(response.status).toBe(400);
   });
 
+  it("rejects an announced body larger than 65,536 bytes", async () => {
+    const response = await countPost(post("/api/projects/filter-count", {
+      filters: {},
+    }, { "content-length": "65537" }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ code: "REQUEST_TOO_LARGE" });
+  });
+
+  it("rejects a streamed body larger than 65,536 bytes without a content-length header", async () => {
+    const request = streamingPost("/api/projects/search", JSON.stringify({
+      filters: { query: "x".repeat(65_537) },
+    }));
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await searchPost(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ code: "REQUEST_TOO_LARGE" });
+  });
+
+  it("returns the invalid-request code for malformed same-origin JSON", async () => {
+    const response = await countPost(new Request(`${origin}/api/projects/filter-count`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: "{not-json",
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ code: "INVALID_FILTER_REQUEST" });
+  });
+
   it("rejects a cross-origin request before parsing its body", async () => {
     const response = await searchPost(new Request(`${origin}/api/projects/search`, {
       method: "POST",
@@ -169,6 +218,70 @@ describe("advanced public filter routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       total: 1,
       items: [{ externalId: seeded.senadoBill.externalId }],
+    });
+  });
+
+  it("accepts twenty repeated filter values and rejects twenty-one", async () => {
+    const values = Array.from({ length: 20 }, (_, index) => `Tema ${index}`);
+    const accepted = await searchPost(post("/api/projects/search", {
+      filters: { topics: values },
+    }));
+    const rejected = await searchPost(post("/api/projects/search", {
+      filters: { topics: [...values, "Tema 20"] },
+    }));
+
+    expect(accepted.status).toBe(200);
+    expect(rejected.status).toBe(400);
+  });
+
+  it("enforces text, date, and pagination filter bounds", async () => {
+    const accepted = await countPost(post("/api/projects/filter-count", {
+      filters: { query: "x".repeat(200), page: 1, pageSize: 50 },
+    }));
+    expect(accepted.status).toBe(200);
+
+    for (const filters of [
+      { query: "x".repeat(201) },
+      { presentedStart: "2026-02-30" },
+      { page: 0 },
+      { page: 100_001 },
+      { pageSize: 0 },
+      { pageSize: 51 },
+    ]) {
+      const response = await countPost(post("/api/projects/filter-count", { filters }));
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("rejects unknown root and bill-reference keys", async () => {
+    const root = await countPost(post("/api/projects/filter-count", {
+      filters: {},
+      unknown: true,
+    }));
+    const reference = await countPost(post("/api/projects/filter-count", {
+      filters: {},
+      anonymousBillKeys: [{ source: "camara", externalId: "route-camara", unknown: true }],
+    }));
+
+    expect(root.status).toBe(400);
+    expect(reference.status).toBe(400);
+  });
+
+  it("deduplicates anonymous bill keys before constructing their scope", async () => {
+    const parsed = await readPublicFilterRequest(post("/api/projects/search", {
+      filters: { followedOnly: true },
+      anonymousBillKeys: [
+        { source: "camara", externalId: seeded.camaraBill.externalId },
+        { source: "camara", externalId: seeded.camaraBill.externalId },
+        { source: "senado", externalId: seeded.senadoBill.externalId },
+      ],
+    }), new UserRepository(testDb));
+
+    expect("scope" in parsed && parsed.scope).toEqual({
+      anonymousBillKeys: [
+        { source: "camara", externalId: seeded.camaraBill.externalId },
+        { source: "senado", externalId: seeded.senadoBill.externalId },
+      ],
     });
   });
 });

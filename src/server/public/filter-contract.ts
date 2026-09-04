@@ -7,6 +7,7 @@ import type { PublicBillFilters } from "#/server/public/read-models";
 
 const MAX_FILTER_VALUES = 20;
 const MAX_TEXT_LENGTH = 200;
+const MAX_REQUEST_BYTES = 65_536;
 
 const sourceValues = ["camara", "senado"] as const;
 const originHouseValues = ["camara", "senado", "congresso"] as const;
@@ -95,6 +96,50 @@ export const filterRequest = z.object({
 
 type FilterRequest = z.infer<typeof filterRequest>;
 
+type FilterRequestRead =
+  | { filters: PublicBillFilters; scope: PublicBillScope }
+  | { error: "INVALID_FILTER_REQUEST" | "REQUEST_TOO_LARGE" };
+type BoundedJsonRead = { body: unknown } | { error: "INVALID_FILTER_REQUEST" | "REQUEST_TOO_LARGE" };
+
+function announcedRequestIsTooLarge(request: Request) {
+  const contentLength = request.headers.get("content-length");
+  if (!contentLength || !/^\d+$/.test(contentLength)) return false;
+  return Number(contentLength) > MAX_REQUEST_BYTES;
+}
+
+async function readBoundedJson(request: Request): Promise<BoundedJsonRead> {
+  if (announcedRequestIsTooLarge(request)) return { error: "REQUEST_TOO_LARGE" };
+
+  const reader = request.body?.getReader();
+  if (!reader) return { error: "INVALID_FILTER_REQUEST" };
+
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > MAX_REQUEST_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { error: "REQUEST_TOO_LARGE" };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { body: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch {
+    return { error: "INVALID_FILTER_REQUEST" };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function anonymousScope(keys: FilterRequest["anonymousBillKeys"]): PublicBillScope {
   const seen = new Set<string>();
   const anonymousBillKeys = keys.filter((key) => {
@@ -106,13 +151,12 @@ function anonymousScope(keys: FilterRequest["anonymousBillKeys"]): PublicBillSco
   return { anonymousBillKeys };
 }
 
-export async function readPublicFilterRequest(request: Request, users: UserRepository): Promise<{
-  filters: PublicBillFilters;
-  scope: PublicBillScope;
-} | null> {
+export async function readPublicFilterRequest(request: Request, users: UserRepository): Promise<FilterRequestRead> {
   const user = await currentUserFromCookie(request.headers.get("cookie"), users);
-  const parsed = filterRequest.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return null;
+  const body = await readBoundedJson(request);
+  if ("error" in body) return body;
+  const parsed = filterRequest.safeParse(body.body);
+  if (!parsed.success) return { error: "INVALID_FILTER_REQUEST" };
 
   return {
     filters: parsed.data.filters,

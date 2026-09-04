@@ -10,7 +10,9 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return Response.json({ code: "CROSS_ORIGIN_REQUEST" }, { status: 403 });
 
   const parsed = await readPublicFilterRequest(request, users);
-  if (!parsed) return Response.json({ code: "INVALID_FILTER_REQUEST" }, { status: 400 });
+  if ("error" in parsed) {
+    return Response.json({ code: parsed.error }, { status: parsed.error === "REQUEST_TOO_LARGE" ? 413 : 400 });
+  }
 
   return Response.json({ total: await countPublicBills(db, parsed.filters, parsed.scope) });
 }
