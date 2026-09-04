@@ -58,4 +58,28 @@ describe("retryingFetch", () => {
     expect(String(error)).not.toContain("socket closed");
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
+
+  it("does not abort a successful response body after its headers arrive", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      return new Response(new ReadableStream({
+        start(controller) {
+          const timer = setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode("stream concluído"));
+            controller.close();
+          }, 30);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            controller.error(signal.reason);
+          }, { once: true });
+        },
+      }));
+    });
+
+    const response = await retryingFetch(new URL("https://example.test/stream"), {
+      retry: { attempts: 1, baseDelayMs: 0, timeoutMs: 10 },
+    });
+
+    await expect(response.text()).resolves.toBe("stream concluído");
+  });
 });

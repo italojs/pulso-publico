@@ -18,6 +18,7 @@ import {
   billAuthors,
   bills,
   billTopics,
+  followedBills,
   individualVotes,
   lawmakers,
   movements,
@@ -347,6 +348,15 @@ export class LegislativeRepository {
       );
     const storedIds = new Set(stored.map((item) => item.externalId));
     return uniqueIds.filter((externalId) => !storedIds.has(externalId));
+  }
+
+  async listTrackedBillExternalIds(source: LegislativeSourceName): Promise<string[]> {
+    const stored = await this.database
+      .selectDistinct({ externalId: bills.externalId })
+      .from(followedBills)
+      .innerJoin(bills, eq(followedBills.billId, bills.id))
+      .where(eq(bills.source, source));
+    return stored.map((item) => item.externalId);
   }
 
   async getCheckpoint(source: LegislativeSourceName): Promise<Date | null> {

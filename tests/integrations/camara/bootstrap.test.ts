@@ -48,4 +48,33 @@ describe("streamCamaraBillArchive", () => {
 
     expect(requestedYears).toEqual([2023, 2024, 2025, 2026]);
   });
+
+  it("retries an annual archive when its response body is interrupted", async () => {
+    const fixture = await readFile(fixtureUrl);
+    let attempts = 0;
+    const bills = [];
+
+    for await (const bill of streamCamaraBillArchive(
+      new Date("2023-09-03T03:00:00.000Z"),
+      new Date("2023-09-04T02:59:59.000Z"),
+      {
+        fetcher: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            return new Response(new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError("socket interrupted"));
+              },
+            }));
+          }
+          return new Response(fixture);
+        },
+      },
+    )) {
+      bills.push(bill);
+    }
+
+    expect(attempts).toBe(2);
+    expect(bills.map((bill) => bill.externalId)).toEqual(["1002", "1003"]);
+  });
 });

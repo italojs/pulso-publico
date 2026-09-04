@@ -4,14 +4,16 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(payload.title, {
     body: payload.body,
     data: { url: payload.url },
-    badge: "/favicon.ico",
     tag: payload.url,
   }));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || "/alertas", self.location.origin).toString();
+  const requestedUrl = new URL(event.notification.data?.url || "/alertas", self.location.origin);
+  const url = requestedUrl.origin === self.location.origin
+    ? requestedUrl.toString()
+    : new URL("/alertas", self.location.origin).toString();
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
     const existing = windows.find((client) => client.url === url);
     return existing ? existing.focus() : clients.openWindow(url);

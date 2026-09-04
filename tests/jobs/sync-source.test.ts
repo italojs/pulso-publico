@@ -113,6 +113,7 @@ class FakeAdapter implements LegislativeSourceAdapter {
   lawmakerDetailCalls: string[] = [];
   failListing = false;
   individualVoteValue: IndividualVote = individualVote;
+  hydratedExternalIds: string[] = [];
 
   constructor(source: LegislativeSourceName = "camara") {
     this.source = source;
@@ -126,8 +127,9 @@ class FakeAdapter implements LegislativeSourceAdapter {
     return { items: [this.billForSource()], nextCursor: null };
   }
 
-  async getBill(): Promise<Bill> {
-    return this.billForSource();
+  async getBill(externalId: string): Promise<Bill> {
+    this.hydratedExternalIds.push(externalId);
+    return { ...this.billForSource(), externalId };
   }
 
   async listBillAuthors(): Promise<BillAuthor[]> {
@@ -194,6 +196,7 @@ class FakeRepository implements SyncRepository {
   lawmakers: Lawmaker[] = [];
   successAt: Date | null = null;
   failure: { checkedAt: Date; code: string } | null = null;
+  trackedBillExternalIds: string[] = [];
 
   async upsertBillGraph(graph: BillGraph) {
     this.graphs.push(graph);
@@ -213,6 +216,10 @@ class FakeRepository implements SyncRepository {
         .map((item) => item.externalId),
     );
     return externalIds.filter((externalId) => !stored.has(externalId));
+  }
+
+  async listTrackedBillExternalIds() {
+    return this.trackedBillExternalIds;
   }
 
   async getCheckpoint() {
@@ -299,6 +306,20 @@ describe("syncSource", () => {
       individualVotes: 1,
       failed: false,
     });
+  });
+
+  it("also refreshes followed bills that are absent from the source change list", async () => {
+    const adapter = new FakeAdapter();
+    const repository = new FakeRepository();
+    repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
+    repository.trackedBillExternalIds = [bill.externalId, "followed-old-bill"];
+
+    const report = await syncSource(adapter, repository, now, {
+      initialHistoryMonths: 36,
+    });
+
+    expect(adapter.hydratedExternalIds).toEqual([bill.externalId, "followed-old-bill"]);
+    expect(report).toMatchObject({ bills: 2, failed: false });
   });
 
   it("loads historical lawmakers referenced by nominal votes before persistence", async () => {

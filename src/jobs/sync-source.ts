@@ -15,6 +15,7 @@ export interface SyncRepository {
     source: LegislativeSourceName,
     externalIds: readonly string[],
   ): Promise<string[]>;
+  listTrackedBillExternalIds(source: LegislativeSourceName): Promise<string[]>;
   getCheckpoint(source: LegislativeSourceName): Promise<Date | null>;
   saveCheckpoint(source: LegislativeSourceName, value: Date): Promise<void>;
   markSourceSuccess(source: LegislativeSourceName, checkedAt: Date): Promise<void>;
@@ -288,16 +289,20 @@ async function syncHydratedPages(
 ) {
   let cursor: string | undefined;
   const seenCursors = new Set<string>();
+  const hydratedBillIds = new Set<string>();
+
+  const hydrateOnce = async (billExternalId: string) => {
+    if (hydratedBillIds.has(billExternalId)) return;
+    const graph = await hydrateBillGraph(adapter, repository, billExternalId);
+    hydratedBillIds.add(billExternalId);
+    addGraphToReport(report, graph);
+  };
+
   do {
     const page = await adapter.listBillsChangedSince(since, cursor);
     for (const changedBill of page.items) {
       assertSource(changedBill, adapter.source);
-      const graph = await hydrateBillGraph(
-        adapter,
-        repository,
-        changedBill.externalId,
-      );
-      addGraphToReport(report, graph);
+      await hydrateOnce(changedBill.externalId);
     }
     cursor = page.nextCursor ?? undefined;
     if (cursor) {
@@ -305,4 +310,9 @@ async function syncHydratedPages(
       seenCursors.add(cursor);
     }
   } while (cursor);
+
+  const trackedBillIds = await repository.listTrackedBillExternalIds(adapter.source);
+  for (const billExternalId of trackedBillIds) {
+    await hydrateOnce(billExternalId);
+  }
 }

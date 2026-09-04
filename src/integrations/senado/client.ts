@@ -143,9 +143,9 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
       const url = this.url("processo", { numdias: String(recentDays) });
       try {
         const values = processListSchema.parse(await this.fetchJson(url));
-        const boundedValues = until
-          ? values.filter((raw) => wasUpdatedInside(raw, since, until))
-          : values;
+        const boundedValues = values.filter((raw) =>
+          wasUpdatedInside(raw, since, effectiveUntil)
+        );
         return { items: this.mapBills(url, boundedValues), nextCursor: null };
       } catch (error) {
         if (error instanceof OfficialSourceError) throw error;

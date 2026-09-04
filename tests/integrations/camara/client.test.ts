@@ -18,7 +18,10 @@ describe("CamaraAdapter", () => {
       "https://camara.test/api/v2/proposicoes?dataInicio=2026-09-02&dataFim=2026-09-02&pagina=2&itens=100";
     const responses = [
       {
-        dados: billListFixture.dados,
+        dados: billListFixture.dados.map((item) => ({
+          ...item,
+          dataApresentacao: "2026-09-02T16:00",
+        })),
         links: [{ rel: "next", href: pageTwoUrl }],
       },
       { dados: [], links: [] },
@@ -50,6 +53,30 @@ describe("CamaraAdapter", () => {
     expect(new URL(requestedUrls[0]!).searchParams.get("dataInicio")).toBe("2026-09-02");
     expect(new URL(requestedUrls[2]!).searchParams.get("dataInicio")).toBe("2026-09-03");
     expect(third.nextCursor).toBeNull();
+  });
+
+  it("filters a same-day page to the exact incremental interval", async () => {
+    const before = {
+      ...billListFixture.dados[0],
+      id: 2351250,
+      dataApresentacao: "2026-09-03T14:40",
+    };
+    const inside = {
+      ...billListFixture.dados[0],
+      id: 2351251,
+      dataApresentacao: "2026-09-03T14:58",
+    };
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async () => jsonResponse({ dados: [before, inside], links: [] }),
+    });
+
+    const page = await adapter.listBillsChangedSince(
+      new Date("2026-09-03T17:55:00.000Z"),
+    );
+
+    expect(page.items.map((item) => item.externalId)).toEqual(["2351251"]);
   });
 
   it("turns a malformed official payload into a bounded contract error", async () => {

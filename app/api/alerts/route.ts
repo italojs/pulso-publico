@@ -4,15 +4,11 @@ import { AlertRepository } from "#/alerts/alert-repository";
 import { currentUser } from "#/auth/current-user";
 import { UserRepository } from "#/auth/user-repository";
 import { db } from "#/server/db/client";
+import { sameOrigin } from "#/server/http/request-origin";
 
 const command = z.object({ action: z.literal("read"), id: z.union([z.uuid(), z.literal("all")]) });
 const users = new UserRepository(db);
 const alerts = new AlertRepository(db);
-
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
-}
 
 export async function GET(request: Request) {
   const user = await currentUser(request, users);

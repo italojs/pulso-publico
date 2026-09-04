@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { parse } from "csv-parse";
 import { z } from "zod";
@@ -75,6 +75,39 @@ function isInsideInterval(value: string, since: Temporal.Instant, until: Tempora
     && Temporal.Instant.compare(instant, until) <= 0;
 }
 
+async function downloadAnnualArchive(fetcher: ArchiveFetcher, url: URL) {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetcher(url, { headers: { Accept: "text/csv" } });
+      if (!response.ok) {
+        throw new OfficialSourceError(
+          `Câmara archive request failed with status ${response.status}`,
+          url.href,
+          response.status,
+          response.status === 408 || response.status === 429 || response.status >= 500,
+        );
+      }
+      if (!response.body) throw new Error("Câmara archive response has no body");
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (error instanceof OfficialSourceError && !error.retryable) throw error;
+      if (attempt === attempts) {
+        if (error instanceof OfficialSourceError) throw error;
+        throw new OfficialSourceError(
+          "Official Câmara archive download was interrupted",
+          url.href,
+          null,
+          true,
+          { cause: error },
+        );
+      }
+      await delay(250 * 2 ** (attempt - 1));
+    }
+  }
+  throw new Error("unreachable archive download state");
+}
+
 export async function* streamCamaraBillArchive(
   since: Date,
   until: Date,
@@ -94,22 +127,8 @@ export async function* streamCamaraBillArchive(
     const url = new URL(`proposicoes-${year}.csv`, baseUrl);
 
     try {
-      const response = await fetcher(url, { headers: { Accept: "text/csv" } });
-      if (!response.ok) {
-        throw new OfficialSourceError(
-          `Câmara archive request failed with status ${response.status}`,
-          url.href,
-          response.status,
-          response.status === 408 || response.status === 429 || response.status >= 500,
-        );
-      }
-      if (!response.body) {
-        throw new Error("Câmara archive response has no body");
-      }
-
-      const body = Readable.fromWeb(
-        response.body as unknown as NodeReadableStream<Uint8Array>,
-      );
+      const archive = await downloadAnnualArchive(fetcher, url);
+      const body = Readable.from([archive]);
       const records = body.pipe(
         parse({
           bom: true,

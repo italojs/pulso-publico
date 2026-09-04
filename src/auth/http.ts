@@ -3,6 +3,7 @@ import { z } from "zod";
 import { hashPassword, verifyPassword } from "#/auth/password";
 import { expiredSessionCookie, readSessionToken, sessionCookie } from "#/auth/session";
 import { normalizeEmail } from "#/auth/user-repository";
+import { isSecureRequest, publicOrigin, sameOrigin } from "#/server/http/request-origin";
 
 interface RegistrationRepository {
   createUser(email: string, passwordHash: string): Promise<{ id: string; email: string }>;
@@ -24,11 +25,6 @@ const credentials = z.object({
   next: z.string().optional(),
 });
 
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
-}
-
 function safePath(value: string | undefined, fallback: string) {
   return value?.startsWith("/") && !value.startsWith("//") ? value : fallback;
 }
@@ -40,7 +36,7 @@ function appendStatus(path: string, key: string, value: string) {
 }
 
 function redirect(request: Request, path: string, cookie?: string) {
-  const headers = new Headers({ Location: new URL(path, request.url).toString() });
+  const headers = new Headers({ Location: new URL(path, publicOrigin(request)).toString() });
   if (cookie) headers.set("Set-Cookie", cookie);
   return new Response(null, { status: 303, headers });
 }
@@ -67,7 +63,7 @@ export function createRegisterHandler(repository: RegistrationRepository) {
       const user = await repository.createUser(parsed.data.email, await hashPassword(parsed.data.password));
       const session = await repository.createSession(user.id);
       const destination = appendStatus(safePath(parsed.data.next, "/seguindo"), "conta", "criada");
-      return redirect(request, destination, sessionCookie(session.token, new URL(request.url).protocol === "https:"));
+      return redirect(request, destination, sessionCookie(session.token, isSecureRequest(request)));
     } catch (error) {
       if (uniqueViolation(error)) return redirect(request, "/cadastro?erro=email");
       return Response.json({ code: "ACCOUNT_CREATION_FAILED" }, { status: 503 });
@@ -88,7 +84,7 @@ export function createLoginHandler(repository: LoginRepository) {
     return redirect(
       request,
       safePath(parsed.data.next, "/seguindo"),
-      sessionCookie(session.token, new URL(request.url).protocol === "https:"),
+      sessionCookie(session.token, isSecureRequest(request)),
     );
   };
 }
@@ -98,6 +94,6 @@ export function createLogoutHandler(repository: LogoutRepository) {
     if (!sameOrigin(request)) return Response.json({ code: "CROSS_ORIGIN_REQUEST" }, { status: 403 });
     const token = readSessionToken(request.headers.get("cookie"));
     if (token) await repository.revokeSession(token);
-    return redirect(request, "/", expiredSessionCookie(new URL(request.url).protocol === "https:"));
+    return redirect(request, "/", expiredSessionCookie(isSecureRequest(request)));
   };
 }

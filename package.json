@@ -8,6 +8,8 @@
     "node": ">=26.8.1 <27"
   },
   "imports": {
+    "#/ui/format": "./src/ui/format.ts",
+    "#/ui/*": "./src/ui/*.tsx",
     "#/*": "./src/*.ts"
   },
   "scripts": {

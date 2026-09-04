@@ -6,6 +6,7 @@ import { currentUser } from "#/auth/current-user";
 import { UserRepository } from "#/auth/user-repository";
 import { env } from "#/server/config";
 import { db } from "#/server/db/client";
+import { sameOrigin } from "#/server/http/request-origin";
 
 const subscribe = z.object({ action: z.literal("subscribe"), subscription: z.object({ endpoint: z.url().max(2048), expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().min(1).max(500), auth: z.string().min(1).max(500) }) }) });
 const unsubscribe = z.object({ action: z.literal("unsubscribe"), endpoint: z.url().max(2048) });
@@ -13,11 +14,6 @@ const command = z.discriminatedUnion("action", [subscribe, unsubscribe]);
 const users = new UserRepository(db);
 const pushes = new PushRepository(db);
 const provider = new WebPushProvider({ subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY });
-
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
-}
 
 export async function GET(request: Request) {
   const user = await currentUser(request, users);

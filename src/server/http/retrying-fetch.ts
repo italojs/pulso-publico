@@ -59,10 +59,14 @@ export async function retryingFetch(
   assertPolicy(retry);
 
   for (let attempt = 1; attempt <= retry.attempts; attempt += 1) {
-    const timeoutSignal = AbortSignal.timeout(retry.timeoutMs);
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(
+      () => timeoutController.abort(new DOMException("Request timed out", "TimeoutError")),
+      retry.timeoutMs,
+    );
     const signal = callerSignal
-      ? AbortSignal.any([callerSignal, timeoutSignal])
-      : timeoutSignal;
+      ? AbortSignal.any([callerSignal, timeoutController.signal])
+      : timeoutController.signal;
 
     try {
       const response = await fetch(url, { ...requestInit, signal });
@@ -71,6 +75,7 @@ export async function retryingFetch(
       }
 
       const retryable = isRetryableStatus(response.status);
+      await response.body?.cancel().catch(() => undefined);
       if (!retryable || attempt === retry.attempts) {
         throw new OfficialSourceError(
           `Official source request failed with status ${response.status}`,
@@ -102,6 +107,8 @@ export async function retryingFetch(
           { cause: error },
         );
       }
+    } finally {
+      clearTimeout(timeout);
     }
 
     const backoffMs = retry.baseDelayMs * 2 ** (attempt - 1);

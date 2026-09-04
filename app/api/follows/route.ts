@@ -4,6 +4,7 @@ import { currentUser } from "#/auth/current-user";
 import { UserRepository } from "#/auth/user-repository";
 import { FollowRepository } from "#/follows/follow-repository";
 import { db } from "#/server/db/client";
+import { sameOrigin } from "#/server/http/request-origin";
 
 const reference = z.object({
   kind: z.enum(["bill", "lawmaker"]),
@@ -18,11 +19,6 @@ const command = z.discriminatedUnion("action", [
 
 const users = new UserRepository(db);
 const follows = new FollowRepository(db);
-
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
-}
 
 export async function GET(request: Request) {
   const user = await currentUser(request, users);

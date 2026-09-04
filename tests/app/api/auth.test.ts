@@ -74,6 +74,34 @@ describe("auth HTTP handlers", () => {
     expect(repository.findByEmail).not.toHaveBeenCalled();
   });
 
+  it("accepts the browser origin when the framework uses a different internal hostname", async () => {
+    const repository = {
+      findByEmail: vi.fn().mockResolvedValue({
+        id: "user-1",
+        email: "pessoa@example.com",
+        passwordHash: await hashPassword("uma senha bastante segura"),
+      }),
+      createSession: vi.fn().mockResolvedValue({ token: "opaque-token", expiresAt: new Date() }),
+    };
+    const request = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: {
+        host: "127.0.0.1:3000",
+        origin: "http://127.0.0.1:3000",
+      },
+      body: new URLSearchParams({
+        email: "pessoa@example.com",
+        password: "uma senha bastante segura",
+      }),
+    });
+
+    const response = await createLoginHandler(repository)(request);
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("http://127.0.0.1:3000/seguindo");
+    expect(repository.createSession).toHaveBeenCalledWith("user-1");
+  });
+
   it("revokes the current cookie on logout", async () => {
     const repository = { revokeSession: vi.fn().mockResolvedValue(undefined) };
     const request = new Request("http://localhost/api/auth/logout", {

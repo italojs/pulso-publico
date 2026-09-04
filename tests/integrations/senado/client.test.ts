@@ -21,7 +21,10 @@ describe("SenadoAdapter", () => {
       now: () => new Date("2026-09-03T18:00:00.000Z"),
       fetcher: async (url) => {
         requestedUrls.push(url);
-        return jsonResponse(processesFixture);
+        return jsonResponse(processesFixture.map((item) => ({
+          ...item,
+          dataUltimaAtualizacao: "2026-09-03T14:58:00.000",
+        })));
       },
     });
 
@@ -33,6 +36,20 @@ describe("SenadoAdapter", () => {
     expect(requestedUrls[0]?.searchParams.get("numdias")).toBe("1");
     expect(page.items[0]?.externalId).toBe("8972241");
     expect(page.nextCursor).toBeNull();
+  });
+
+  it("does not return stale records from the recent-update endpoint", async () => {
+    const adapter = new SenadoAdapter({
+      baseUrl: "https://senado.test/dadosabertos",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async () => jsonResponse(processesFixture),
+    });
+
+    const page = await adapter.listBillsChangedSince(
+      new Date("2026-09-03T17:55:00.000Z"),
+    );
+
+    expect(page.items).toEqual([]);
   });
 
   it("bounds an initial history load to calendar-month windows", async () => {

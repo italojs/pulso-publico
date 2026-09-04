@@ -128,7 +128,13 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
     const checkedAt = this.now();
     let items: Bill[];
     try {
-      items = envelope.dados.map((raw) => mapCamaraBill(raw, checkedAt));
+      items = envelope.dados
+        .map((raw) => mapCamaraBill(raw, checkedAt))
+        .filter((bill) => {
+          if (!bill.presentedAt) return true;
+          const presentedAt = new Date(bill.presentedAt).getTime();
+          return presentedAt >= since.getTime() && presentedAt <= effectiveUntil.getTime();
+        });
     } catch (error) {
       throw this.contractError(url, error);
     }
