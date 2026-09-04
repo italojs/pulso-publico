@@ -53,6 +53,13 @@ function selectedValues<T>(canonical: T[] | undefined, legacy?: T): T[] {
 
 function brazilianDateBoundary(value: string | undefined, nextDay: boolean): SQL | undefined {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  const calendarDate = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day ?? 0));
+  if (
+    calendarDate.getUTCFullYear() !== year
+    || calendarDate.getUTCMonth() !== (month ?? 0) - 1
+    || calendarDate.getUTCDate() !== day
+  ) return undefined;
   return nextDay
     ? sql`((${value}::date + 1) AT TIME ZONE 'America/Sao_Paulo')`
     : sql`(${value}::date AT TIME ZONE 'America/Sao_Paulo')`;

@@ -398,6 +398,16 @@ describe("public legislative queries", () => {
     expect(activity.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
   });
 
+  it("ignores impossible calendar dates in list and count queries", async () => {
+    const [result, total] = await Promise.all([
+      listPublicBills(testDb, { presentedStart: "2026-02-30" }),
+      countPublicBills(testDb, { activityEnd: "2026-99-99" }),
+    ]);
+
+    expect(result.total).toBe(3);
+    expect(total).toBe(3);
+  });
+
   it("keeps missing official activity null and ignores the internal update timestamp", async () => {
     await testDb
       .update(bills)
@@ -588,5 +598,14 @@ describe("public legislative queries", () => {
       { value: "SP", label: "SP" },
       { value: "nao_informada", label: "Não informada" },
     ]);
+  });
+
+  it("does not offer non-nominal when the dataset only has nominal and secret votes", async () => {
+    await testDb.delete(voteEvents).where(eq(voteEvents.externalId, "vote-501-2"));
+
+    const options = await listPublicFilterOptions(testDb);
+
+    expect(options.voteKinds).toContainEqual({ value: "secret", label: "Secreta" });
+    expect(options.voteKinds).not.toContainEqual({ value: "non_nominal", label: "Não nominal" });
   });
 });
