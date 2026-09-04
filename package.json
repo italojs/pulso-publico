@@ -20,7 +20,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "sync": "node scripts/sync.ts",
-    "reconcile": "node scripts/reconcile.ts"
+    "reconcile": "node scripts/reconcile.ts",
+    "summaries": "node scripts/generate-summaries.ts"
   },
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",

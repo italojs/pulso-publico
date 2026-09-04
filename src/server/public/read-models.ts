@@ -25,6 +25,8 @@ export interface PublicBillCard {
   latestActivityAt: string;
   topics: string[];
   authors: PublicAuthor[];
+  friendlyTitle?: string | null;
+  shortDescription?: string | null;
 }
 
 export interface PublicBillPage {

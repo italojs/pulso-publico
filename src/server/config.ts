@@ -7,6 +7,9 @@ const environmentSchema = z.object({
   HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   HTTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
   INITIAL_HISTORY_MONTHS: z.coerce.number().int().min(1).max(120).default(36),
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_MODEL: z.string().min(1).optional(),
+  OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
 });
 
 export function parseEnv(input: Readonly<Record<string, string | undefined>>) {

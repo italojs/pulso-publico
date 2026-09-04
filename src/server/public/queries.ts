@@ -4,6 +4,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type { LegislativeSourceName } from "#/domain/legislative";
 import {
+  aiSummaries,
   billAuthors,
   bills,
   billTopics,
@@ -100,7 +101,7 @@ async function enrichBillRows(
   const billIds = rows.map((row) => row.id);
   if (billIds.length === 0) return [];
 
-  const [topicRows, authorRows] = await Promise.all([
+  const [topicRows, authorRows, summaryRows] = await Promise.all([
     database
       .select({ billId: billTopics.billId, label: billTopics.label })
       .from(billTopics)
@@ -121,10 +122,19 @@ async function enrichBillRows(
       .leftJoin(lawmakers, eq(billAuthors.lawmakerId, lawmakers.id))
       .where(inArray(billAuthors.billId, billIds))
       .orderBy(desc(billAuthors.isPrimary), asc(billAuthors.officialName)),
+    database
+      .select({
+        billId: aiSummaries.billId,
+        friendlyTitle: aiSummaries.friendlyTitle,
+        shortDescription: aiSummaries.shortDescription,
+      })
+      .from(aiSummaries)
+      .where(inArray(aiSummaries.billId, billIds)),
   ]);
 
   const topicsByBill = Map.groupBy(topicRows, (item) => item.billId);
   const authorsByBill = Map.groupBy(authorRows, (item) => item.billId);
+  const summariesByBill = new Map(summaryRows.map((item) => [item.billId, item]));
 
   return rows.map((row) => ({
     source: row.source,
@@ -151,6 +161,8 @@ async function enrichBillRows(
         officialUrl: item.officialUrl,
       }),
     ),
+    friendlyTitle: summariesByBill.get(row.id)?.friendlyTitle ?? null,
+    shortDescription: summariesByBill.get(row.id)?.shortDescription ?? null,
   }));
 }
 

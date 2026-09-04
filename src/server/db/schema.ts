@@ -215,6 +215,27 @@ export const sourceHealth = pgTable("source_health", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const aiSummaries = pgTable(
+  "ai_summaries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => bills.id, { onDelete: "cascade" }),
+    friendlyTitle: text("friendly_title").notNull(),
+    shortDescription: text("short_description").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("ai_summaries_bill_id_uq").on(table.billId),
+    index("ai_summaries_fingerprint_idx").on(table.sourceFingerprint),
+  ],
+);
+
 export type NewBill = typeof bills.$inferInsert;
 export type NewLawmaker = typeof lawmakers.$inferInsert;
 export type NewBillAuthor = typeof billAuthors.$inferInsert;
@@ -224,3 +245,4 @@ export type NewVoteEvent = typeof voteEvents.$inferInsert;
 export type NewIndividualVote = typeof individualVotes.$inferInsert;
 export type NewSyncCheckpoint = typeof syncCheckpoints.$inferInsert;
 export type NewSourceHealth = typeof sourceHealth.$inferInsert;
+export type NewAiSummary = typeof aiSummaries.$inferInsert;
