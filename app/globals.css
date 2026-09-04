@@ -376,6 +376,23 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .followingList h2 a { text-decoration: none; }
 .followingList p { margin: 0; color: var(--ink-soft); font-size: 14px; }
 .alertOn { width: fit-content; padding: 3px 7px; border-radius: 999px; color: var(--green-dark); background: #dceee8; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+.alertsToolbar { display: flex; padding: 20px 0; align-items: center; justify-content: space-between; gap: 18px; }
+.alertsToolbar p { margin: 0; color: var(--ink-soft); }
+.alertsToolbar p strong { color: var(--ink); font-family: var(--utility); }
+.alertsToolbar button, .alertCard__actions button { padding: 7px 10px; border: 1px solid #aebcb7; border-radius: 8px; color: var(--green-dark); background: white; cursor: pointer; font-weight: 700; }
+.alertsList { display: grid; gap: 12px; }
+.alertCard { position: relative; display: grid; padding: 22px 22px 22px 34px; border: 1px solid #afc9c0; border-radius: var(--radius-md); background: white; box-shadow: 0 8px 24px rgb(23 36 31 / 5%); }
+.alertCard--read { border-color: var(--line); box-shadow: none; opacity: .78; }
+.alertCard__marker { position: absolute; top: 28px; left: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.alertCard--read .alertCard__marker { background: #a9b5b0; }
+.alertCard__meta { display: flex; align-items: center; gap: 12px; color: var(--ink-soft); font-family: var(--utility); font-size: 11px; }
+.alertCard__meta time { margin-left: auto; }
+.alertCard h2 { margin: 10px 0 5px; font-family: var(--display); font-size: 30px; line-height: 1; }
+.alertCard h2 a { text-decoration: none; }
+.alertCard p { margin: 0; }
+.alertCard__actions { display: flex; margin-top: 16px; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
+.alertCard__actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--green-dark); font-weight: 700; }
+.alertCard__actions svg { width: 15px; height: 15px; }
 
 @media (max-width: 720px) {
   body { font-size: 16px; }
@@ -430,6 +447,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .followingAccount { align-items: flex-start; flex-direction: column; }
   .followingAccount form { margin-left: 0; }
   .followingList article { align-items: flex-start; flex-direction: column; }
+  .alertsToolbar, .alertCard__meta, .alertCard__actions { align-items: flex-start; flex-direction: column; }
+  .alertCard__meta time { margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

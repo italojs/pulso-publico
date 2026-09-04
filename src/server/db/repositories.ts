@@ -1,6 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
+import { AlertRepository } from "#/alerts/alert-repository";
+import { detectAlertCandidates } from "#/alerts/detect-events";
+
 import type {
   Bill,
   BillAuthor,
@@ -90,6 +93,31 @@ export class LegislativeRepository {
 
   async upsertBillGraph(graph: BillGraph): Promise<void> {
     await this.database.transaction(async (transaction) => {
+      const [previousBill] = await transaction
+        .select({ id: bills.id, statusLabel: bills.statusLabel })
+        .from(bills)
+        .where(and(eq(bills.source, graph.bill.source), eq(bills.externalId, graph.bill.externalId)))
+        .limit(1);
+      const movementIds = graph.movements.map((item) => item.externalId);
+      const voteIds = graph.voteEvents.map((item) => item.externalId);
+      const [knownMovementRows, knownVoteRows] = previousBill
+        ? await Promise.all([
+            movementIds.length > 0
+              ? transaction
+                  .select({ externalId: movements.externalId })
+                  .from(movements)
+                  .where(and(eq(movements.source, graph.bill.source), inArray(movements.externalId, movementIds)))
+              : Promise.resolve([]),
+            voteIds.length > 0
+              ? transaction
+                  .select({ externalId: voteEvents.externalId })
+                  .from(voteEvents)
+                  .where(and(eq(voteEvents.source, graph.bill.source), inArray(voteEvents.externalId, voteIds)))
+              : Promise.resolve([]),
+          ])
+        : [[], []];
+      const knownMovementIds = new Set(knownMovementRows.map((item) => item.externalId));
+      const knownVoteIds = new Set(knownVoteRows.map((item) => item.externalId));
       const values = billValues(graph.bill);
       const [storedBill] = await transaction
         .insert(bills)
@@ -268,6 +296,20 @@ export class LegislativeRepository {
             target: [individualVotes.source, individualVotes.externalId],
             set: { ...individualVoteValues, updatedAt: new Date() },
           });
+      }
+      if (previousBill) {
+        const candidates = detectAlertCandidates({
+          source: graph.bill.source,
+          billExternalId: graph.bill.externalId,
+          officialCode: graph.bill.officialCode,
+          priorStatusLabel: previousBill.statusLabel,
+          currentStatusLabel: graph.bill.statusLabel,
+          checkedAt: graph.bill.checkedAt,
+          officialUrl: graph.bill.officialUrl,
+          movements: graph.movements.filter((item) => !knownMovementIds.has(item.externalId)),
+          voteEvents: graph.voteEvents.filter((item) => !knownVoteIds.has(item.externalId)),
+        });
+        await new AlertRepository(transaction as unknown as Database).publishForBill(storedBill.id, candidates);
       }
     });
   }
