@@ -90,14 +90,7 @@ END;--> statement-breakpoint
 UPDATE "vote_events"
 SET "result_category" = CASE
   WHEN "result" IS NULL OR btrim("result") = '' THEN 'unavailable'::"vote_result_category"
-  WHEN lower("result") LIKE '%não aprovado%'
-    OR lower("result") LIKE '%nao aprovado%'
-    OR lower("result") LIKE '%não aprovada%'
-    OR lower("result") LIKE '%nao aprovada%'
-    OR lower("result") LIKE '%não rejeitado%'
-    OR lower("result") LIKE '%nao rejeitado%'
-    OR lower("result") LIKE '%não rejeitada%'
-    OR lower("result") LIKE '%nao rejeitada%'
+  WHEN lower("result") ~ '(^|[[:space:]])(não|nao)[[:space:]]+((foi|foram)[[:space:]]+)?(aprovad[oa]s?|rejeitad[oa]s?)([[:space:]]|$|[.,;:])'
     OR (
       (lower("result") LIKE '%aprovado%' OR lower("result") LIKE '%aprovada%')
       AND (lower("result") LIKE '%rejeitado%' OR lower("result") LIKE '%rejeitada%')
