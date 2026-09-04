@@ -5,17 +5,21 @@ import {
   billAuthors,
   bills,
   billTopics,
+  followedBills,
   individualVotes,
   lawmakers,
   movements,
+  users,
   voteEvents,
 } from "#/server/db/schema";
 import {
+  countPublicBills,
   getPublicBill,
   getPublicLawmaker,
   listPublicBills,
   listPublicFilterOptions,
 } from "#/server/public/queries";
+import type { PublicBillFilters } from "#/server/public/read-models";
 import {
   migrateTestDatabase,
   testDb,
@@ -59,13 +63,16 @@ async function seedPublicData() {
     .returning();
   if (!deputy || !senator) throw new Error("lawmakers not seeded");
 
-  const [workBill, healthBill] = await testDb
+  const [workBill, healthBill, noVoteBill] = await testDb
     .insert(bills)
     .values([
       {
         source: "camara",
         externalId: "501",
         officialCode: "PEC 8/2025",
+        proposalType: "PEC",
+        proposalNumber: 8,
+        proposalYear: 2025,
         congressionalKey: "PEC-8-2025",
         officialTitle: "Proposta de Emenda à Constituição nº 8, de 2025",
         officialSummary: "Reduz a jornada semanal e altera a escala de trabalho.",
@@ -73,6 +80,7 @@ async function seedPublicData() {
         currentHouse: "camara",
         statusCode: "comissao",
         statusLabel: "Aguardando parecer na comissão",
+        simplifiedStage: "committees",
         officialUrl: "https://www.camara.leg.br/propostas-legislativas/501",
         presentedAt: new Date("2025-02-01T12:00:00.000Z"),
         checkedAt,
@@ -81,20 +89,43 @@ async function seedPublicData() {
         source: "senado",
         externalId: "601",
         officialCode: "PL 12/2024",
+        proposalType: "PL",
+        proposalNumber: 12,
+        proposalYear: 2024,
         congressionalKey: "PL-12-2024",
         officialTitle: "Projeto de Lei nº 12, de 2024",
         officialSummary: "Dispõe sobre atendimento básico de saúde.",
-        originHouse: "senado",
+        originHouse: "camara",
         currentHouse: "senado",
         statusCode: "plenario",
         statusLabel: "Pronto para deliberação do Plenário",
+        simplifiedStage: "ready_for_vote",
         officialUrl: "https://www25.senado.leg.br/web/atividade/materias/-/materia/601",
         presentedAt: new Date("2024-05-10T12:00:00.000Z"),
         checkedAt,
       },
+      {
+        source: "camara",
+        externalId: "701",
+        officialCode: "Projeto sem votação",
+        proposalType: null,
+        proposalNumber: null,
+        proposalYear: null,
+        congressionalKey: null,
+        officialTitle: "Projeto sem identidade estruturada",
+        officialSummary: "Cria ações de apoio à educação pública.",
+        originHouse: "senado",
+        currentHouse: null,
+        statusCode: "apresentada",
+        statusLabel: "Apresentada sem classificação",
+        simplifiedStage: "unclassified",
+        officialUrl: "https://www.camara.leg.br/propostas-legislativas/701",
+        presentedAt: new Date("2023-01-15T12:00:00.000Z"),
+        checkedAt,
+      },
     ])
     .returning();
-  if (!workBill || !healthBill) throw new Error("bills not seeded");
+  if (!workBill || !healthBill || !noVoteBill) throw new Error("bills not seeded");
 
   await testDb.insert(billAuthors).values([
     {
@@ -121,6 +152,18 @@ async function seedPublicData() {
       officialUrl: senator.officialUrl,
       checkedAt,
     },
+    {
+      source: "camara",
+      externalId: "author-701",
+      billId: noVoteBill.id,
+      lawmakerId: null,
+      officialName: "Instituto Educação",
+      party: null,
+      authorKind: "Entidade",
+      isPrimary: true,
+      officialUrl: noVoteBill.officialUrl,
+      checkedAt,
+    },
   ]);
   await testDb.insert(billTopics).values([
     {
@@ -139,6 +182,15 @@ async function seedPublicData() {
       code: "50",
       label: "Saúde",
       officialUrl: healthBill.officialUrl,
+      checkedAt,
+    },
+    {
+      source: "camara",
+      externalId: "topic-701",
+      billId: noVoteBill.id,
+      code: "60",
+      label: "Educação",
+      officialUrl: noVoteBill.officialUrl,
       checkedAt,
     },
   ]);
@@ -173,35 +225,92 @@ async function seedPublicData() {
       officialUrl: healthBill.officialUrl,
       checkedAt,
     },
-  ]);
-  const [vote] = await testDb
-    .insert(voteEvents)
-    .values({
-      source: "camara",
-      externalId: "vote-501",
-      billId: workBill.id,
-      occurredAt: new Date("2026-08-31T18:00:00.000Z"),
-      house: "camara",
-      description: "Votação do parecer",
-      result: "Aprovado",
-      isNominal: true,
-      isSecret: false,
-      officialUrl: workBill.officialUrl,
+    {
+      source: "senado",
+      externalId: "move-601-2",
+      billId: healthBill.id,
+      occurredAt: new Date("2026-08-29T10:00:00.000Z"),
+      sequence: 2,
+      house: "senado",
+      bodyCode: "PLEN",
+      bodyName: "Plenário",
+      statusCode: "plenario",
+      statusLabel: "Em deliberação",
+      officialDescription: "Aberta a deliberação do projeto.",
+      officialUrl: healthBill.officialUrl,
       checkedAt,
-    })
+    },
+  ]);
+  const [workVote, secondWorkVote, healthVote] = await testDb
+    .insert(voteEvents)
+    .values([
+      {
+        source: "camara",
+        externalId: "vote-501",
+        billId: workBill.id,
+        occurredAt: new Date("2026-08-31T18:00:00.000Z"),
+        house: "senado",
+        description: "Votação secreta do parecer",
+        result: "Rejeitado",
+        resultCategory: "rejected",
+        isNominal: false,
+        isSecret: true,
+        officialUrl: workBill.officialUrl,
+        checkedAt,
+      },
+      {
+        source: "camara",
+        externalId: "vote-501-2",
+        billId: workBill.id,
+        occurredAt: new Date("2026-08-30T18:00:00.000Z"),
+        house: "senado",
+        description: "Segunda votação secreta",
+        result: null,
+        resultCategory: "unavailable",
+        isNominal: false,
+        isSecret: true,
+        officialUrl: workBill.officialUrl,
+        checkedAt,
+      },
+      {
+        source: "senado",
+        externalId: "vote-601",
+        billId: healthBill.id,
+        occurredAt: new Date("2026-08-30T12:00:00.000Z"),
+        house: "camara",
+        description: "Votação nominal do projeto",
+        result: "Aprovado",
+        resultCategory: "approved",
+        isNominal: true,
+        isSecret: false,
+        officialUrl: healthBill.officialUrl,
+        checkedAt,
+      },
+    ])
     .returning();
-  if (!vote) throw new Error("vote not seeded");
+  if (!workVote || !secondWorkVote || !healthVote) throw new Error("votes not seeded");
   await testDb.insert(individualVotes).values({
-    source: "camara",
-    externalId: "individual-501-100",
-    voteEventId: vote.id,
-    lawmakerId: deputy.id,
+    source: "senado",
+    externalId: "individual-601-200",
+    voteEventId: healthVote.id,
+    lawmakerId: senator.id,
     choice: "sim",
     rawChoice: "Sim",
-    officialUrl: workBill.officialUrl,
+    officialUrl: healthBill.officialUrl,
     checkedAt,
   });
+
+  const [user] = await testDb
+    .insert(users)
+    .values({ email: "leitora@example.com", passwordHash: "hash" })
+    .returning();
+  if (!user) throw new Error("user not seeded");
+  await testDb.insert(followedBills).values({ userId: user.id, billId: healthBill.id });
+
+  return { userId: user.id };
 }
+
+let seeded: Awaited<ReturnType<typeof seedPublicData>>;
 
 beforeAll(async () => {
   await migrateTestDatabase();
@@ -209,7 +318,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateLegislativeTables();
-  await seedPublicData();
+  seeded = await seedPublicData();
 });
 
 afterAll(async () => {
@@ -220,10 +329,11 @@ describe("public legislative queries", () => {
   it("lists bills ordered by latest official activity", async () => {
     const result = await listPublicBills(testDb, {});
 
-    expect(result.total).toBe(2);
+    expect(result.total).toBe(3);
     expect(result.items.map((item) => item.officialCode)).toEqual([
       "PEC 8/2025",
       "PL 12/2024",
+      "Projeto sem votação",
     ]);
     expect(result.items[0]).toMatchObject({
       source: "camara",
@@ -231,6 +341,102 @@ describe("public legislative queries", () => {
       authors: [{ name: "Ana Cidadã", party: "ABC" }],
       latestActivityAt: "2026-08-31T18:00:00.000Z",
     });
+  });
+
+  it.each([
+    [{ proposalTypes: ["PEC"] }, ["PEC 8/2025"]],
+    [{ proposalNumber: 12, yearFrom: 2024, yearTo: 2024 }, ["PL 12/2024"]],
+    [{ sources: ["senado"] }, ["PL 12/2024"]],
+    [{ originHouses: ["camara"], currentHouses: ["senado"] }, ["PL 12/2024"]],
+    [{ stages: ["committees"] }, ["PEC 8/2025"]],
+    [{ statuses: ["Pronto para deliberação do Plenário"] }, ["PL 12/2024"]],
+    [{ votePresence: "without" }, ["Projeto sem votação"]],
+    [{ voteKinds: ["nominal"], individualVoteAvailability: "available" }, ["PL 12/2024"]],
+    [{ voteKinds: ["secret"] }, ["PEC 8/2025"]],
+    [{ voteKinds: ["non_nominal"] }, ["PEC 8/2025"]],
+    [{ individualVoteAvailability: "unavailable" }, ["PEC 8/2025"]],
+    [{ voteResults: ["approved"], voteHouses: ["camara"] }, ["PL 12/2024"]],
+    [{ topics: ["Educação"] }, ["Projeto sem votação"]],
+    [{ authors: ["Ana Cidadã"] }, ["PEC 8/2025"]],
+    [{ parties: ["XYZ"] }, ["PL 12/2024"]],
+    [{ regions: ["SP"] }, ["PL 12/2024"]],
+    [{ regions: ["nao_informada"] }, ["Projeto sem votação"]],
+  ] satisfies Array<[PublicBillFilters, string[]]>)("filters %#", async (filters, expected) => {
+    const result = await listPublicBills(testDb, filters);
+    expect(result.items.map((item) => item.officialCode)).toEqual(expected);
+  });
+
+  it("combines selected values with OR and different facets with AND", async () => {
+    const typeOr = await listPublicBills(testDb, { proposalTypes: ["PEC", "PL"] });
+    const topicOr = await listPublicBills(testDb, { topics: ["Educação", "Saúde"] });
+    const crossFacetAnd = await listPublicBills(testDb, {
+      proposalTypes: ["PL"],
+      topics: ["Saúde"],
+      presentedStart: "2024-05-10",
+      presentedEnd: "2024-05-10",
+    });
+
+    expect(typeOr.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025", "PL 12/2024"]);
+    expect(topicOr.items.map((item) => item.officialCode)).toEqual(["PL 12/2024", "Projeto sem votação"]);
+    expect(crossFacetAnd.items.map((item) => item.officialCode)).toEqual(["PL 12/2024"]);
+  });
+
+  it("treats presentation and activity date bounds as inclusive calendar days", async () => {
+    const presented = await listPublicBills(testDb, {
+      presentedStart: "2025-02-01",
+      presentedEnd: "2025-02-01",
+    });
+    const activity = await listPublicBills(testDb, {
+      activityStart: "2026-08-31",
+      activityEnd: "2026-08-31",
+    });
+
+    expect(presented.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
+    expect(activity.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
+  });
+
+  it("selects projects whose current house is not informed", async () => {
+    const result = await listPublicBills(testDb, { currentHouses: ["nao_informada"] });
+
+    expect(result.items.map((item) => item.officialCode)).toEqual(["Projeto sem votação"]);
+  });
+
+  it("resolves followed projects from authenticated and anonymous scopes", async () => {
+    const authenticated = await listPublicBills(testDb, { followedOnly: true }, { userId: seeded.userId });
+    const anonymous = await listPublicBills(testDb, { followedOnly: true }, {
+      anonymousBillKeys: [
+        { source: "camara", externalId: "501" },
+        { source: "senado", externalId: "missing" },
+      ],
+    });
+    const empty = await listPublicBills(testDb, { followedOnly: true }, { anonymousBillKeys: [] });
+
+    expect(authenticated.items.map((item) => item.officialCode)).toEqual(["PL 12/2024"]);
+    expect(anonymous.items.map((item) => item.officialCode)).toEqual(["PEC 8/2025"]);
+    expect(empty).toMatchObject({ items: [], total: 0 });
+  });
+
+  it.each([
+    ["updated", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
+    ["presented_desc", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
+    ["presented_asc", ["Projeto sem votação", "PL 12/2024", "PEC 8/2025"]],
+    ["most_movements", ["PL 12/2024", "PEC 8/2025", "Projeto sem votação"]],
+    ["most_votes", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
+  ] as const)("orders by %s", async (order, expected) => {
+    const result = await listPublicBills(testDb, { order });
+
+    expect(result.items.map((item) => item.officialCode)).toEqual(expected);
+  });
+
+  it("keeps countPublicBills in parity with the paginated list", async () => {
+    const filters = { proposalTypes: ["PEC", "PL"], topics: ["Saúde", "Trabalho e Emprego"], pageSize: 1 };
+    const [count, result] = await Promise.all([
+      countPublicBills(testDb, filters),
+      listPublicBills(testDb, filters),
+    ]);
+
+    expect(count).toBe(2);
+    expect(result).toMatchObject({ total: count, pageSize: 1, totalPages: 2 });
   });
 
   it.each(["presented_desc", "presented"] as const)(
@@ -246,6 +452,7 @@ describe("public legislative queries", () => {
       expect(result.items.map((item) => item.officialCode)).toEqual([
         "PL 12/2024",
         "PEC 8/2025",
+        "Projeto sem votação",
       ]);
     },
   );
@@ -269,7 +476,7 @@ describe("public legislative queries", () => {
 
     expect(result.page).toBe(2);
     expect(result.pageSize).toBe(1);
-    expect(result.totalPages).toBe(2);
+    expect(result.totalPages).toBe(3);
     expect(result.items[0]?.officialCode).toBe("PL 12/2024");
   });
 
@@ -279,22 +486,19 @@ describe("public legislative queries", () => {
     expect(project).not.toBeNull();
     expect(project?.authors[0]?.lawmakerExternalId).toBe("100");
     expect(project?.timeline[0]?.description).toBe("Designado relator na comissão.");
-    expect(project?.voteEvents[0]?.individualVotes[0]).toMatchObject({
-      lawmakerName: "Ana Cidadã",
-      choice: "sim",
-    });
+    expect(project?.voteEvents[0]?.individualVotes).toEqual([]);
   });
 
   it("loads a neutral lawmaker profile with authored bills and votes", async () => {
-    const profile = await getPublicLawmaker(testDb, "camara", "100");
+    const profile = await getPublicLawmaker(testDb, "senado", "200");
 
     expect(profile).not.toBeNull();
-    expect(profile?.lawmaker).toMatchObject({ name: "Ana Cidadã", party: "ABC" });
-    expect(profile?.authoredBills[0]?.officialCode).toBe("PEC 8/2025");
+    expect(profile?.lawmaker).toMatchObject({ name: "Bruno Federal", party: "XYZ" });
+    expect(profile?.authoredBills[0]?.officialCode).toBe("PL 12/2024");
     expect(profile?.votes[0]).toMatchObject({
       choice: "sim",
       result: "Aprovado",
-      billExternalId: "501",
+      billExternalId: "601",
     });
   });
 
@@ -302,8 +506,43 @@ describe("public legislative queries", () => {
     const options = await listPublicFilterOptions(testDb);
 
     expect(options.sources).toEqual(["camara", "senado"]);
-    expect(options.topics).toEqual(["Saúde", "Trabalho e Emprego"]);
+    expect(options.proposalTypes).toEqual(["PEC", "PL"]);
+    expect(options.years).toEqual([2024, 2025]);
+    expect(options.originHouses).toEqual([
+      { value: "camara", label: "Câmara dos Deputados" },
+      { value: "senado", label: "Senado Federal" },
+    ]);
+    expect(options.currentHouses).toEqual([
+      { value: "camara", label: "Câmara dos Deputados" },
+      { value: "senado", label: "Senado Federal" },
+      { value: "nao_informada", label: "Não informada" },
+    ]);
+    expect(options.stages).toEqual([
+      { value: "committees", label: "Em comissões" },
+      { value: "ready_for_vote", label: "Pronto para votação" },
+      { value: "unclassified", label: "Fase não classificada" },
+    ]);
+    expect(options.voteKinds).toEqual([
+      { value: "nominal", label: "Nominal" },
+      { value: "secret", label: "Secreta" },
+      { value: "non_nominal", label: "Não nominal" },
+    ]);
+    expect(options.voteResults).toEqual([
+      { value: "approved", label: "Aprovada" },
+      { value: "rejected", label: "Rejeitada" },
+      { value: "unavailable", label: "Resultado não informado" },
+    ]);
+    expect(options.voteHouses).toEqual([
+      { value: "camara", label: "Câmara dos Deputados" },
+      { value: "senado", label: "Senado Federal" },
+    ]);
+    expect(options.topics).toEqual(["Educação", "Saúde", "Trabalho e Emprego"]);
     expect(options.parties).toEqual(["ABC", "XYZ"]);
-    expect(options.authors).toEqual(["Ana Cidadã", "Bruno Federal"]);
+    expect(options.authors).toEqual(["Ana Cidadã", "Bruno Federal", "Instituto Educação"]);
+    expect(options.regions).toEqual([
+      { value: "PE", label: "PE" },
+      { value: "SP", label: "SP" },
+      { value: "nao_informada", label: "Não informada" },
+    ]);
   });
 });

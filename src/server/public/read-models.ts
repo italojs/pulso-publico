@@ -109,12 +109,26 @@ export interface PublicLawmakerDetail {
   votes: PublicLawmakerVote[];
 }
 
+export interface PublicFilterOption<T extends string = string> {
+  value: T;
+  label: string;
+}
+
 export interface PublicFilterOptions {
   sources: LegislativeSourceName[];
+  proposalTypes: string[];
+  years: number[];
+  originHouses: PublicFilterOption<Exclude<PublicHouse, "nao_informada">>[];
+  currentHouses: PublicFilterOption<PublicHouse>[];
+  stages: PublicFilterOption<PublicBillStage>[];
   statuses: string[];
+  voteKinds: PublicFilterOption<PublicVoteKind>[];
+  voteResults: PublicFilterOption<PublicVoteResult>[];
+  voteHouses: PublicFilterOption<Exclude<PublicHouse, "nao_informada">>[];
   topics: string[];
   parties: string[];
   authors: string[];
+  regions: PublicFilterOption[];
 }
 
 export type PublicHouse = "camara" | "senado" | "congresso" | "nao_informada";

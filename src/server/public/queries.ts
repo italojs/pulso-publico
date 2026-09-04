@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
@@ -8,6 +8,7 @@ import {
   billAuthors,
   bills,
   billTopics,
+  followedBills,
   individualVotes,
   lawmakers,
   movements,
@@ -19,12 +20,22 @@ import type {
   PublicBillCard,
   PublicBillDetail,
   PublicBillFilters,
+  PublicBillOrder,
   PublicBillPage,
+  PublicBillStage,
+  PublicHouse,
   PublicFilterOptions,
   PublicLawmakerDetail,
+  PublicVoteKind,
+  PublicVoteResult,
 } from "#/server/public/read-models";
 
 type Database = PostgresJsDatabase<typeof schema>;
+
+export interface PublicBillScope {
+  userId?: string;
+  anonymousBillKeys?: Array<{ source: LegislativeSourceName; externalId: string }>;
+}
 
 function iso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -35,7 +46,21 @@ function clampInteger(value: number | undefined, fallback: number, min: number, 
   return Math.min(max, Math.max(min, value as number));
 }
 
-function billConditions(filters: PublicBillFilters): SQL[] {
+function selectedValues<T>(canonical: T[] | undefined, legacy?: T): T[] {
+  if (canonical && canonical.length > 0) return canonical;
+  return legacy === undefined ? [] : [legacy];
+}
+
+function dateBoundary(value: string | undefined, endOfDay: boolean): Date | undefined {
+  if (!value) return undefined;
+  const candidate = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`
+    : value;
+  const date = new Date(candidate);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {}): SQL[] {
   const conditions: SQL[] = [];
   const query = filters.query?.trim();
   if (query) {
@@ -48,37 +73,149 @@ function billConditions(filters: PublicBillFilters): SQL[] {
       ) as SQL,
     );
   }
-  if (filters.source) conditions.push(eq(bills.source, filters.source));
-  if (filters.status) conditions.push(eq(bills.statusLabel, filters.status));
-  if (filters.topic) {
+  const proposalTypes = selectedValues(filters.proposalTypes, filters.proposalType);
+  if (proposalTypes.length > 0) conditions.push(inArray(bills.proposalType, proposalTypes));
+  if (filters.proposalNumber !== undefined) conditions.push(eq(bills.proposalNumber, filters.proposalNumber));
+  if (filters.yearFrom !== undefined) conditions.push(gte(bills.proposalYear, filters.yearFrom));
+  if (filters.yearTo !== undefined) conditions.push(lte(bills.proposalYear, filters.yearTo));
+
+  const sources = selectedValues(filters.sources, filters.source);
+  if (sources.length > 0) conditions.push(inArray(bills.source, sources));
+  if (filters.originHouses?.length) conditions.push(inArray(bills.originHouse, filters.originHouses));
+  if (filters.currentHouses?.length) {
+    const actualHouses = filters.currentHouses.filter(
+      (house): house is Exclude<PublicHouse, "nao_informada"> => house !== "nao_informada",
+    );
+    const houseConditions: SQL[] = [];
+    if (actualHouses.length > 0) houseConditions.push(inArray(bills.currentHouse, actualHouses));
+    if (filters.currentHouses.includes("nao_informada")) houseConditions.push(isNull(bills.currentHouse));
+    conditions.push(or(...houseConditions) as SQL);
+  }
+  if (filters.stages?.length) conditions.push(inArray(bills.simplifiedStage, filters.stages));
+  const statuses = selectedValues(filters.statuses, filters.status);
+  if (statuses.length > 0) conditions.push(inArray(bills.statusLabel, statuses));
+
+  const presentedStart = dateBoundary(filters.presentedStart, false);
+  const presentedEnd = dateBoundary(filters.presentedEnd, true);
+  const activityStart = dateBoundary(filters.activityStart, false);
+  const activityEnd = dateBoundary(filters.activityEnd, true);
+  if (presentedStart) conditions.push(gte(bills.presentedAt, presentedStart));
+  if (presentedEnd) conditions.push(lte(bills.presentedAt, presentedEnd));
+  if (activityStart) {
+    conditions.push(gte(latestActivityExpression, sql.param(activityStart, bills.presentedAt)));
+  }
+  if (activityEnd) {
+    conditions.push(lte(latestActivityExpression, sql.param(activityEnd, bills.presentedAt)));
+  }
+
+  const topics = selectedValues(filters.topics, filters.topic);
+  if (topics.length > 0) {
     conditions.push(sql`exists (
       select 1 from ${billTopics}
       where ${billTopics.billId} = ${bills.id}
-        and ${billTopics.label} = ${filters.topic}
+        and ${inArray(billTopics.label, topics)}
     )`);
   }
-  if (filters.party) {
+
+  const authors = selectedValues(filters.authors, filters.author);
+  const parties = selectedValues(filters.parties, filters.party);
+  const authorConditions: SQL[] = [];
+  if (authors.length > 0) authorConditions.push(inArray(billAuthors.officialName, authors));
+  if (parties.length > 0) authorConditions.push(inArray(billAuthors.party, parties));
+  if (filters.regions?.length) {
+    const regions = filters.regions.filter((region) => region !== "nao_informada");
+    const regionConditions: SQL[] = [];
+    if (regions.length > 0) regionConditions.push(inArray(lawmakers.region, regions));
+    if (filters.regions.includes("nao_informada")) {
+      regionConditions.push(isNull(billAuthors.lawmakerId));
+      regionConditions.push(isNull(lawmakers.region));
+    }
+    authorConditions.push(or(...regionConditions) as SQL);
+  }
+  if (authorConditions.length > 0) {
     conditions.push(sql`exists (
       select 1 from ${billAuthors}
+      left join ${lawmakers} on ${lawmakers.id} = ${billAuthors.lawmakerId}
       where ${billAuthors.billId} = ${bills.id}
-        and ${billAuthors.party} = ${filters.party}
+        and ${and(...authorConditions)}
     )`);
   }
-  if (filters.author) {
+
+  const hasVote = sql`exists (
+    select 1 from ${voteEvents}
+    where ${voteEvents.billId} = ${bills.id}
+  )`;
+  if (filters.votePresence === "with") conditions.push(hasVote);
+  if (filters.votePresence === "without") conditions.push(sql`not (${hasVote})`);
+
+  const voteConditions: SQL[] = [];
+  if (filters.voteKinds?.length) {
+    const kindConditions = filters.voteKinds.map((kind): SQL => {
+      if (kind === "nominal") return eq(voteEvents.isNominal, true);
+      if (kind === "secret") return eq(voteEvents.isSecret, true);
+      return eq(voteEvents.isNominal, false);
+    });
+    voteConditions.push(or(...kindConditions) as SQL);
+  }
+  if (filters.voteResults?.length) voteConditions.push(inArray(voteEvents.resultCategory, filters.voteResults));
+  if (filters.voteHouses?.length) voteConditions.push(inArray(voteEvents.house, filters.voteHouses));
+  if (filters.individualVoteAvailability) {
+    const hasIndividualVote = sql`exists (
+      select 1 from ${individualVotes}
+      where ${individualVotes.voteEventId} = ${voteEvents.id}
+    )`;
+    voteConditions.push(
+      filters.individualVoteAvailability === "available"
+        ? hasIndividualVote
+        : sql`not (${hasIndividualVote})`,
+    );
+  }
+  if (voteConditions.length > 0) {
     conditions.push(sql`exists (
-      select 1 from ${billAuthors}
-      where ${billAuthors.billId} = ${bills.id}
-        and ${billAuthors.officialName} = ${filters.author}
+      select 1 from ${voteEvents}
+      where ${voteEvents.billId} = ${bills.id}
+        and ${and(...voteConditions)}
     )`);
+  }
+
+  if (filters.followedOnly) {
+    const followConditions: SQL[] = [];
+    if (scope.userId) {
+      followConditions.push(sql`exists (
+        select 1 from ${followedBills}
+        where ${followedBills.billId} = ${bills.id}
+          and ${followedBills.userId} = ${scope.userId}
+      )`);
+    }
+    const anonymousKeys = scope.anonymousBillKeys ?? [];
+    if (anonymousKeys.length > 0) {
+      followConditions.push(or(...anonymousKeys.map((key) => and(
+        eq(bills.source, key.source),
+        eq(bills.externalId, key.externalId),
+      ) as SQL)) as SQL);
+    }
+    conditions.push(followConditions.length > 0 ? or(...followConditions) as SQL : sql`false`);
   }
   return conditions;
 }
 
-const latestActivity = sql<string>`greatest(
+const latestActivityExpression = sql<string>`greatest(
   coalesce((select max("movements"."occurred_at") from "movements" where "movements"."bill_id" = "bills"."id"), '-infinity'::timestamptz),
   coalesce((select max("vote_events"."occurred_at") from "vote_events" where "vote_events"."bill_id" = "bills"."id"), '-infinity'::timestamptz),
   coalesce(${bills.presentedAt}, ${bills.updatedAt})
-)`.as("latest_activity_at");
+)`;
+
+const latestActivity = latestActivityExpression.as("latest_activity_at");
+
+const movementCount = sql<number>`(
+  select count(*)::integer from "movements"
+  where "movements"."bill_id" = "bills"."id"
+)`.as("movement_count");
+
+const voteCount = sql<number>`(
+  select count(*)::integer from "vote_events"
+  where "vote_events"."bill_id" = "bills"."id"
+)`.as("vote_count");
 
 async function enrichBillRows(
   database: Database,
@@ -182,26 +319,53 @@ const billSelection = {
   latestActivityAt: latestActivity,
 };
 
+const billListSelection = {
+  ...billSelection,
+  movementCount,
+  voteCount,
+};
+
+function billOrdering(order: PublicBillOrder | undefined): SQL[] {
+  if (order === "presented_asc") return [asc(bills.presentedAt), asc(bills.id)];
+  if (order === "presented_desc" || order === "presented") {
+    return [desc(bills.presentedAt), asc(bills.id)];
+  }
+  if (order === "most_movements") return [desc(movementCount), asc(bills.id)];
+  if (order === "most_votes") return [desc(voteCount), asc(bills.id)];
+  return [desc(latestActivity), asc(bills.id)];
+}
+
+export async function countPublicBills(
+  database: Database,
+  filters: PublicBillFilters,
+  scope: PublicBillScope = {},
+): Promise<number> {
+  const conditions = billConditions(filters, scope);
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const rows = await database.select({ value: count() }).from(bills).where(where);
+  return rows[0]?.value ?? 0;
+}
+
 export async function listPublicBills(
   database: Database,
   filters: PublicBillFilters,
+  scope: PublicBillScope = {},
 ): Promise<PublicBillPage> {
   const page = clampInteger(filters.page, 1, 1, 100_000);
   const pageSize = clampInteger(filters.pageSize, 20, 1, 50);
-  const conditions = billConditions(filters);
+  const conditions = billConditions(filters, scope);
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const [countRows, rows] = await Promise.all([
-    database.select({ value: count() }).from(bills).where(where),
+  const [total, rows] = await Promise.all([
+    countPublicBills(database, filters, scope),
     database
-      .select(billSelection)
+      .select(billListSelection)
       .from(bills)
       .where(where)
-      .orderBy(filters.order === "presented" || filters.order === "presented_desc" ? desc(bills.presentedAt) : desc(latestActivity))
+      .orderBy(...billOrdering(filters.order))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
   ]);
-  const total = countRows[0]?.value ?? 0;
 
   return {
     items: await enrichBillRows(database, rows),
@@ -355,10 +519,80 @@ export async function getPublicLawmaker(
   };
 }
 
+const HOUSE_LABELS = {
+  camara: "Câmara dos Deputados",
+  senado: "Senado Federal",
+  congresso: "Congresso Nacional",
+  nao_informada: "Não informada",
+} as const satisfies Record<PublicHouse, string>;
+
+const STAGE_LABELS = {
+  presented: "Apresentada",
+  committees: "Em comissões",
+  ready_for_vote: "Pronto para votação",
+  voted: "Votada",
+  sanction_or_veto: "Sanção ou veto",
+  closed: "Encerrada",
+  unclassified: "Fase não classificada",
+} as const satisfies Record<PublicBillStage, string>;
+
+const VOTE_KIND_LABELS = {
+  nominal: "Nominal",
+  secret: "Secreta",
+  non_nominal: "Não nominal",
+} as const satisfies Record<PublicVoteKind, string>;
+
+const VOTE_RESULT_LABELS = {
+  approved: "Aprovada",
+  rejected: "Rejeitada",
+  other: "Outro resultado",
+  unavailable: "Resultado não informado",
+} as const satisfies Record<PublicVoteResult, string>;
+
+function labeled<T extends string>(value: T, labels: Record<T, string>) {
+  return { value, label: labels[value] };
+}
+
 export async function listPublicFilterOptions(database: Database): Promise<PublicFilterOptions> {
-  const [sourceRows, statusRows, topicRows, partyRows, authorRows] = await Promise.all([
+  const [
+    sourceRows,
+    proposalTypeRows,
+    yearRows,
+    originHouseRows,
+    currentHouseRows,
+    stageRows,
+    statusRows,
+    voteShapeRows,
+    voteResultRows,
+    voteHouseRows,
+    topicRows,
+    partyRows,
+    authorRows,
+    regionRows,
+  ] = await Promise.all([
     database.selectDistinct({ value: bills.source }).from(bills).orderBy(asc(bills.source)),
+    database
+      .selectDistinct({ value: bills.proposalType })
+      .from(bills)
+      .where(sql`${bills.proposalType} is not null`)
+      .orderBy(asc(bills.proposalType)),
+    database
+      .selectDistinct({ value: bills.proposalYear })
+      .from(bills)
+      .where(sql`${bills.proposalYear} is not null`)
+      .orderBy(asc(bills.proposalYear)),
+    database.selectDistinct({ value: bills.originHouse }).from(bills).orderBy(asc(bills.originHouse)),
+    database.selectDistinct({ value: bills.currentHouse }).from(bills).orderBy(asc(bills.currentHouse)),
+    database.selectDistinct({ value: bills.simplifiedStage }).from(bills).orderBy(asc(bills.simplifiedStage)),
     database.selectDistinct({ value: bills.statusLabel }).from(bills).orderBy(asc(bills.statusLabel)),
+    database
+      .selectDistinct({ nominal: voteEvents.isNominal, secret: voteEvents.isSecret })
+      .from(voteEvents),
+    database
+      .selectDistinct({ value: voteEvents.resultCategory })
+      .from(voteEvents)
+      .orderBy(asc(voteEvents.resultCategory)),
+    database.selectDistinct({ value: voteEvents.house }).from(voteEvents).orderBy(asc(voteEvents.house)),
     database.selectDistinct({ value: billTopics.label }).from(billTopics).orderBy(asc(billTopics.label)),
     database
       .selectDistinct({ value: billAuthors.party })
@@ -369,13 +603,45 @@ export async function listPublicFilterOptions(database: Database): Promise<Publi
       .selectDistinct({ value: billAuthors.officialName })
       .from(billAuthors)
       .orderBy(asc(billAuthors.officialName)),
+    database
+      .selectDistinct({ value: lawmakers.region })
+      .from(billAuthors)
+      .leftJoin(lawmakers, eq(billAuthors.lawmakerId, lawmakers.id))
+      .orderBy(asc(lawmakers.region)),
   ]);
+
+  const currentHouses: PublicFilterOptions["currentHouses"] = currentHouseRows.flatMap(
+    (item) => item.value ? [labeled(item.value, HOUSE_LABELS)] : [],
+  );
+  if (currentHouseRows.some((item) => item.value === null)) {
+    currentHouses.push(labeled("nao_informada", HOUSE_LABELS));
+  }
+  const availableVoteKinds = new Set<PublicVoteKind>();
+  for (const row of voteShapeRows) {
+    if (row.nominal) availableVoteKinds.add("nominal");
+    if (row.secret) availableVoteKinds.add("secret");
+    if (!row.nominal) availableVoteKinds.add("non_nominal");
+  }
+  const voteKindOrder: PublicVoteKind[] = ["nominal", "secret", "non_nominal"];
+  const regions = regionRows.flatMap((item) => item.value ? [{ value: item.value, label: item.value }] : []);
+  if (regionRows.some((item) => item.value === null)) {
+    regions.push({ value: "nao_informada", label: "Não informada" });
+  }
 
   return {
     sources: sourceRows.map((item) => item.value),
+    proposalTypes: proposalTypeRows.flatMap((item) => item.value ? [item.value] : []),
+    years: yearRows.flatMap((item) => item.value === null ? [] : [item.value]),
+    originHouses: originHouseRows.map((item) => labeled(item.value, HOUSE_LABELS)),
+    currentHouses,
+    stages: stageRows.map((item) => labeled(item.value, STAGE_LABELS)),
     statuses: statusRows.map((item) => item.value),
+    voteKinds: voteKindOrder.filter((kind) => availableVoteKinds.has(kind)).map((kind) => labeled(kind, VOTE_KIND_LABELS)),
+    voteResults: voteResultRows.map((item) => labeled(item.value, VOTE_RESULT_LABELS)),
+    voteHouses: voteHouseRows.map((item) => labeled(item.value, HOUSE_LABELS)),
     topics: topicRows.map((item) => item.value),
     parties: partyRows.flatMap((item) => item.value ? [item.value] : []),
     authors: authorRows.map((item) => item.value),
+    regions,
   };
 }
