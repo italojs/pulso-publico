@@ -154,9 +154,27 @@ No encerramento foram removidos explicitamente o acompanhamento, a sessão e o u
 
 ### Mobile — 390 × 844
 
-- O mesmo URL de zero resultado apresentou o estado vazio em viewport `390 × 844`.
-- Ao abrir o painel, a inspeção visual mostrou `dialog.open=true`, `position: fixed` e retângulo `390 × 844`; cabeçalho e rodapé (contagem, `Limpar tudo`, `Aplicar filtros`) ficaram visíveis. A captura foi observada pela automação, mas não salva em arquivo.
-- `Escape` fechou o painel e devolveu o foco ao gatilho. Os controles do percurso desktop continuam presentes no viewport móvel; não foi enviada requisição de IA durante essas interações.
+O percurso abaixo foi repetido em 4 de setembro em um contexto Chrome novo, controlado por Playwright efêmero apontando para o executável local do Chrome. `window.innerWidth × window.innerHeight` devolveu exatamente `390x844`; não foi salva captura persistente. As respostas relevantes foram `POST /api/projects/filter-count 200` e, no acompanhamento anônimo, `POST /api/projects/search 200`.
+
+- O painel abriu com `dialog.open=true`, `position: fixed` e retângulo `390x844`. `Escape` o fechou e o foco retornou a `Filtros avançados`.
+- Foram marcados `PEC` e `PL` (mesmo campo) e `Saúde` (outro campo). A prévia exibiu `157 projetos encontrados`; o envio resultou em `/?tipo=PEC&tipo=PL&tema=Sa%C3%BAde&numero=&anoInicio=&anoFim=&apresentadaInicio=&apresentadaFim=&atividadeRecente=&atividadeInicio=&atividadeFim=&ordem=updated`, com `157 registros oficiais`. Isso confirma OU entre os dois tipos e E com o tema também no viewport móvel.
+- As três etiquetas móveis foram `Tipo: PEC×`, `Tipo: PL×` e `Tema: Saúde×`. Acionar `Remover tipo PEC` deixou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`; `Limpar tudo` retornou a `http://localhost:3001/`.
+- Em um contexto novo sem cookies nem `localStorage`, abrir exatamente o URL compartilhável acima devolveu o mesmo URL e `157 registros oficiais`. Assim, os filtros públicos são reproduzíveis sem o estado do primeiro navegador.
+- A página seguinte foi `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated&pagina=2`; Voltar restaurou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`.
+- O URL `/?q=zzzzvalidacaosemresultado20260904` devolveu `0 registros oficiais` e uma ocorrência de `Nenhum projeto apareceu com esses filtros.`.
+- No mesmo contexto anônimo, foi seguido localmente `PL 1928/2026` (`camara/2617687`). `/?acompanhando=1` devolveu `1 registros oficiais`; a URL permaneceu exatamente `http://localhost:3001/?acompanhando=1` e a verificação de `followedBillKeys` ou `2617687` nela foi `false`. A referência local foi, portanto, enviada só no corpo do `POST /api/projects/search`.
+
+Para o trecho autenticado móvel, a rota pública de cadastro criou `validation.mobile-round1-20260904@invalid.test`; o log registrou `POST /api/auth/register 303` e o navegador foi redirecionado para `/?acompanhando=1&conta=criada`. Foi então inserido somente para esse teste o acompanhamento de `camara/2617687`:
+
+| Registro temporário | UUID |
+| --- | --- |
+| Usuário | `7a8872de-aa7f-4559-b85a-1b7b51ade064` |
+| Sessão | `33882fb8-caa2-4749-bbb7-d272b7a7567a` |
+| Acompanhamento | `c654667f-9f9b-4e16-b6cd-0a1ab4a37825` |
+| Projeto | `13d491d2-eb34-4b6f-b3c8-f8bb4c47c943` (`camara/2617687`) |
+
+- Com o cookie dessa sessão e em `390x844`, `/?acompanhando=1` retornou `1 registros oficiais` e um link para `PL 1928/2026`; não havia `Próxima página` (`0` ocorrências), como esperado para `totalPages=1`. O log do servidor registrou `GET /?acompanhando=1 200`, `GET /seguindo 200` e `GET /api/follows 200` nessa sessão. A paginação com múltiplos resultados já foi acionada acima no mesmo viewport.
+- A auditoria imediatamente antes da limpeza foi `users=1, sessions=1, followed_bills=1`. Foram apagados, nessa ordem e pelo e-mail/UUID temporário exato, o acompanhamento `c654667f-9f9b-4e16-b6cd-0a1ab4a37825`, a sessão `33882fb8-caa2-4749-bbb7-d272b7a7567a` e o usuário `7a8872de-aa7f-4559-b85a-1b7b51ade064`. A auditoria posterior foi `users=0, sessions=0, followed_bills=0`.
 
 ## Observações e limitações
 
