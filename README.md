@@ -55,4 +55,22 @@ Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a 
 - Itens seguidos são salvos no dispositivo enquanto o usuário estiver anônimo e unidos de forma idempotente à conta no primeiro acesso autenticado.
 - Senhas usam `scrypt`; tokens de sessão ficam em cookie `HttpOnly` e somente seus hashes são armazenados.
 
-As decisões de produto e a arquitetura estão em [`docs/superpowers/specs`](docs/superpowers/specs). O relatório da validação mais recente está em [`docs/validation/2026-09-03-mvp-validation.md`](docs/validation/2026-09-03-mvp-validation.md).
+## Filtros avançados do feed
+
+Além da busca e dos filtros rápidos, o botão **Filtros avançados** abre um painel com identificação, tramitação, datas e atividade, votações, autoria e representação, acompanhamento e ordem dos resultados. Valores de um mesmo campo são alternativas (por exemplo, `PEC` **ou** `PL`); campos diferentes são combinados entre si (por exemplo, tipo **e** tema).
+
+Os filtros que podem ser compartilhados ficam na URL. Seleções múltiplas usam parâmetros repetidos, como `/?tipo=PEC&tipo=PL&tema=Saúde&tema=Trabalho`; intervalos usam, por exemplo, `anoInicio=2024&anoFim=2026` e `apresentadaInicio=2024-01-01`. Alterar um filtro volta à primeira página.
+
+Para tornar a busca rápida, o banco normaliza facetas sem alterar os textos oficiais: tipo, número e ano da proposta; uma fase geral determinística da tramitação; e uma categoria de resultado de votação (`aprovada`, `rejeitada`, `outros` ou `não informado`). A tela continua mostrando os títulos, situações e resultados oficiais quando eles existem.
+
+“Mostrar somente projetos que acompanho” funciona para contas e para navegação anônima. No modo anônimo, as chaves dos projetos permanecem no armazenamento local do dispositivo e seguem somente no corpo das consultas necessárias; elas nunca são adicionadas à URL compartilhável. Se a pessoa entrar em uma conta, o filtro é resolvido no servidor pelos acompanhamentos da conta.
+
+Todos os filtros usam exclusivamente dados oficiais já sincronizados da Câmara dos Deputados e do Senado Federal. Aplicar, contar ou combinar filtros não faz requisição de IA.
+
+Após atualizar o código, aplique a migração aditiva antes de sincronizar ou consultar as novas facetas:
+
+```bash
+npm run db:migrate
+```
+
+As decisões de produto e a arquitetura estão em [`docs/superpowers/specs`](docs/superpowers/specs). O relatório da validação mais recente dos filtros está em [`docs/validation/2026-09-04-filtros-avancados-validation.md`](docs/validation/2026-09-04-filtros-avancados-validation.md); a validação de base do MVP permanece em [`docs/validation/2026-09-03-mvp-validation.md`](docs/validation/2026-09-03-mvp-validation.md).
