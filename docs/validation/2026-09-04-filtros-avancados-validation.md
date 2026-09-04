@@ -5,7 +5,7 @@
 - Worktree: `.../.worktrees/advanced-filters`, branch `codex/advanced-filters`.
 - Runtime: Node.js `v26.8.1`, npm `11.19.0`, Next.js `16.3.4` e PostgreSQL local em `127.0.0.1:5435`.
 - Banco de desenvolvimento: `legislativo_codex_dev`; banco de testes: `legislativo_codex_test`.
-- A validação inicial usou `http://localhost:3001`; a rodada de correção da auditoria final usou uma nova instância isolada em `http://localhost:3002`, ambas com `DATABASE_URL` apontando para desenvolvimento. A instância principal em `:3000` não foi interrompida e o processo em `:3002` foi encerrado ao final.
+- A validação inicial usou `http://localhost:3001`; a rodada de correção da auditoria final usou uma nova instância isolada em `http://localhost:3002`; e o re-review usou Chrome headless isolado em `http://127.0.0.1:3114`, sempre com `DATABASE_URL` apontando para desenvolvimento. A instância principal em `:3000` não foi interrompida; os processos adicionais e o perfil temporário foram encerrados e removidos ao final.
 
 ## Migração e backfill
 
@@ -16,9 +16,9 @@ PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':
   DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run db:migrate
 ```
 
-Resultado: exit code `0`; `drizzle-kit migrate` concluiu com `migrations applied successfully!` em desenvolvimento e testes. A migração histórica `0003_advanced_filters.sql` foi preservada. A migração forward `0004_proposal_identity_backfill.sql` preenche tipo e número mesmo quando o ano não tem quatro dígitos, e reconhece os tipos oficiais hifenizados. Ambas são aditivas e não contêm `DELETE`. O total permaneceu em 257.366 projetos antes e depois da migração; movimentações (18.398), eventos de votação (908) e resumos de IA (0) também foram preservados.
+Resultado: exit code `0`; `drizzle-kit migrate` concluiu com `migrations applied successfully!` em desenvolvimento e testes. As migrações históricas `0003_advanced_filters.sql` e `0004_proposal_identity_backfill.sql` foram preservadas. A migração forward `0004` preenche tipo e número mesmo quando o ano não tem quatro dígitos e reconhece tipos hifenizados; a nova forward `0005_proposal_identity_official_grammar.sql` cobre a gramática oficial com segmentos separados por ponto ou sublinhado. Todas são aditivas e não contêm `DELETE`. O total permaneceu em 257.366 projetos; movimentações (18.398), eventos de votação (908) e resumos de IA (0) também foram preservados.
 
-Antes de `0004`, havia 133.495 projetos sem tipo/número; 133.447 tinham identidade reconhecível pela gramática corrigida, incluindo 4.722 códigos hifenizados e 30.503 ocorrências de `PRL 1/0`. Depois da migração restaram somente 48 projetos sem tipo/número. O banco passou a ter 257.318 projetos com tipo e número, 123.890 com tipo e ano, 4.738 tipos hifenizados e 30.503 `PRL 1/0` com tipo/número preenchidos e ano nulo.
+Antes de `0004`, havia 133.495 projetos sem tipo/número; 133.447 tinham identidade reconhecível pela gramática corrigida, incluindo 4.722 códigos hifenizados e 30.503 ocorrências de `PRL 1/0`. Depois de `0004` restaram 48 projetos: 2 `ATA_PRE`, 6 `R.C` e 40 `R.S`. A migração forward `0005` preencheu os 48; o banco passou a ter 257.366 projetos com tipo e número, sem divergência entre o código reconhecido e as facetas, 123.938 com tipo e ano, 4.738 tipos hifenizados, 2 com sublinhado, 46 com ponto e 30.503 `PRL 1/0` com tipo/número preenchidos e ano nulo.
 
 Consulta de contagem, executada somente para leitura:
 
@@ -39,9 +39,11 @@ ORDER BY metric;
 | Métrica | Contagem |
 | --- | ---: |
 | Projetos | 257.366 |
-| Projetos com tipo e número extraídos | 257.318 |
-| Projetos com tipo e ano extraídos | 123.890 |
+| Projetos com tipo e número extraídos | 257.366 |
+| Projetos com tipo e ano extraídos | 123.938 |
 | Projetos com tipo hifenizado | 4.738 |
+| Projetos com tipo sublinhado | 2 |
+| Projetos com tipo pontuado | 46 |
 | `PRL 1/0` com tipo/número e ano nulo | 30.503 |
 | Fase: apresentada | 110 |
 | Fase: em comissões | 13.300 |
@@ -125,9 +127,9 @@ POST /api/projects/search
 
 | Comando | Resultado observado |
 | --- | --- |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 223 testes aprovados em 9,48 s. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 247 testes aprovados em 9,36 s. |
 | `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH npm run typecheck` | exit `0`; `tsc --noEmit` sem diagnósticos. |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 335 ms, TypeScript em 217 ms e 15/15 páginas estáticas geradas. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 410 ms, TypeScript em 231 ms e 15/15 páginas estáticas geradas. |
 
 ## Percurso manual reproduzível
 
@@ -139,6 +141,7 @@ Foi usada automação real do navegador embutido com árvore de acessibilidade e
 - O painel expôs exatamente sete seções semânticas e recolhíveis: **Identificação**, **Tramitação**, **Datas e atividade**, **Votações**, **Assuntos e autoria**, **Acompanhamento** e **Ordenação**. Recolher e reabrir **Tramitação** alterou o estado nativo de `details` como esperado.
 - No catálogo real, o painel final manteve 91 checkboxes, 5 buscas e 20.068 caracteres de HTML, contra 912 checkboxes e cerca de 129 KB apontados pela auditoria. Tipos, situações, temas, autoria e partidos mostram no máximo 8 sugestões mais os valores já selecionados; buscas por `SBE-A` e por situação localizaram opções fora do primeiro lote.
 - Com `q=jornada`, o foco inicial foi para **Fechar filtros avançados**, nunca para o input hidden. A opção neutra **Todos** removeu apenas o filtro de presença de votação.
+- No re-review, os três rádios de **Há votação registrada?** compartilharam `name=votacao` e os três de **Votos individuais** compartilharam `name=votosIndividuais`. `ArrowLeft` moveu nativamente **Com votação** → **Todos** e **Disponíveis** → **Qualquer situação**. O `FormData` manteve o fallback GET dos campos neutros e a navegação JavaScript canonicalizou o resultado para `/?q=jornada&tipoVotacao=nominal`, sem valores vazios.
 - Na rodada final, aplicar `SBE-A` preservando `q=jornada` produziu exatamente `/?q=jornada&tipo=SBE-A`: nenhum parâmetro vazio ou valor privado foi incluído. Os testes automatizados preservam também todos os valores repetidos de fonte, situação e tema ao alterar apenas `q` ou uma dimensão rápida.
 - Um acompanhamento anônimo foi criado no próprio navegador. Ao ativar **Mostrar somente projetos que acompanho** pela primeira vez, a prévia exibiu `1 projeto encontrado`; depois de deixar de seguir com a página aberta, o evento local atualizou a mesma prévia para `0 projetos encontrados`. As referências ficaram fora da URL e da resposta.
 - O URL com `tipo=ZZZ`, `anoInicio=1999`, situação, tema e autoria antigos manteve todos selecionados e os marcou como `indisponível`, inclusive o ano, até remoção explícita.
@@ -169,6 +172,7 @@ No encerramento foram removidos explicitamente o acompanhamento, a sessão e o u
 O percurso abaixo foi repetido em 4 de setembro em um contexto Chrome novo, controlado por Playwright efêmero apontando para o executável local do Chrome. `window.innerWidth × window.innerHeight` devolveu exatamente `390x844`; não foi salva captura persistente. As respostas relevantes foram `POST /api/projects/filter-count 200` e, no acompanhamento anônimo, `POST /api/projects/search 200`.
 
 - O painel abriu com retângulo exato `390x844`, sem overflow horizontal no documento nem no diálogo. O corpo era rolável e o rodapé de ação permaneceu visível.
+- O re-review repetiu a inspeção em `390x844`: sete seções, ambos os overflows horizontais falsos e o rádio neutro pertencendo a `name=votacao`.
 - A submissão agora usa o serializador canônico também na primeira navegação; os parâmetros vazios anteriormente observados foram eliminados.
 - As três etiquetas móveis foram `Tipo: PEC×`, `Tipo: PL×` e `Tema: Saúde×`. Acionar `Remover tipo PEC` deixou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`; `Limpar tudo` retornou a `http://localhost:3001/`.
 - Em um contexto novo sem cookies nem `localStorage`, abrir exatamente o URL compartilhável acima devolveu o mesmo URL e `157 registros oficiais`. Assim, os filtros públicos são reproduzíveis sem o estado do primeiro navegador.
