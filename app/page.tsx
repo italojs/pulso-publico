@@ -1,15 +1,31 @@
+import { cookies } from "next/headers.js";
+
+import { currentUserFromCookie } from "#/auth/current-user";
+import { UserRepository } from "#/auth/user-repository";
 import { db } from "#/server/db/client";
 import { listPublicBills, listPublicFilterOptions } from "#/server/public/queries";
 import { parseFeedSearchParams } from "#/server/public/search-params";
 import { FeedFilters } from "#/ui/feed-filters";
-import { Pagination } from "#/ui/pagination";
-import { ProjectCard } from "#/ui/project-card";
+import { AnonymousFollowedResults } from "#/ui/anonymous-followed-results";
+import { ProjectResults } from "#/ui/project-results";
 
 export const dynamic = "force-dynamic";
 
+const users = new UserRepository(db);
+
 export default async function HomePage({ searchParams }: Readonly<{ searchParams: Promise<Record<string, string | string[] | undefined>> }>) {
   const filters = parseFeedSearchParams(await searchParams);
-  const [projects, options] = await Promise.all([listPublicBills(db, filters), listPublicFilterOptions(db)]);
+  const optionsPromise = listPublicFilterOptions(db);
+  let projects;
+  let anonymousFollowed = false;
+  if (!filters.followedOnly) {
+    projects = await listPublicBills(db, filters);
+  } else {
+    const user = await currentUserFromCookie((await cookies()).toString(), users);
+    if (user) projects = await listPublicBills(db, filters, { userId: user.id });
+    else anonymousFollowed = true;
+  }
+  const options = await optionsPromise;
 
   return (
     <main id="conteudo" className="feedPage">
@@ -18,15 +34,9 @@ export default async function HomePage({ searchParams }: Readonly<{ searchParams
         <p>Projetos de lei em uma linguagem que dá para entender — com o caminho completo para você conferir cada informação.</p>
       </section>
       <FeedFilters filters={filters} options={options} />
-      <section className="feedResults" aria-labelledby="results-title">
-        <header className="resultsHeader"><div><span className="eyebrow">Radar legislativo</span><h2 id="results-title">Projetos encontrados</h2></div><p><strong>{projects.total.toLocaleString("pt-BR")}</strong> registros oficiais</p></header>
-        {projects.items.length > 0 ? (
-          <div className="projectGrid">{projects.items.map((project) => <ProjectCard key={`${project.source}-${project.externalId}`} project={project} />)}</div>
-        ) : (
-          <div className="emptyState"><span aria-hidden="true">○</span><h3>Nenhum projeto apareceu com esses filtros.</h3><p>Tente remover um filtro ou buscar uma palavra mais curta.</p><a href="/">Ver todos os projetos</a></div>
-        )}
-        <Pagination filters={filters} page={projects.page} totalPages={projects.totalPages} />
-      </section>
+      {anonymousFollowed
+        ? <AnonymousFollowedResults filters={filters} />
+        : <ProjectResults filters={filters} projects={projects!} />}
     </main>
   );
 }

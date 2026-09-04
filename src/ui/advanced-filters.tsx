@@ -59,7 +59,7 @@ function validIsoDate(value: string | undefined) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === (month ?? 0) - 1 && date.getUTCDate() === day ? value : undefined;
 }
 
-function strictPreviewFilters(filters: PublicBillFilters): PublicBillFilters {
+export function publicFilterRequestFilters(filters: PublicBillFilters): PublicBillFilters {
   const canonical = canonicalFilters(filters);
   const allowed = <T extends string>(values: readonly string[] | undefined, accepted: readonly T[]) =>
     capped(values).filter((value): value is T => accepted.includes(value as T));
@@ -199,7 +199,7 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
     const timeout = window.setTimeout(async () => {
       try {
         const response = await fetch("/api/projects/filter-count", {
-          body: JSON.stringify({ filters: strictPreviewFilters(draft), anonymousBillKeys }),
+          body: JSON.stringify({ filters: publicFilterRequestFilters(draft), anonymousBillKeys }),
           headers: { "content-type": "application/json" }, method: "POST", signal: controller.signal,
         });
         if (!response.ok) throw new Error("Count request failed");

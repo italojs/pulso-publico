@@ -3,12 +3,15 @@
 import "@testing-library/jest-dom/vitest";
 
 import { readFileSync } from "node:fs";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PublicBillFilters, PublicFilterOptions } from "#/server/public/read-models";
+import { LOCAL_FOLLOWS_KEY } from "#/follows/local";
+import { AnonymousFollowedResults } from "#/ui/anonymous-followed-results";
 import { FeedFilters } from "#/ui/feed-filters";
+import { Pagination } from "#/ui/pagination";
 
 const options = {
   sources: ["camara", "senado"], proposalTypes: ["PEC", "PL"], years: [2024, 2025, 2026],
@@ -25,10 +28,54 @@ const options = {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  window.history.replaceState(null, "", "/");
   document.body.style.overflow = "";
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+const project = {
+  source: "camara" as const,
+  externalId: "501",
+  officialCode: "PEC 8/2025",
+  officialTitle: "Proposta de Emenda à Constituição nº 8, de 2025",
+  officialSummary: "Reduz a jornada semanal e altera a escala de trabalho.",
+  officialUrl: "https://www.camara.leg.br/propostas-legislativas/501",
+  statusLabel: "Aguardando parecer na comissão",
+  originHouse: "camara" as const,
+  currentHouse: "camara" as const,
+  presentedAt: "2025-02-01T12:00:00.000Z",
+  checkedAt: "2026-09-03T12:00:00.000Z",
+  latestActivityAt: "2026-08-31T18:00:00.000Z",
+  topics: ["Trabalho e Emprego"],
+  authors: [{
+    source: "camara" as const,
+    name: "Ana Cidadã",
+    party: "ABC",
+    kind: "Deputada Federal",
+    primary: true,
+    lawmakerExternalId: "100",
+    officialUrl: "https://www.camara.leg.br/deputados/100",
+  }],
+};
+
+const localBill = {
+  kind: "bill" as const,
+  source: "camara" as const,
+  externalId: "501",
+  label: "PEC 8/2025",
+  href: "/projetos/camara/501",
+  subtitle: "Aguardando parecer na comissão",
+};
+
+const localLawmaker = {
+  kind: "lawmaker" as const,
+  source: "senado" as const,
+  externalId: "200",
+  label: "Bruno Federal",
+  href: "/parlamentares/senado/200",
+};
 
 function renderFilters(filters: PublicBillFilters = {}, customOptions = options) {
   return render(<FeedFilters filters={filters} options={customOptions} />);
@@ -40,6 +87,97 @@ function openDialog() {
 }
 
 describe("advanced feed filters", () => {
+  it("loads anonymous followed bills without exposing references and paginates through POST", async () => {
+    window.history.replaceState(null, "", "/?acompanhando=1&tema=Trabalho");
+    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill, localLawmaker]));
+    const searchRequests: Array<{ anonymousBillKeys: unknown[]; filters: PublicBillFilters }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/projects/search") return new Response(null, { status: 401 });
+      const body = JSON.parse(String(init?.body)) as { anonymousBillKeys: unknown[]; filters: PublicBillFilters };
+      searchRequests.push(body);
+      return new Response(JSON.stringify({
+        items: [project], page: body.filters.page, pageSize: 1, total: 2, totalPages: 2,
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] }} />);
+
+    expect(await screen.findByRole("link", { name: /PEC 8\/2025/ })).toHaveAttribute("href", "/projetos/camara/501");
+    expect(searchRequests[0]).toEqual({
+      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
+      filters: { followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] },
+    });
+    expect(window.location.search).toBe("?acompanhando=1&tema=Trabalho");
+
+    fireEvent.click(screen.getByRole("button", { name: "Próxima página" }));
+    await waitFor(() => expect(searchRequests).toHaveLength(2));
+    expect(searchRequests[1]).toEqual({
+      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
+      filters: { followedOnly: true, page: 2, pageSize: 1, topics: ["Trabalho"] },
+    });
+    expect(window.location.search).toBe("?acompanhando=1&tema=Trabalho");
+  });
+
+  it("shows how to follow a project when anonymous storage has no bill", async () => {
+    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localLawmaker]));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AnonymousFollowedResults filters={{ followedOnly: true }} />);
+
+    expect(await screen.findByText("Você ainda não acompanha nenhum projeto.")).toBeInTheDocument();
+    expect(screen.getByText(/use o botão “Seguir projeto”/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends anonymous bill references to the followed-only count preview", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill, localLawmaker]));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ total: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderFilters({ followedOnly: true });
+    openDialog();
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
+      filters: { followedOnly: true },
+    });
+  });
+
+  it("preserves advanced filters in SSR pagination and changes only the page", () => {
+    const filters: PublicBillFilters = {
+      proposalTypes: ["PEC", "PL"], sources: ["camara", "senado"],
+      presentedStart: "2025-01-01", presentedEnd: "2025-12-31",
+      activityStart: "2026-01-01", activityEnd: "2026-06-30",
+      votePresence: "with", voteKinds: ["nominal", "secret"],
+      voteResults: ["approved", "rejected"], voteHouses: ["camara", "senado"],
+      order: "most_votes", page: 2,
+    };
+    render(<Pagination filters={filters} page={2} totalPages={4} />);
+
+    const previous = new URL(screen.getByRole("link", { name: "Página anterior" }).getAttribute("href")!, "https://local.invalid").searchParams;
+    const next = new URL(screen.getByRole("link", { name: "Próxima página" }).getAttribute("href")!, "https://local.invalid").searchParams;
+    expect(previous.getAll("tipo")).toEqual(["PEC", "PL"]);
+    expect(next.getAll("fonte")).toEqual(["camara", "senado"]);
+    expect(next.get("apresentadaInicio")).toBe("2025-01-01");
+    expect(next.get("apresentadaFim")).toBe("2025-12-31");
+    expect(next.get("atividadeInicio")).toBe("2026-01-01");
+    expect(next.get("atividadeFim")).toBe("2026-06-30");
+    expect(next.get("votacao")).toBe("with");
+    expect(next.getAll("tipoVotacao")).toEqual(["nominal", "secret"]);
+    expect(next.getAll("resultado")).toEqual(["approved", "rejected"]);
+    expect(next.getAll("casaVotacao")).toEqual(["camara", "senado"]);
+    expect(next.get("ordem")).toBe("most_votes");
+    expect(previous.get("pagina")).toBeNull();
+    expect(next.get("pagina")).toBe("3");
+    previous.delete("pagina");
+    next.delete("pagina");
+    expect([...next.entries()]).toEqual([...previous.entries()]);
+  });
+
   it("server-renders the native dialog, invoker attributes, and named GET controls", () => {
     const html = renderToString(<FeedFilters filters={{ proposalTypes: ["PEC"], sources: ["camara", "senado"] }} options={options} />);
 

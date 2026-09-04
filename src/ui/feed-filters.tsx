@@ -1,3 +1,8 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { LOCAL_FOLLOWS_KEY, parseLocalFollows } from "#/follows/local";
 import type { PublicBillFilters, PublicFilterOptions } from "#/server/public/read-models";
 import { buildFeedHref } from "#/server/public/search-params";
 import { ActiveFilterChips } from "#/ui/active-filter-chips";
@@ -10,6 +15,13 @@ interface FeedFiltersProps {
 }
 
 export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
+  const [anonymousBillKeys, setAnonymousBillKeys] = useState<Array<{ source: "camara" | "senado"; externalId: string }>>([]);
+  useEffect(() => {
+    if (!filters.followedOnly) return;
+    setAnonymousBillKeys(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY))
+      .filter((item) => item.kind === "bill")
+      .map(({ source, externalId }) => ({ source, externalId })));
+  }, [filters.followedOnly]);
   const sources = filters.sources ?? (filters.source ? [filters.source] : []);
   const statuses = filters.statuses ?? (filters.status ? [filters.status] : []);
   const topics = filters.topics ?? (filters.topic ? [filters.topic] : []);
@@ -33,7 +45,7 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
       </fieldset>
       {[...preserved.entries()].map(([name, value], index) => <input key={`${name}-${value}-${index}`} name={name} type="hidden" value={value} />)}
       </form>
-      <AdvancedFilters filters={filters} options={options} />
+      <AdvancedFilters anonymousBillKeys={anonymousBillKeys} filters={filters} options={options} />
       <ActiveFilterChips filters={filters} />
     </div>
   );

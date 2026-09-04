@@ -488,6 +488,22 @@ describe("public legislative queries", () => {
     expect(empty).toMatchObject({ items: [], total: 0 });
   });
 
+  it("paginates anonymous followed projects within their filtered scope", async () => {
+    const result = await listPublicBills(testDb, {
+      followedOnly: true,
+      page: 2,
+      pageSize: 1,
+    }, {
+      anonymousBillKeys: [
+        { source: "camara", externalId: "501" },
+        { source: "senado", externalId: "601" },
+      ],
+    });
+
+    expect(result).toMatchObject({ page: 2, pageSize: 1, total: 2, totalPages: 2 });
+    expect(result.items.map((item) => item.officialCode)).toEqual(["PL 12/2024"]);
+  });
+
   it.each([
     ["updated", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
     ["presented_desc", ["PEC 8/2025", "PL 12/2024", "Projeto sem votação"]],
