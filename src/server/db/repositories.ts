@@ -3,6 +3,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { AlertRepository } from "#/alerts/alert-repository";
 import { detectAlertCandidates } from "#/alerts/detect-events";
+import {
+  classifySimplifiedStage,
+  classifyVoteResult,
+  parseProposalIdentity,
+} from "#/domain/bill-facets";
 
 import type {
   Bill,
@@ -56,6 +61,7 @@ function billValues(bill: Bill) {
     source: bill.source,
     externalId: bill.externalId,
     officialCode: bill.officialCode,
+    ...parseProposalIdentity(bill.officialCode),
     congressionalKey: bill.congressionalKey,
     officialTitle: bill.officialTitle,
     officialSummary: bill.officialSummary,
@@ -63,6 +69,7 @@ function billValues(bill: Bill) {
     currentHouse: bill.currentHouse,
     statusCode: bill.statusCode,
     statusLabel: bill.statusLabel,
+    simplifiedStage: classifySimplifiedStage(bill.statusLabel),
     officialUrl: bill.officialUrl,
     presentedAt: nullableDate(bill.presentedAt),
     checkedAt: date(bill.checkedAt),
@@ -232,6 +239,7 @@ export class LegislativeRepository {
           house: voteEvent.house,
           description: voteEvent.description,
           result: voteEvent.result,
+          resultCategory: classifyVoteResult(voteEvent.result),
           isNominal: voteEvent.isNominal,
           isSecret: voteEvent.isSecret,
           officialUrl: voteEvent.officialUrl,

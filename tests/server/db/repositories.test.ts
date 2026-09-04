@@ -28,14 +28,14 @@ const checkedAt = "2026-09-03T18:00:00.000Z";
 const bill = BillRecord.parse({
   source: "camara",
   externalId: "2351249",
-  officialCode: "PL 1106/2023",
+  officialCode: "PEC 8/2025",
   congressionalKey: "pl:1106:2023",
   officialTitle: "Projeto de Lei 1106/2023",
   officialSummary: "Reconhece a robótica como esporte.",
   originHouse: "camara",
   currentHouse: "senado",
   statusCode: "926",
-  statusLabel: "Aguardando Apreciação pelo Senado Federal",
+  statusLabel: "Aguardando parecer na comissão",
   officialUrl: "https://www.camara.leg.br/propostas-legislativas/2351249",
   presentedAt: "2023-03-14T14:46:00.000Z",
   checkedAt,
@@ -87,7 +87,7 @@ const voteEvent = VoteEventRecord.parse({
   occurredAt: "2026-06-30T18:00:00.000Z",
   house: "camara",
   description: "Votação nominal.",
-  result: "aprovada",
+  result: "Aprovado",
   isNominal: true,
   isSecret: false,
   officialUrl: "https://dadosabertos.camara.leg.br/api/v2/votacoes/2351249-1",
@@ -133,6 +133,21 @@ describe("LegislativeRepository", () => {
     expect(
       await testDb.select({ id: individualVotes.id }).from(individualVotes),
     ).toHaveLength(1);
+  });
+
+  it("persists derived bill and vote filter facets", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph());
+
+    expect(await testDb.select({
+      type: bills.proposalType,
+      number: bills.proposalNumber,
+      year: bills.proposalYear,
+      stage: bills.simplifiedStage,
+    }).from(bills)).toEqual([{ type: "PEC", number: 8, year: 2025, stage: "committees" }]);
+
+    expect(await testDb.select({ category: voteEvents.resultCategory }).from(voteEvents))
+      .toEqual([{ category: "approved" }]);
   });
 
   it("updates official status while preserving the original row identity", async () => {

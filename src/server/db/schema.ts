@@ -26,6 +26,21 @@ export const voteChoiceEnum = pgEnum("vote_choice", [
   "outro",
   "indisponivel",
 ]);
+export const simplifiedStageEnum = pgEnum("simplified_stage", [
+  "presented",
+  "committees",
+  "ready_for_vote",
+  "voted",
+  "sanction_or_veto",
+  "closed",
+  "unclassified",
+]);
+export const voteResultCategoryEnum = pgEnum("vote_result_category", [
+  "approved",
+  "rejected",
+  "other",
+  "unavailable",
+]);
 export const alertTypeEnum = pgEnum("alert_type", [
   "status_change",
   "vote_scheduled",
@@ -42,6 +57,9 @@ export const bills = pgTable(
     source: sourceEnum("source").notNull(),
     externalId: text("external_id").notNull(),
     officialCode: text("official_code").notNull(),
+    proposalType: text("proposal_type"),
+    proposalNumber: integer("proposal_number"),
+    proposalYear: integer("proposal_year"),
     congressionalKey: text("congressional_key"),
     officialTitle: text("official_title").notNull(),
     officialSummary: text("official_summary").default("").notNull(),
@@ -49,6 +67,7 @@ export const bills = pgTable(
     currentHouse: houseEnum("current_house"),
     statusCode: text("status_code"),
     statusLabel: text("status_label").notNull(),
+    simplifiedStage: simplifiedStageEnum("simplified_stage").default("unclassified").notNull(),
     officialUrl: text("official_url").notNull(),
     presentedAt: timestamp("presented_at", { withTimezone: true }),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
@@ -57,6 +76,9 @@ export const bills = pgTable(
   (table) => [
     uniqueIndex("bills_source_external_id_uq").on(table.source, table.externalId),
     index("bills_congressional_key_idx").on(table.congressionalKey),
+    index("bills_proposal_type_year_idx").on(table.proposalType, table.proposalYear),
+    index("bills_simplified_stage_idx").on(table.simplifiedStage),
+    index("bills_houses_idx").on(table.originHouse, table.currentHouse),
     index("bills_presented_at_idx").on(table.presentedAt),
   ],
 );
@@ -170,6 +192,7 @@ export const voteEvents = pgTable(
     house: houseEnum("house").notNull(),
     description: text("description").notNull(),
     result: text("result"),
+    resultCategory: voteResultCategoryEnum("result_category").default("unavailable").notNull(),
     isNominal: boolean("is_nominal").notNull(),
     isSecret: boolean("is_secret").notNull(),
     officialUrl: text("official_url").notNull(),
@@ -179,6 +202,7 @@ export const voteEvents = pgTable(
   (table) => [
     uniqueIndex("vote_events_source_external_id_uq").on(table.source, table.externalId),
     index("vote_events_bill_occurred_at_idx").on(table.billId, table.occurredAt),
+    index("vote_events_result_category_idx").on(table.resultCategory),
   ],
 );
 
