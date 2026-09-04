@@ -122,8 +122,9 @@ describe("feed search params", () => {
       order: "presented_desc",
     });
     expect(buildFeedHref(filters, 1)).toContain("ordem=presented_desc");
-    expect(buildFeedHref({ source: "senado", status: "Em análise", topic: "Trabalho", party: "ABC", author: "Ana", order: "presented" }, 1))
+    expect(buildFeedHref({ source: "senado", status: "Em análise", topic: "Trabalho", party: "ABC", author: "Ana", proposalType: "PLX", order: "presented" }, 1))
       .toContain("fonte=senado");
+    expect(buildFeedHref({ proposalType: "PLX" }, 1)).toContain("tipo=PLX");
   });
 
   it("accepts new proposal type tokens, non-nominal votes, and the region sentinel", () => {

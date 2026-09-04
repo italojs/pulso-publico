@@ -197,7 +197,7 @@ export async function listPublicBills(
       .select(billSelection)
       .from(bills)
       .where(where)
-      .orderBy(filters.order === "presented" ? desc(bills.presentedAt) : desc(latestActivity))
+      .orderBy(filters.order === "presented" || filters.order === "presented_desc" ? desc(bills.presentedAt) : desc(latestActivity))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
   ]);
