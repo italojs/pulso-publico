@@ -12,10 +12,11 @@ describe("bill facets", () => {
     ["Aguardando parecer na comissão", "committees"],
     ["Pronta para pauta", "ready_for_vote"],
     ["Transformada em norma jurídica", "closed"],
+    ["Retirada de pauta", "unclassified"],
     ["Situação inédita", "unclassified"],
   ])("classifies stage %s", (value, expected) => expect(classifySimplifiedStage(value)).toBe(expected));
 
-  it.each([["Aprovado", "approved"], ["Rejeitada", "rejected"], ["Retirada de pauta", "other"], [null, "unavailable"]])(
+  it.each([["Aprovado", "approved"], ["Rejeitada", "rejected"], ["Retirada de pauta", "other"], ["Não foram aprovados", "other"], ["Não foram rejeitados", "other"], [null, "unavailable"]])(
     "classifies vote result %s",
     (value, expected) => expect(classifyVoteResult(value)).toBe(expected),
   );

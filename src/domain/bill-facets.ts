@@ -36,7 +36,7 @@ type StageRule = { stage: SimplifiedStage; terms: readonly string[] };
 const stageRules: readonly StageRule[] = [
   {
     stage: "closed",
-    terms: ["transformada em norma juridica", "transformado em norma juridica", "arquivada", "arquivado", "encerrada", "encerrado", "prejudicada", "prejudicado", "retirada de pauta"],
+    terms: ["transformada em norma juridica", "transformado em norma juridica", "arquivada", "arquivado", "encerrada", "encerrado", "prejudicada", "prejudicado"],
   },
   {
     stage: "sanction_or_veto",
@@ -82,7 +82,7 @@ export function classifyVoteResult(result: string | null): VoteResultCategory {
   if (result === null || !result.trim()) return "unavailable";
 
   const normalized = fold(result.trim());
-  const negated = /\bnao\s+(?:foi\s+)?(?:aprovad[oa]s?|rejeitad[oa]s?)\b/i.test(normalized);
+  const negated = /\bnao\s+(?:(?:foi|foram)\s+)?(?:aprovad[oa]s?|rejeitad[oa]s?)\b/i.test(normalized);
   const matches = voteResultRules.filter((rule) => rule.expression.test(normalized));
 
   if (negated || matches.length !== 1) return "other";
