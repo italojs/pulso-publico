@@ -12,6 +12,7 @@ Branch: `codex/advanced-filters`
 - Implementação e regressões: `e2ef63a` (`fix: resolve final advanced filter audit`).
 - Evidências da primeira rodada: `8ca2400` (`docs: record final filter audit evidence`).
 - Correção adicional do re-review: `cda4c25` (`fix: accept official proposal type grammar`).
+- Correção operacional da `0005`: `154783c` (`fix: avoid no-op proposal backfill writes`).
 - A especificação e o plano não foram editados. README, validação e este relatório documentam apenas o comportamento e as evidências atualizados.
 
 ## Mapa finding → teste → correção → evidência
@@ -36,16 +37,24 @@ Branch: `codex/advanced-filters`
 | Gramática oficial e degradação segura | Important | 16 falhas reproduziram rejeição de `ATA_PRE`, `R.C` e `R.S` no parser, `BillRecord`, mappers, lote e URL. Um tipo `TIPO/INTERNO` ainda lançava Zod e abortava a página inteira. A migração não tinha a forward `0005`. | A gramática compartilhada aceita tokens de 2–20 caracteres formados por segmentos alfabéticos separados por `.`, `_` ou `-`; `BillRecord` normaliza um tipo não reconhecido para `null`, preservando projeto, número/ano estruturados e texto oficial. A nova `0005_proposal_identity_official_grammar.sql` faz apenas o backfill forward; `0004` não foi reescrita. | 10 arquivos / 170 testes focados passaram. Regressões diretas cobrem os três tipos, ambos os mappers, lote Câmara com item inválido sem aborto, URL/Zod, migration e busca textual de projeto com tipo `null`. Em dev, `ATA_PRE=2`, `R.C=6` e `R.S=40` ficaram completos; 257.366/257.366 códigos reconhecidos têm tipo/número e houve 0 divergências. O parser SQL fez uma varredura em 1.104,510 ms no conjunto inteiro. |
 | Grupo nativo dos neutros | Minor | Os neutros não tinham `name`, portanto ficavam fora dos grupos e da navegação nativa; a regressão também exigiu submit canônico sem vazio. | Todos os rádios agora mantêm o `name` do fieldset. O valor neutro continua mapeado a `undefined`; `FormData` oferece o fallback GET e o handler usa `buildFeedHref` para omitir vazios da navegação final. | Teste UI comprova os dois grupos de três rádios, nomes, valor neutro e URL `/?tipoVotacao=nominal`. No Chrome real, `ArrowLeft` moveu `with` e `available` para os respectivos neutros; com `q=jornada`, o submit produziu `/?q=jornada&tipoVotacao=nominal`. Em 390×844 houve 7 seções e nenhum overflow horizontal. |
 
+## Re-review operacional da migration 0005
+
+| Issue | Severidade | Teste RED | Correção mínima robusta | Evidência GREEN |
+| --- | --- | --- | --- | --- |
+| Updates sem mudança material | Important | Em schema fresco, a primeira `0005` afetou 560 linhas em vez de 48: além dos tipos novos, reescreveu 512 `PRL n/0` com tipo/número completos porque `proposal_year IS NULL` bastava no `WHERE`. | Como a `0005` não foi publicada em produção, ela foi corrigida no próprio arquivo, sem criar `0006`. O CTE tipa os valores parseados e cada ramo de assignment/`WHERE` exige coluna alvo nula, valor parseado não nulo e `IS DISTINCT FROM`. | Primeiro run: exatamente 48 updates (`ATA_PRE=2`, `R.C=6`, `R.S=40`). Rerun: 0. As 512 linhas sem ano mantiveram o mesmo `ctid`; `TIPO/INTERNO` permaneceu inalterado. Um banco temporário vazio aplicou as seis migrations; `drizzle-kit check` aprovou a metadata. No dev já migrado, uma consulta somente leitura encontrou 0 candidatos; não houve rerun da 0005 e foi executado apenas `VACUUM (ANALYZE) bills`. |
+
 ## Verificação final
 
 | Verificação | Resultado |
 | --- | --- |
 | Testes focados do re-review | 10 arquivos, 170 testes, exit 0 |
+| Teste focado da migration operacional | 1 arquivo, 3 testes, exit 0; 48/0 updates e 512 `ctid` preservados |
 | Testes focados de UI | 1 arquivo, 25 testes, exit 0 |
-| `npm test` com Node 26.8.1 e banco de teste indicado | 32 arquivos, 247 testes, exit 0, 9,36 s |
+| `npm test` com Node 26.8.1 e banco de teste indicado | 32 arquivos, 247 testes, exit 0, 9,45 s |
 | `npm run typecheck` | exit 0, sem diagnósticos |
 | `npm run build` com banco de desenvolvimento | exit 0; 15/15 páginas estáticas geradas |
 | `npm run db:migrate` em desenvolvimento e testes | exit 0 nos dois bancos |
+| `db:migrate` em banco temporário vazio + `drizzle-kit check` | 6 migrations, schema criado, metadata válida e banco removido |
 | `git diff --check` | sem erros |
 
 O percurso principal foi executado em `http://localhost:3002`; o re-review usou uma sessão Chrome headless isolada em `http://127.0.0.1:3114`. Além de recolhimento, pesquisa, foco com `q`, URL canônica, primeira prévia anônima, unfollow reativo e opções indisponíveis, o re-review validou nomes de grupo e navegação por setas dos rádios. Em 390×844 o diálogo não apresentou overflow horizontal e manteve as sete seções. Servidor e Chrome foram encerrados, a aba efêmera foi fechada e o perfil temporário foi removido. O banco de testes foi limpo ao final: `bills=0`, `users=0`, `followed_bills=0`.

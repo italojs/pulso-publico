@@ -20,6 +20,10 @@ Resultado: exit code `0`; `drizzle-kit migrate` concluiu com `migrations applied
 
 Antes de `0004`, havia 133.495 projetos sem tipo/número; 133.447 tinham identidade reconhecível pela gramática corrigida, incluindo 4.722 códigos hifenizados e 30.503 ocorrências de `PRL 1/0`. Depois de `0004` restaram 48 projetos: 2 `ATA_PRE`, 6 `R.C` e 40 `R.S`. A migração forward `0005` preencheu os 48; o banco passou a ter 257.366 projetos com tipo e número, sem divergência entre o código reconhecido e as facetas, 123.938 com tipo e ano, 4.738 tipos hifenizados, 2 com sublinhado, 46 com ponto e 30.503 `PRL 1/0` com tipo/número preenchidos e ano nulo.
 
+Antes do merge, a auditoria operacional mostrou que a primeira versão da `0005` ainda selecionava linhas cujo `proposal_year` era nulo mesmo sem ano válido parseado. Em um fixture fresco, isso resultava em 560 updates: os 48 necessários mais 512 identidades `PRL n/0` já completas. Como a migration ainda não foi publicada em produção, o próprio arquivo `0005` foi corrigido: cada ramo do `WHERE` agora exige coluna alvo nula, valor parseado não nulo e valor materialmente diferente; os assignments aplicam as mesmas condições. A regressão no schema fresco comprovou exatamente 48 updates no primeiro run, 0 no segundo, `ctid` inalterado para as 512 linhas sem ano e dados intactos para `TIPO/INTERNO`.
+
+O banco de desenvolvimento já tinha recebido a versão preliminar da `0005`; ela não foi reaplicada. Uma consulta somente leitura com o predicado publicado corrigido encontrou `0` candidatos materiais. Foi executado apenas `VACUUM (ANALYZE) bills`, não bloqueante para leituras e escritas normais; `n_dead_tup` já era `0` após autovacuum e permaneceu `0`. Em banco temporário vazio, `drizzle-kit migrate` aplicou as seis migrations, registrou seis entradas e criou `bills`; o banco foi removido em seguida. `drizzle-kit check` aprovou journal e snapshots.
+
 Consulta de contagem, executada somente para leitura:
 
 ```sql
@@ -127,9 +131,12 @@ POST /api/projects/search
 
 | Comando | Resultado observado |
 | --- | --- |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 247 testes aprovados em 9,36 s. |
+| Teste focado `tests/server/db/migration-advanced-filters.test.ts` | exit `0`; 1 arquivo e 3 testes aprovados; primeiro run 48, rerun 0, 512 `ctid` preservados. |
+| `drizzle-kit check` com `DATABASE_URL` de teste | exit `0`; journal e snapshots coerentes. |
+| `drizzle-kit migrate` em banco temporário vazio | exit `0`; 6 migrations registradas e banco removido após a validação. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 247 testes aprovados em 9,45 s. |
 | `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH npm run typecheck` | exit `0`; `tsc --noEmit` sem diagnósticos. |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 410 ms, TypeScript em 231 ms e 15/15 páginas estáticas geradas. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 389 ms, TypeScript em 209 ms e 15/15 páginas estáticas geradas. |
 
 ## Percurso manual reproduzível
 
