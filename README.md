@@ -57,9 +57,9 @@ Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a 
 
 ## Filtros avançados do feed
 
-Além da busca e dos filtros rápidos, o botão **Filtros avançados** abre um painel com identificação, tramitação, datas e atividade, votações, autoria e representação, acompanhamento e ordem dos resultados. Valores de um mesmo campo são alternativas (por exemplo, `PEC` **ou** `PL`); campos diferentes são combinados entre si (por exemplo, tipo **e** tema).
+Além da busca e dos filtros rápidos, o botão **Filtros avançados** abre um painel com sete seções recolhíveis: identificação; tramitação; datas e atividade; votações; assuntos e autoria; acompanhamento; e ordenação. Tipos, situações, temas, autoria e partidos têm busca com sugestões limitadas, para que os catálogos oficiais grandes não sejam renderizados integralmente. Valores de um mesmo campo são alternativas (por exemplo, `PEC` **ou** `PL`); campos diferentes são combinados entre si (por exemplo, tipo **e** tema).
 
-Os filtros que podem ser compartilhados ficam na URL. Seleções múltiplas usam parâmetros repetidos, como `/?tipo=PEC&tipo=PL&tema=Saúde&tema=Trabalho`; intervalos usam, por exemplo, `anoInicio=2024&anoFim=2026` e `apresentadaInicio=2024-01-01`. Alterar um filtro volta à primeira página.
+Os filtros que podem ser compartilhados ficam na URL. Seleções múltiplas usam parâmetros repetidos, como `/?tipo=PEC&tipo=PL&tema=Saúde&tema=Trabalho`; intervalos usam, por exemplo, `anoInicio=2024&anoFim=2026` e `apresentadaInicio=2024-01-01`. Alterar um filtro volta à primeira página, preserva as demais seleções e omite parâmetros vazios. Se uma opção selecionada sair do catálogo sincronizado, ela continua visível como indisponível até ser removida explicitamente.
 
 Para tornar a busca rápida, o banco normaliza facetas sem alterar os textos oficiais: tipo, número e ano da proposta; uma fase geral determinística da tramitação; e uma categoria de resultado de votação (`aprovada`, `rejeitada`, `outros` ou `não informado`). A tela continua mostrando os títulos, situações e resultados oficiais quando eles existem.
 

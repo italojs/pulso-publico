@@ -5,7 +5,7 @@
 - Worktree: `.../.worktrees/advanced-filters`, branch `codex/advanced-filters`.
 - Runtime: Node.js `v26.8.1`, npm `11.19.0`, Next.js `16.3.4` e PostgreSQL local em `127.0.0.1:5435`.
 - Banco de desenvolvimento: `legislativo_codex_dev`; banco de testes: `legislativo_codex_test`.
-- A aplicação de validação foi iniciada somente nesta tarefa em `http://localhost:3001` (`DATABASE_URL` apontando para o banco de desenvolvimento). A instância principal em `:3000` não foi interrompida.
+- A validação inicial usou `http://localhost:3001`; a rodada de correção da auditoria final usou uma nova instância isolada em `http://localhost:3002`, ambas com `DATABASE_URL` apontando para desenvolvimento. A instância principal em `:3000` não foi interrompida e o processo em `:3002` foi encerrado ao final.
 
 ## Migração e backfill
 
@@ -16,7 +16,9 @@ PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':
   DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run db:migrate
 ```
 
-Resultado: exit code `0`; `drizzle-kit migrate` concluiu com `migrations applied successfully!`. A migração `0003_advanced_filters.sql` é aditiva (`CREATE TYPE`, `ALTER TABLE ... ADD COLUMN`, `UPDATE` de backfill e `CREATE INDEX`); não contém `DELETE` de projetos, movimentações, votos ou resumos de IA. As contagens posteriores foram: 257.366 projetos, 18.398 movimentações, 908 eventos de votação e 0 resumos de IA.
+Resultado: exit code `0`; `drizzle-kit migrate` concluiu com `migrations applied successfully!` em desenvolvimento e testes. A migração histórica `0003_advanced_filters.sql` foi preservada. A migração forward `0004_proposal_identity_backfill.sql` preenche tipo e número mesmo quando o ano não tem quatro dígitos, e reconhece os tipos oficiais hifenizados. Ambas são aditivas e não contêm `DELETE`. O total permaneceu em 257.366 projetos antes e depois da migração; movimentações (18.398), eventos de votação (908) e resumos de IA (0) também foram preservados.
+
+Antes de `0004`, havia 133.495 projetos sem tipo/número; 133.447 tinham identidade reconhecível pela gramática corrigida, incluindo 4.722 códigos hifenizados e 30.503 ocorrências de `PRL 1/0`. Depois da migração restaram somente 48 projetos sem tipo/número. O banco passou a ter 257.318 projetos com tipo e número, 123.890 com tipo e ano, 4.738 tipos hifenizados e 30.503 `PRL 1/0` com tipo/número preenchidos e ano nulo.
 
 Consulta de contagem, executada somente para leitura:
 
@@ -37,7 +39,10 @@ ORDER BY metric;
 | Métrica | Contagem |
 | --- | ---: |
 | Projetos | 257.366 |
-| Projetos com tipo e ano extraídos | 123.871 |
+| Projetos com tipo e número extraídos | 257.318 |
+| Projetos com tipo e ano extraídos | 123.890 |
+| Projetos com tipo hifenizado | 4.738 |
+| `PRL 1/0` com tipo/número e ano nulo | 30.503 |
 | Fase: apresentada | 110 |
 | Fase: em comissões | 13.300 |
 | Fase: pronta para votação | 3.896 |
@@ -61,6 +66,7 @@ Todas as consultas abaixo foram executadas no banco de desenvolvimento com `EXPL
 | Casa atual + fase + data | Câmara, `closed`, 2024-01-01 a 2025-01-01 (início inclusivo, fim exclusivo) | 12,035 ms | `bills_pkey` forneceu a ordem de `id` com `LIMIT 20`; os três predicados ficaram como filtro. Não houve `Seq Scan`. |
 | Nominal + resultado + UF | nominal, `approved`, UF `SP` | 2,241 ms | `bills_pkey` foi usado no acesso aos sete projetos finais. O planejador fez `Seq Scan` de `individual_votes` (2.413), `lawmakers` (731) e `vote_events` (908), e não selecionou `vote_events_result_category_idx`. |
 | Acompanhados autenticados | UUID inexistente de usuário, limite 20 | 0,017 ms | `followed_bills_user_bill_uq`; 0 linhas; acesso seguinte a `bills_pkey` não foi executado. |
+| Atividade recente | Últimos 30 dias sobre 257.366 projetos | 387,523 ms | 4.998 resultados; `Seq Scan` de `bills` e 257.366 buscas `Index Only Scan` em cada índice `movements_bill_occurred_at_idx` e `vote_events_bill_occurred_at_idx`. |
 
 As quatro formas completas executadas foram:
 
@@ -101,6 +107,8 @@ ORDER BY b.id LIMIT 20;
 
 Não foi criado novo índice. Os índices de faceta existem, mas o otimizador preferiu varrer somente relações pequenas em três casos, ou `bills_pkey` para satisfazer `ORDER BY b.id LIMIT 20`; nenhuma varredura sequencial de relação grande dominou o plano (a maior teve 2.789 linhas e o pior tempo foi 12,035 ms). Criar um índice adicional sem essa evidência contrariaria o critério da tarefa.
 
+O caso de atividade recente é a exceção: a expressão usa dois máximos correlacionados e fez cerca de 514 mil buscas indexadas, além da varredura dos projetos. O tempo local ficou abaixo de 0,4 s, portanto não se introduziu materialização ou infraestrutura de atualização nesta rodada. Esse plano deve ser acompanhado se o volume crescer ou se a latência da prévia degradar.
+
 ## Rotas e verificações automatizadas
 
 As duas requisições same-origin abaixo devolveram HTTP `200`:
@@ -117,9 +125,9 @@ POST /api/projects/search
 
 | Comando | Resultado observado |
 | --- | --- |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 206 testes aprovados em 8,52 s. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH TEST_DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_test' npm test` | exit `0`; 32 arquivos e 223 testes aprovados em 9,48 s. |
 | `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH npm run typecheck` | exit `0`; `tsc --noEmit` sem diagnósticos. |
-| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 287 ms, TypeScript em 230 ms e 15/15 páginas estáticas geradas. |
+| `PATH='/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin':$PATH DATABASE_URL='postgres://italojose@127.0.0.1:5435/legislativo_codex_dev' npm run build` | exit `0`; compilação em 335 ms, TypeScript em 217 ms e 15/15 páginas estáticas geradas. |
 
 ## Percurso manual reproduzível
 
@@ -128,8 +136,12 @@ Foi usada automação real do navegador embutido com árvore de acessibilidade e
 ### Desktop — 1280 × 720
 
 - Em `http://localhost:3001/`, o painel abriu e fechou por `Escape`; após o fechamento o foco voltou para o botão `Filtros avançados`.
-- Os sete grupos semânticos estavam disponíveis: identificação; tramitação; datas/atividade; votações; autoria/representação; acompanhamento; ordenação. Visualmente, a implementação os agrupa em cinco headings: **Identificação**, **Tramitação** (também datas/atividade), **Votações**, **Autoria e representação** (também acompanhamento) e **Ordem dos resultados**.
-- Foram selecionados `PEC` e `PL` no mesmo grupo e `Saúde` em outro. A prévia exibiu `157 projetos encontrados`; ao aplicar, a URL foi `/?tipo=PEC&tipo=PL&tema=Sa%C3%BAde&...&ordem=updated` e os resultados foram 157. Isso demonstra OU no grupo de tipo e E com o tema.
+- O painel expôs exatamente sete seções semânticas e recolhíveis: **Identificação**, **Tramitação**, **Datas e atividade**, **Votações**, **Assuntos e autoria**, **Acompanhamento** e **Ordenação**. Recolher e reabrir **Tramitação** alterou o estado nativo de `details` como esperado.
+- No catálogo real, o painel final manteve 91 checkboxes, 5 buscas e 20.068 caracteres de HTML, contra 912 checkboxes e cerca de 129 KB apontados pela auditoria. Tipos, situações, temas, autoria e partidos mostram no máximo 8 sugestões mais os valores já selecionados; buscas por `SBE-A` e por situação localizaram opções fora do primeiro lote.
+- Com `q=jornada`, o foco inicial foi para **Fechar filtros avançados**, nunca para o input hidden. A opção neutra **Todos** removeu apenas o filtro de presença de votação.
+- Na rodada final, aplicar `SBE-A` preservando `q=jornada` produziu exatamente `/?q=jornada&tipo=SBE-A`: nenhum parâmetro vazio ou valor privado foi incluído. Os testes automatizados preservam também todos os valores repetidos de fonte, situação e tema ao alterar apenas `q` ou uma dimensão rápida.
+- Um acompanhamento anônimo foi criado no próprio navegador. Ao ativar **Mostrar somente projetos que acompanho** pela primeira vez, a prévia exibiu `1 projeto encontrado`; depois de deixar de seguir com a página aberta, o evento local atualizou a mesma prévia para `0 projetos encontrados`. As referências ficaram fora da URL e da resposta.
+- O URL com `tipo=ZZZ`, `anoInicio=1999`, situação, tema e autoria antigos manteve todos selecionados e os marcou como `indisponível`, inclusive o ano, até remoção explícita.
 - As etiquetas ativas exibiram `Remover tipo PEC`, `Remover tipo PL` e `Remover tema Saúde`. Remover PEC levou a `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated` sem remover os demais filtros. `Limpar tudo` levou de volta a `/?`.
 - A página seguinte preservou filtros e acrescentou apenas `pagina=2`: `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated&pagina=2`. O botão Voltar restaurou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`.
 - O URL `/?q=zzzzvalidacaosemresultado20260904` exibiu `0 registros oficiais` e a mensagem `Nenhum projeto apareceu com esses filtros.`
@@ -156,8 +168,8 @@ No encerramento foram removidos explicitamente o acompanhamento, a sessão e o u
 
 O percurso abaixo foi repetido em 4 de setembro em um contexto Chrome novo, controlado por Playwright efêmero apontando para o executável local do Chrome. `window.innerWidth × window.innerHeight` devolveu exatamente `390x844`; não foi salva captura persistente. As respostas relevantes foram `POST /api/projects/filter-count 200` e, no acompanhamento anônimo, `POST /api/projects/search 200`.
 
-- O painel abriu com `dialog.open=true`, `position: fixed` e retângulo `390x844`. `Escape` o fechou e o foco retornou a `Filtros avançados`.
-- Foram marcados `PEC` e `PL` (mesmo campo) e `Saúde` (outro campo). A prévia exibiu `157 projetos encontrados`; o envio resultou em `/?tipo=PEC&tipo=PL&tema=Sa%C3%BAde&numero=&anoInicio=&anoFim=&apresentadaInicio=&apresentadaFim=&atividadeRecente=&atividadeInicio=&atividadeFim=&ordem=updated`, com `157 registros oficiais`. Isso confirma OU entre os dois tipos e E com o tema também no viewport móvel.
+- O painel abriu com retângulo exato `390x844`, sem overflow horizontal no documento nem no diálogo. O corpo era rolável e o rodapé de ação permaneceu visível.
+- A submissão agora usa o serializador canônico também na primeira navegação; os parâmetros vazios anteriormente observados foram eliminados.
 - As três etiquetas móveis foram `Tipo: PEC×`, `Tipo: PL×` e `Tema: Saúde×`. Acionar `Remover tipo PEC` deixou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`; `Limpar tudo` retornou a `http://localhost:3001/`.
 - Em um contexto novo sem cookies nem `localStorage`, abrir exatamente o URL compartilhável acima devolveu o mesmo URL e `157 registros oficiais`. Assim, os filtros públicos são reproduzíveis sem o estado do primeiro navegador.
 - A página seguinte foi `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated&pagina=2`; Voltar restaurou `/?tipo=PL&tema=Sa%C3%BAde&ordem=updated`.
@@ -178,6 +190,6 @@ Para o trecho autenticado móvel, a rota pública de cadastro criou `validation.
 
 ## Observações e limitações
 
-- A submissão nativa do formulário avançado incluiu alguns parâmetros vazios no primeiro URL aplicado (`numero=`, `anoInicio=`, `anoFim=`, `apresentadaInicio=`, `apresentadaFim=`, `atividadeRecente=`, `atividadeInicio=`, `atividadeFim=`). O parser os ignora e os links de etiquetas/paginação serializam somente valores ativos; o comportamento de filtro não mudou, mas o primeiro URL fica menos conciso.
-- A apresentação visual consolida os sete grupos funcionais em cinco headings: datas/atividade fica em **Tramitação** e acompanhamento em **Autoria e representação**. Todos os controles dos sete grupos especificados estavam presentes; trata-se de agrupamento visual, não de ausência de controle.
-- A conta temporária foi removida; portanto não há credencial nem acompanhamento de validação remanescente no banco de desenvolvimento.
+- A consulta de atividade recente em 30 dias permanece correlacionada. A medição local de 387,523 ms não justificou materialização fora do escopo, mas o plano e o volume de buscas indexadas estão registrados acima para monitoramento.
+- O navegador registrou apenas o aviso de desenvolvimento preexistente do Next.js sobre `scroll-behavior: smooth`; não houve erro funcional de aplicação durante o percurso final.
+- Nenhuma conta foi criada na rodada final. As contas temporárias das rodadas anteriores já tinham sido removidas; não há credencial nem acompanhamento de validação remanescente no banco de desenvolvimento. O banco de testes foi truncado ao final (`bills=0`, `users=0`, `followed_bills=0`).
