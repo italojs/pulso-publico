@@ -54,6 +54,36 @@ describe("advanced filters migration", () => {
             'camara', 'legacy-vote-2', '00000000-0000-0000-0000-000000000001', now(),
             'camara', 'Resultado histórico', 'Não foi rejeitada', false, false,
             'https://www.camara.leg.br/votacoes/legacy-vote-2', now()
+          ),
+          (
+            'camara', 'legacy-vote-3', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', 'Não foram aprovados!', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-3', now()
+          ),
+          (
+            'camara', 'legacy-vote-4', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', '(Não foram aprovados)', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-4', now()
+          ),
+          (
+            'camara', 'legacy-vote-5', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', 'Resultado:(Não foram aprovados)', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-5', now()
+          ),
+          (
+            'camara', 'legacy-vote-6', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', 'Não foram rejeitados!', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-6', now()
+          ),
+          (
+            'camara', 'legacy-vote-7', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', '(Não foram rejeitados)', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-7', now()
+          ),
+          (
+            'camara', 'legacy-vote-8', '00000000-0000-0000-0000-000000000001', now(),
+            'camara', 'Resultado histórico', 'Resultado:(Não foram rejeitados)', false, false,
+            'https://www.camara.leg.br/votacoes/legacy-vote-8', now()
           )
       `;
 
@@ -66,6 +96,12 @@ describe("advanced filters migration", () => {
       `).toEqual([
         { result: "Não foram aprovados", category: "other" },
         { result: "Não foi rejeitada", category: "other" },
+        { result: "Não foram aprovados!", category: "other" },
+        { result: "(Não foram aprovados)", category: "other" },
+        { result: "Resultado:(Não foram aprovados)", category: "other" },
+        { result: "Não foram rejeitados!", category: "other" },
+        { result: "(Não foram rejeitados)", category: "other" },
+        { result: "Resultado:(Não foram rejeitados)", category: "other" },
       ]);
     } finally {
       await database.unsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
