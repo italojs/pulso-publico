@@ -112,6 +112,12 @@ const rawLawmakerSchema = z.object({
   IdentificacaoParlamentar: identificationSchema,
 });
 
+const rawLawmakerDetailSchema = z.object({
+  DetalheParlamentar: z.object({
+    Parlamentar: rawLawmakerSchema,
+  }),
+});
+
 function checkedAtIso(checkedAt: Date) {
   return checkedAt.toISOString();
 }
@@ -149,7 +155,9 @@ function secureUrl(value: string | null | undefined) {
 }
 
 function processIdentity(value: z.infer<typeof rawProcessSchema>) {
-  const match = value.identificacao.match(/^([^\s]+)\s+(\d+)\/(\d{4})$/u);
+  const match = value.identificacao.match(
+    /^([^\s]+)\s+(\d+)\/(\d{4})(?:\s+.+)?$/u,
+  );
   const sigla = blankToNull(value.sigla) ?? match?.[1] ?? null;
   const numero = identifierOrNull(value.numero) ?? match?.[2] ?? null;
   const ano = value.ano ?? (match?.[3] ? Number(match[3]) : null);
@@ -276,7 +284,7 @@ export function mapSenadoMovement(
 
   return MovementRecord.parse({
     source: "senado",
-    externalId: value.id,
+    externalId: `${billId}:${value.id}`,
     billExternalId: billId,
     occurredAt: localDateTimeToIso(value.data),
     sequence,
@@ -342,7 +350,11 @@ export function mapSenadoIndividualVote(
   });
 }
 
-export function mapSenadoLawmaker(raw: unknown, checkedAt: Date): Lawmaker {
+export function mapSenadoLawmaker(
+  raw: unknown,
+  checkedAt: Date,
+  active = true,
+): Lawmaker {
   const value = rawLawmakerSchema.parse(raw).IdentificacaoParlamentar;
   return LawmakerRecord.parse({
     source: "senado",
@@ -353,9 +365,17 @@ export function mapSenadoLawmaker(raw: unknown, checkedAt: Date): Lawmaker {
     party: blankToNull(value.SiglaPartidoParlamentar),
     region: blankToNull(value.UfParlamentar),
     photoUrl: secureUrl(value.UrlFotoParlamentar),
-    active: true,
+    active,
     officialUrl: secureUrl(value.UrlPaginaParlamentar)
       ?? `https://www25.senado.leg.br/web/senadores/senador/-/perfil/${value.CodigoParlamentar}`,
     checkedAt: checkedAtIso(checkedAt),
   });
+}
+
+export function mapSenadoLawmakerDetail(
+  raw: unknown,
+  checkedAt: Date,
+): Lawmaker {
+  const value = rawLawmakerDetailSchema.parse(raw);
+  return mapSenadoLawmaker(value.DetalheParlamentar.Parlamentar, checkedAt, false);
 }

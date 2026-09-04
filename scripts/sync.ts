@@ -31,6 +31,7 @@ try {
     { env },
     databaseModule,
     { LegislativeRepository },
+    { withAdvisoryLock },
     { syncSource },
   ] = await Promise.all([
     import("#/integrations/camara/client"),
@@ -38,6 +39,7 @@ try {
     import("#/server/config"),
     import("#/server/db/client"),
     import("#/server/db/repositories"),
+    import("#/server/db/advisory-lock"),
     import("#/jobs/sync-source"),
   ]);
   closeDatabase = async () => databaseModule.sql.end({ timeout: 5 });
@@ -46,17 +48,27 @@ try {
     camara: new CamaraAdapter(),
     senado: new SenadoAdapter(),
   };
-  let failed = false;
+  const execution = await withAdvisoryLock(
+    databaseModule.sql,
+    "legislative-sync",
+    async () => {
+      let failed = false;
+      for (const source of sources) {
+        const report = await syncSource(adapters[source], repository, new Date(), {
+          initialHistoryMonths: env.INITIAL_HISTORY_MONTHS,
+        });
+        console.log(JSON.stringify(report));
+        failed ||= report.failed;
+      }
+      return { failed };
+    },
+  );
 
-  for (const source of sources) {
-    const report = await syncSource(adapters[source], repository, new Date(), {
-      initialHistoryMonths: env.INITIAL_HISTORY_MONTHS,
-    });
-    console.log(JSON.stringify(report));
-    failed ||= report.failed;
+  if (!execution.acquired) {
+    console.log(JSON.stringify({ skipped: "already_running" }));
+  } else if (execution.value.failed) {
+    process.exitCode = 1;
   }
-
-  if (failed) process.exitCode = 1;
 } catch {
   console.error(JSON.stringify({ status: "failed", code: "STARTUP_ERROR" }));
   process.exitCode = 1;

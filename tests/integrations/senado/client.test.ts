@@ -68,6 +68,41 @@ describe("SenadoAdapter", () => {
     );
   });
 
+  it("filters recent reconciliation results by their official update timestamp", async () => {
+    const requestedUrls: URL[] = [];
+    const inside = {
+      ...processesFixture[0],
+      id: 8972242,
+      codigoMateria: 172004,
+      dataUltimaAtualizacao: "2026-09-02T08:00:00.000",
+    };
+    const outside = {
+      ...processesFixture[0],
+      id: 8972243,
+      codigoMateria: 172005,
+      dataUltimaAtualizacao: "2026-09-03T08:00:00.000",
+    };
+    const adapter = new SenadoAdapter({
+      baseUrl: "https://senado.test/dadosabertos",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async (url) => {
+        requestedUrls.push(url);
+        return jsonResponse([inside, outside]);
+      },
+    });
+
+    const page = await adapter.listBillsChangedSince(
+      new Date("2026-09-02T00:00:00.000Z"),
+      undefined,
+      new Date("2026-09-02T23:59:59.999Z"),
+    );
+
+    expect(requestedUrls).toHaveLength(1);
+    expect(requestedUrls[0]?.searchParams.get("numdias")).toBe("2");
+    expect(page.items.map((item) => item.externalId)).toEqual(["8972242"]);
+    expect(page.nextCursor).toBeNull();
+  });
+
   it("hydrates process relations and nominal votes from current JSON endpoints", async () => {
     const adapter = new SenadoAdapter({
       baseUrl: "https://senado.test/dadosabertos",
@@ -95,5 +130,21 @@ describe("SenadoAdapter", () => {
     expect(voteEvents).toHaveLength(1);
     expect(individualVotes).toHaveLength(2);
     expect(lawmakers.items).toHaveLength(1);
+  });
+
+  it("deduplicates a movement repeated across Senate process branches", async () => {
+    const repeatedProcess = {
+      ...processFixture,
+      autuacoes: [processFixture.autuacoes[0], processFixture.autuacoes[0]],
+    };
+    const adapter = new SenadoAdapter({
+      baseUrl: "https://senado.test/dadosabertos",
+      fetcher: async () => jsonResponse(repeatedProcess),
+    });
+
+    const movements = await adapter.listBillMovements("8972241");
+
+    expect(movements).toHaveLength(1);
+    expect(movements[0]?.sequence).toBe(0);
   });
 });

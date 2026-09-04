@@ -88,8 +88,18 @@ const rawDeputySchema = z.object({
   urlFoto: z.string().url().nullish(),
 });
 
+const rawDeputyDetailSchema = z.object({
+  id: identifier,
+  uri: z.string().url(),
+  nomeCivil: z.string().min(1),
+  ultimoStatus: rawDeputySchema.extend({
+    nomeEleitoral: z.string().nullish(),
+    situacao: z.string().nullish(),
+  }).nullish(),
+});
+
 const rawIndividualVoteSchema = z.object({
-  tipoVoto: z.string().min(1),
+  tipoVoto: z.string().min(1).nullish(),
   dataRegistroVoto: z.string().nullish(),
   deputado_: rawDeputySchema,
 });
@@ -284,14 +294,15 @@ export function mapCamaraIndividualVote(
 ): IndividualVote {
   const value = rawIndividualVoteSchema.parse(raw);
   const lawmakerExternalId = value.deputado_.id;
+  const rawChoice = blankToNull(value.tipoVoto) ?? "Não informado pela fonte";
 
   return IndividualVoteRecord.parse({
     source: "camara",
     externalId: `${voteId}:${lawmakerExternalId}`,
     voteEventExternalId: voteId,
     lawmakerExternalId,
-    choice: normalizeVoteChoice(value.tipoVoto),
-    rawChoice: value.tipoVoto,
+    choice: value.tipoVoto ? normalizeVoteChoice(value.tipoVoto) : "indisponivel",
+    rawChoice,
     officialUrl: `https://dadosabertos.camara.leg.br/api/v2/votacoes/${encodeURIComponent(voteId)}/votos`,
     checkedAt: checkedAtIso(checkedAt),
   });
@@ -310,6 +321,33 @@ export function mapCamaraLawmaker(raw: unknown, checkedAt: Date): Lawmaker {
     region: blankToNull(value.siglaUf),
     photoUrl: blankToNull(value.urlFoto),
     active: true,
+    officialUrl: `https://www.camara.leg.br/deputados/${value.id}`,
+    checkedAt: checkedAtIso(checkedAt),
+  });
+}
+
+export function mapCamaraLawmakerDetail(raw: unknown, checkedAt: Date): Lawmaker {
+  const value = rawDeputyDetailSchema.parse(raw);
+  const status = value.ultimoStatus;
+  const normalizedSituation = status?.situacao
+    ?.normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+
+  return LawmakerRecord.parse({
+    source: "camara",
+    externalId: value.id,
+    name: value.nomeCivil,
+    electoralName:
+      blankToNull(status?.nomeEleitoral)
+      ?? blankToNull(status?.nome)
+      ?? value.nomeCivil,
+    role: "deputado_federal",
+    party: blankToNull(status?.siglaPartido),
+    region: blankToNull(status?.siglaUf),
+    photoUrl: blankToNull(status?.urlFoto),
+    active: normalizedSituation === "exercicio",
     officialUrl: `https://www.camara.leg.br/deputados/${value.id}`,
     checkedAt: checkedAtIso(checkedAt),
   });

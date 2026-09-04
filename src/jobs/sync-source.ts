@@ -11,6 +11,10 @@ import { OfficialSourceError } from "#/server/http/retrying-fetch";
 export interface SyncRepository {
   upsertBillGraph(graph: BillGraph): Promise<void>;
   upsertLawmakers(items: Lawmaker[]): Promise<void>;
+  findMissingLawmakerExternalIds(
+    source: LegislativeSourceName,
+    externalIds: readonly string[],
+  ): Promise<string[]>;
   getCheckpoint(source: LegislativeSourceName): Promise<Date | null>;
   saveCheckpoint(source: LegislativeSourceName, value: Date): Promise<void>;
   markSourceSuccess(source: LegislativeSourceName, checkedAt: Date): Promise<void>;
@@ -75,9 +79,9 @@ function summaryGraph(bill: Bill): BillGraph {
   };
 }
 
-async function syncLawmakers(
+export async function syncLawmakers(
   adapter: LegislativeSourceAdapter,
-  repository: SyncRepository,
+  repository: Pick<SyncRepository, "upsertLawmakers">,
 ) {
   let count = 0;
   let cursor: string | undefined;
@@ -104,9 +108,8 @@ async function syncLawmakers(
   return count;
 }
 
-async function hydrateBillGraph(
+export async function loadBillGraph(
   adapter: LegislativeSourceAdapter,
-  repository: SyncRepository,
   billExternalId: string,
 ): Promise<BillGraph> {
   const [bill, authors, topics, movements, voteEvents] = await Promise.all([
@@ -125,10 +128,54 @@ async function hydrateBillGraph(
         .map((voteEvent) => adapter.listIndividualVotes(voteEvent.externalId)),
     )
   ).flat();
-  const graph = { bill, authors, topics, movements, voteEvents, individualVotes };
+  return { bill, authors, topics, movements, voteEvents, individualVotes };
+}
+
+async function hydrateBillGraph(
+  adapter: LegislativeSourceAdapter,
+  repository: Pick<
+    SyncRepository,
+    "findMissingLawmakerExternalIds" | "upsertBillGraph" | "upsertLawmakers"
+  >,
+  billExternalId: string,
+): Promise<BillGraph> {
+  const graph = await loadBillGraph(adapter, billExternalId);
+  const referencedLawmakerIds = [
+    ...graph.authors.flatMap((author) =>
+      author.lawmakerExternalId ? [author.lawmakerExternalId] : []
+    ),
+    ...graph.individualVotes.map((vote) => vote.lawmakerExternalId),
+  ];
+  const missingLawmakerIds = await repository.findMissingLawmakerExternalIds(
+    adapter.source,
+    referencedLawmakerIds,
+  );
+  if (missingLawmakerIds.length > 0) {
+    const lawmakers: Lawmaker[] = [];
+    for (let index = 0; index < missingLawmakerIds.length; index += 8) {
+      const batch = missingLawmakerIds.slice(index, index + 8);
+      lawmakers.push(
+        ...await Promise.all(
+          batch.map((externalId) => adapter.getLawmaker(externalId)),
+        ),
+      );
+    }
+    for (const [index, lawmaker] of lawmakers.entries()) {
+      const expectedExternalId = missingLawmakerIds[index];
+      if (
+        lawmaker.source !== adapter.source
+        || lawmaker.externalId !== expectedExternalId
+      ) {
+        throw new Error(`Adapter ${adapter.source} returned an unexpected lawmaker`);
+      }
+    }
+    await repository.upsertLawmakers(lawmakers);
+  }
   await repository.upsertBillGraph(graph);
   return graph;
 }
+
+export { hydrateBillGraph as persistHydratedBillGraph };
 
 export async function hydrateBill(
   adapter: LegislativeSourceAdapter,
@@ -148,7 +195,7 @@ function addGraphToReport(report: SyncReport, graph: BillGraph) {
   report.individualVotes += graph.individualVotes.length;
 }
 
-function errorCode(error: unknown) {
+export function sourceErrorCode(error: unknown) {
   if (error instanceof OfficialSourceError) {
     if (error.status !== null) return `HTTP_${error.status}`;
     return error.retryable ? "UPSTREAM_UNAVAILABLE" : "CONTRACT_MISMATCH";
@@ -199,7 +246,7 @@ export async function syncSource(
   } catch (error) {
     report.failed = true;
     try {
-      await repository.markSourceFailure(adapter.source, now, errorCode(error));
+      await repository.markSourceFailure(adapter.source, now, sourceErrorCode(error));
     } catch {
       // The report remains failed if both the source and health persistence are unavailable.
     }

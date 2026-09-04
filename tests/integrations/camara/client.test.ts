@@ -67,4 +67,52 @@ describe("CamaraAdapter", () => {
     });
     await expect(result).rejects.toBeInstanceOf(OfficialSourceError);
   });
+
+  it("preserves a failed official HTTP status without parsing its body", async () => {
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      fetcher: async () => jsonResponse({ dados: [], links: [] }),
+    });
+    const failingAdapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      fetcher: async () => new Response("temporary failure", { status: 503 }),
+    });
+
+    await expect(failingAdapter.listActiveLawmakers()).rejects.toMatchObject({
+      name: "OfficialSourceError",
+      status: 503,
+      retryable: true,
+    });
+    await expect(adapter.listActiveLawmakers()).resolves.toMatchObject({ items: [] });
+  });
+
+  it("does not advance beyond an explicit reconciliation boundary", async () => {
+    const requestedUrls: URL[] = [];
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async (url) => {
+        requestedUrls.push(url);
+        return jsonResponse({ dados: [], links: [] });
+      },
+    });
+
+    const first = await adapter.listBillsChangedSince(
+      new Date("2026-09-01T00:00:00.000Z"),
+      undefined,
+      new Date("2026-09-01T23:59:59.999Z"),
+    );
+    const second = await adapter.listBillsChangedSince(
+      new Date("2026-09-01T00:00:00.000Z"),
+      first.nextCursor ?? undefined,
+      new Date("2026-09-01T23:59:59.999Z"),
+    );
+
+    expect(requestedUrls).toHaveLength(2);
+    expect(requestedUrls[0]?.searchParams.get("dataInicio")).toBe("2026-08-31");
+    expect(requestedUrls[0]?.searchParams.get("dataFim")).toBe("2026-08-31");
+    expect(requestedUrls[1]?.searchParams.get("dataInicio")).toBe("2026-09-01");
+    expect(requestedUrls[1]?.searchParams.get("dataFim")).toBe("2026-09-01");
+    expect(second.nextCursor).toBeNull();
+  });
 });

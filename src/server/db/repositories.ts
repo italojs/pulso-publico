@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type {
@@ -285,6 +285,26 @@ export class LegislativeRepository {
           });
       }
     });
+  }
+
+  async findMissingLawmakerExternalIds(
+    source: LegislativeSourceName,
+    externalIds: readonly string[],
+  ): Promise<string[]> {
+    const uniqueIds = [...new Set(externalIds)];
+    if (uniqueIds.length === 0) return [];
+
+    const stored = await this.database
+      .select({ externalId: lawmakers.externalId })
+      .from(lawmakers)
+      .where(
+        and(
+          eq(lawmakers.source, source),
+          inArray(lawmakers.externalId, uniqueIds),
+        ),
+      );
+    const storedIds = new Set(stored.map((item) => item.externalId));
+    return uniqueIds.filter((externalId) => !storedIds.has(externalId));
   }
 
   async getCheckpoint(source: LegislativeSourceName): Promise<Date | null> {

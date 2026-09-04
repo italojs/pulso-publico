@@ -16,6 +16,7 @@ import {
   mapSenadoBill,
   mapSenadoIndividualVote,
   mapSenadoLawmaker,
+  mapSenadoLawmakerDetail,
   mapSenadoMovement,
   mapSenadoTopic,
   mapSenadoVoteEvent,
@@ -36,6 +37,9 @@ export interface SenadoAdapterOptions {
 }
 
 const processListSchema = z.array(z.unknown());
+const processUpdateSchema = z.object({
+  dataUltimaAtualizacao: z.string().min(1),
+});
 const processRelationsSchema = z.object({
   documento: z.object({
     autoria: z.array(z.unknown()).optional(),
@@ -84,6 +88,25 @@ function isInside(value: string | null, since: string, until: string) {
     && Temporal.Instant.compare(instant, Temporal.Instant.from(until)) <= 0;
 }
 
+function localTimestampToInstant(value: string) {
+  const normalized = value.trim().replace(" ", "T");
+  if (/(?:Z|[+-]\d{2}:\d{2})$/u.test(normalized)) {
+    return Temporal.Instant.from(normalized);
+  }
+  return Temporal.PlainDateTime.from(normalized)
+    .toZonedDateTime("America/Sao_Paulo")
+    .toInstant();
+}
+
+function wasUpdatedInside(raw: unknown, since: Date, until: Date) {
+  const value = processUpdateSchema.parse(raw);
+  const updatedAt = localTimestampToInstant(value.dataUltimaAtualizacao);
+  const start = Temporal.Instant.from(since.toISOString());
+  const end = Temporal.Instant.from(until.toISOString());
+  return Temporal.Instant.compare(updatedAt, start) >= 0
+    && Temporal.Instant.compare(updatedAt, end) <= 0;
+}
+
 export class SenadoAdapter implements LegislativeSourceAdapter {
   readonly source = "senado" as const;
   private readonly baseUrl: URL;
@@ -97,15 +120,37 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
     this.now = options.now ?? (() => new Date());
   }
 
-  async listBillsChangedSince(since: Date, cursor?: string): Promise<SyncPage<Bill>> {
-    const now = this.now();
-    if (since.getTime() > now.getTime()) return { items: [], nextCursor: null };
+  async listBillsChangedSince(
+    since: Date,
+    cursor?: string,
+    until?: Date,
+  ): Promise<SyncPage<Bill>> {
+    const observedAt = this.now();
+    const effectiveUntil = until ?? observedAt;
+    if (since.getTime() > effectiveUntil.getTime()) {
+      return { items: [], nextCursor: null };
+    }
 
-    const elapsedDays = Math.max(1, Math.ceil((now.getTime() - since.getTime()) / 86_400_000));
-    if (!cursor && elapsedDays <= 30) {
-      const url = this.url("processo", { numdias: String(elapsedDays) });
-      const values = processListSchema.parse(await this.fetchJson(url));
-      return { items: this.mapBills(url, values), nextCursor: null };
+    const recentDays = Math.max(
+      1,
+      Math.ceil((observedAt.getTime() - since.getTime()) / 86_400_000),
+    );
+    if (
+      !cursor
+      && recentDays <= 30
+      && effectiveUntil.getTime() <= observedAt.getTime()
+    ) {
+      const url = this.url("processo", { numdias: String(recentDays) });
+      try {
+        const values = processListSchema.parse(await this.fetchJson(url));
+        const boundedValues = until
+          ? values.filter((raw) => wasUpdatedInside(raw, since, until))
+          : values;
+        return { items: this.mapBills(url, boundedValues), nextCursor: null };
+      } catch (error) {
+        if (error instanceof OfficialSourceError) throw error;
+        throw this.contractError(url, error);
+      }
     }
 
     const state = cursor
@@ -113,9 +158,9 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
       : {
           kind: "history" as const,
           nextStartDate: dateInSaoPaulo(since).toString(),
-          finalDate: dateInSaoPaulo(now).toString(),
+          finalDate: dateInSaoPaulo(effectiveUntil).toString(),
           sinceInstant: since.toISOString(),
-          untilInstant: now.toISOString(),
+          untilInstant: effectiveUntil.toISOString(),
         };
     const start = Temporal.PlainDate.from(state.nextStartDate);
     const finalDate = Temporal.PlainDate.from(state.finalDate);
@@ -188,9 +233,12 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
       const informes = (detail.autuacoes ?? []).flatMap(
         (autuacao) => autuacao.informesLegislativos ?? [],
       );
-      return informes.map((movement, sequence) =>
+      const mapped = informes.map((movement, sequence) =>
         mapSenadoMovement(movement, billExternalId, sequence, this.now()),
       );
+      return [
+        ...new Map(mapped.map((movement) => [movement.externalId, movement])).values(),
+      ].map((movement, sequence) => ({ ...movement, sequence }));
     } catch (error) {
       throw this.contractError(url, error);
     }
@@ -243,6 +291,16 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
         ),
         nextCursor: null,
       };
+    } catch (error) {
+      if (error instanceof OfficialSourceError) throw error;
+      throw this.contractError(url, error);
+    }
+  }
+
+  async getLawmaker(lawmakerExternalId: string): Promise<Lawmaker> {
+    const url = this.url(`senador/${encodeURIComponent(lawmakerExternalId)}`);
+    try {
+      return mapSenadoLawmakerDetail(await this.fetchJson(url), this.now());
     } catch (error) {
       if (error instanceof OfficialSourceError) throw error;
       throw this.contractError(url, error);

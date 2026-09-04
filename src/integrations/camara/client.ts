@@ -18,6 +18,7 @@ import {
   mapCamaraBill,
   mapCamaraIndividualVote,
   mapCamaraLawmaker,
+  mapCamaraLawmakerDetail,
   mapCamaraMovement,
   mapCamaraTopic,
   mapCamaraVoteEvent,
@@ -96,9 +97,17 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
     });
   }
 
-  async listBillsChangedSince(since: Date, cursor?: string): Promise<SyncPage<Bill>> {
+  async listBillsChangedSince(
+    since: Date,
+    cursor?: string,
+    until?: Date,
+  ): Promise<SyncPage<Bill>> {
+    const effectiveUntil = until ?? this.now();
     const initialDay = dateInSaoPaulo(since);
-    const endDate = dateInSaoPaulo(this.now());
+    const endDate = dateInSaoPaulo(effectiveUntil);
+    if (since.getTime() > effectiveUntil.getTime()) {
+      return { items: [], nextCursor: null };
+    }
     if (!cursor && Temporal.PlainDate.compare(initialDay, endDate) > 0) {
       return { items: [], nextCursor: null };
     }
@@ -231,6 +240,16 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
     };
   }
 
+  async getLawmaker(lawmakerExternalId: string): Promise<Lawmaker> {
+    const url = this.url(`deputados/${encodeURIComponent(lawmakerExternalId)}`);
+    const envelope = await this.fetchItem(url);
+    try {
+      return mapCamaraLawmakerDetail(envelope.dados, this.now());
+    } catch (error) {
+      throw this.contractError(url, error);
+    }
+  }
+
   private billDayUrl(day: string) {
     return this.url("proposicoes", {
       dataInicio: day,
@@ -280,6 +299,7 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
   private async fetchCollectionPage(url: URL) {
     try {
       const response = await this.fetcher(url, { headers: { Accept: "application/json" } });
+      this.assertSuccessfulResponse(response, url);
       return collectionEnvelopeSchema.parse(await response.json());
     } catch (error) {
       if (error instanceof OfficialSourceError) throw error;
@@ -290,11 +310,22 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
   private async fetchItem(url: URL) {
     try {
       const response = await this.fetcher(url, { headers: { Accept: "application/json" } });
+      this.assertSuccessfulResponse(response, url);
       return itemEnvelopeSchema.parse(await response.json());
     } catch (error) {
       if (error instanceof OfficialSourceError) throw error;
       throw this.contractError(url, error);
     }
+  }
+
+  private assertSuccessfulResponse(response: Response, url: URL) {
+    if (response.ok) return;
+    throw new OfficialSourceError(
+      `Câmara request failed with status ${response.status}`,
+      url.href,
+      response.status,
+      response.status === 408 || response.status === 429 || response.status >= 500,
+    );
   }
 
   private async fetchAllCollectionItems(initialUrl: URL) {

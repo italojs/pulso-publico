@@ -156,6 +156,14 @@ describe("LegislativeRepository", () => {
     expect(await testDb.select().from(bills)).toHaveLength(0);
   });
 
+  it("returns only referenced lawmakers that have not been stored", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+
+    await expect(
+      repository.findMissingLawmakerExternalIds("camara", ["204485", "220579"]),
+    ).resolves.toEqual(["220579"]);
+  });
+
   it("stores checkpoints and bounded source health state", async () => {
     const firstFailure = new Date("2026-09-03T18:00:00.000Z");
     await repository.saveCheckpoint("camara", firstFailure);

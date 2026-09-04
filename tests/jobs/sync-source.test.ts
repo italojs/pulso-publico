@@ -110,7 +110,9 @@ class FakeAdapter implements LegislativeSourceAdapter {
   receivedSince: Date | null = null;
   movementCalls = 0;
   individualCalls = 0;
+  lawmakerDetailCalls: string[] = [];
   failListing = false;
+  individualVoteValue: IndividualVote = individualVote;
 
   constructor(source: LegislativeSourceName = "camara") {
     this.source = source;
@@ -147,11 +149,20 @@ class FakeAdapter implements LegislativeSourceAdapter {
 
   async listIndividualVotes(): Promise<IndividualVote[]> {
     this.individualCalls += 1;
-    return [individualVote];
+    return [this.individualVoteValue];
   }
 
   async listActiveLawmakers(): Promise<SyncPage<Lawmaker>> {
     return { items: [this.lawmakerForSource()], nextCursor: null };
+  }
+
+  async getLawmaker(lawmakerExternalId: string): Promise<Lawmaker> {
+    this.lawmakerDetailCalls.push(lawmakerExternalId);
+    return {
+      ...this.lawmakerForSource(),
+      externalId: lawmakerExternalId,
+      active: false,
+    };
   }
 
   private billForSource(): Bill {
@@ -190,6 +201,18 @@ class FakeRepository implements SyncRepository {
 
   async upsertLawmakers(items: Lawmaker[]) {
     this.lawmakers.push(...items);
+  }
+
+  async findMissingLawmakerExternalIds(
+    source: LegislativeSourceName,
+    externalIds: readonly string[],
+  ) {
+    const stored = new Set(
+      this.lawmakers
+        .filter((item) => item.source === source)
+        .map((item) => item.externalId),
+    );
+    return externalIds.filter((externalId) => !stored.has(externalId));
   }
 
   async getCheckpoint() {
@@ -276,6 +299,27 @@ describe("syncSource", () => {
       individualVotes: 1,
       failed: false,
     });
+  });
+
+  it("loads historical lawmakers referenced by nominal votes before persistence", async () => {
+    const adapter = new FakeAdapter();
+    adapter.individualVoteValue = {
+      ...individualVote,
+      externalId: "vote-1:220579",
+      lawmakerExternalId: "220579",
+    };
+    const repository = new FakeRepository();
+    repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
+
+    const report = await syncSource(adapter, repository, now, {
+      initialHistoryMonths: 36,
+    });
+
+    expect(report.failed).toBe(false);
+    expect(adapter.lawmakerDetailCalls).toEqual(["220579"]);
+    expect(repository.lawmakers).toContainEqual(
+      expect.objectContaining({ externalId: "220579", active: false }),
+    );
   });
 
   it("does not advance the checkpoint when an official source fails", async () => {

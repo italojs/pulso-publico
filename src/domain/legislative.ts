@@ -107,7 +107,11 @@ export interface SyncPage<T> {
 
 export interface LegislativeSourceAdapter {
   readonly source: LegislativeSourceName;
-  listBillsChangedSince(since: Date, cursor?: string): Promise<SyncPage<Bill>>;
+  listBillsChangedSince(
+    since: Date,
+    cursor?: string,
+    until?: Date,
+  ): Promise<SyncPage<Bill>>;
   getBill(billExternalId: string): Promise<Bill>;
   listBillAuthors(billExternalId: string): Promise<BillAuthor[]>;
   listBillTopics(billExternalId: string): Promise<BillTopic[]>;
@@ -115,6 +119,7 @@ export interface LegislativeSourceAdapter {
   listBillVoteEvents(billExternalId: string): Promise<VoteEvent[]>;
   listIndividualVotes(voteEventExternalId: string): Promise<IndividualVote[]>;
   listActiveLawmakers(cursor?: string): Promise<SyncPage<Lawmaker>>;
+  getLawmaker(lawmakerExternalId: string): Promise<Lawmaker>;
 }
 
 export interface LegislativeBulkBootstrap {

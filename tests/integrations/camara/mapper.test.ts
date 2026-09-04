@@ -12,6 +12,7 @@ import {
   mapCamaraBill,
   mapCamaraIndividualVote,
   mapCamaraLawmaker,
+  mapCamaraLawmakerDetail,
   mapCamaraMovement,
   mapCamaraTopic,
   mapCamaraVoteEvent,
@@ -84,6 +85,22 @@ describe("Câmara mapper", () => {
     });
   });
 
+  it("marks a nominal vote with no published choice as unavailable", () => {
+    const vote = mapCamaraIndividualVote(
+      {
+        ...individualVoteFixture.dados[0],
+        tipoVoto: null,
+      },
+      "2579999-8",
+      checkedAt,
+    );
+
+    expect(vote).toMatchObject({
+      choice: "indisponivel",
+      rawChoice: "Não informado pela fonte",
+    });
+  });
+
   it("maps an active federal deputy", () => {
     const lawmaker = mapCamaraLawmaker(lawmakerFixture.dados[0], checkedAt);
 
@@ -93,6 +110,34 @@ describe("Câmara mapper", () => {
       role: "deputado_federal",
       region: "AP",
       active: true,
+    });
+  });
+
+  it("maps a former deputy from the official detail response", () => {
+    const lawmaker = mapCamaraLawmakerDetail(
+      {
+        id: 220579,
+        uri: "https://dadosabertos.camara.leg.br/api/v2/deputados/220579",
+        nomeCivil: "Silvia Nobre Lopes",
+        ultimoStatus: {
+          id: 220579,
+          uri: "https://dadosabertos.camara.leg.br/api/v2/deputados/220579",
+          nome: "Silvia Waiãpi",
+          nomeEleitoral: "Silvia Waiãpi",
+          siglaPartido: "PL",
+          siglaUf: "AP",
+          urlFoto: "https://www.camara.leg.br/internet/deputado/bandep/220579.jpg",
+          situacao: "Suplência",
+        },
+      },
+      checkedAt,
+    );
+
+    expect(lawmaker).toMatchObject({
+      externalId: "220579",
+      name: "Silvia Nobre Lopes",
+      electoralName: "Silvia Waiãpi",
+      active: false,
     });
   });
 });
