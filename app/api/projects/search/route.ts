@@ -1,0 +1,16 @@
+import { UserRepository } from "#/auth/user-repository";
+import { db } from "#/server/db/client";
+import { sameOrigin } from "#/server/http/request-origin";
+import { readPublicFilterRequest } from "#/server/public/filter-contract";
+import { listPublicBills } from "#/server/public/queries";
+
+const users = new UserRepository(db);
+
+export async function POST(request: Request) {
+  if (!sameOrigin(request)) return Response.json({ code: "CROSS_ORIGIN_REQUEST" }, { status: 403 });
+
+  const parsed = await readPublicFilterRequest(request, users);
+  if (!parsed) return Response.json({ code: "INVALID_FILTER_REQUEST" }, { status: 400 });
+
+  return Response.json(await listPublicBills(db, parsed.filters, parsed.scope));
+}
