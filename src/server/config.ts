@@ -10,6 +10,9 @@ const environmentSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).optional(),
   OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
+  VAPID_SUBJECT: z.string().min(1).optional(),
+  VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+  VAPID_PRIVATE_KEY: z.string().min(1).optional(),
 });
 
 export function parseEnv(input: Readonly<Record<string, string | undefined>>) {

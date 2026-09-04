@@ -334,6 +334,22 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .lawmakerVote p { margin: 0; color: var(--ink-soft); font-size: 14px; }
 .lawmakerVote dl { display: grid; padding-top: 14px; margin: 0; border-top: 1px solid var(--line); grid-template-columns: 1fr 1fr; gap: 14px; }
 .lawmakerVote .officialLink { font-size: 13px; }
+.authPage { display: grid; width: min(980px, calc(100% - 40px)); min-height: calc(100vh - 210px); padding: 70px 0; margin: 0 auto; align-items: center; grid-template-columns: 1.15fr .85fr; gap: clamp(45px, 8vw, 100px); }
+.authCard { padding: clamp(28px, 5vw, 54px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: white; box-shadow: var(--shadow); }
+.authCard h1 { margin: 9px 0 12px; font-family: var(--display); font-size: clamp(48px, 7vw, 76px); line-height: .9; }
+.authCard > p { color: var(--ink-soft); }
+.authCard form { display: grid; margin-top: 26px; gap: 16px; }
+.authCard label { display: grid; color: var(--ink-soft); font-size: 13px; font-weight: 750; gap: 6px; }
+.authCard label small { font-weight: 500; }
+.authCard input { width: 100%; min-height: 48px; padding: 9px 12px; border: 1px solid #aebcb7; border-radius: 9px; color: var(--ink); background: white; }
+.authCard button { min-height: 48px; padding: 10px 18px; border: 0; border-radius: 9px; color: white; background: var(--green); cursor: pointer; font-weight: 750; }
+.authSwitch { margin: 20px 0 0; font-size: 14px; }
+.authSwitch a { color: var(--green-dark); font-weight: 750; }
+.formError { padding: 12px 14px; border-left: 4px solid var(--danger); color: #74291f !important; background: #f9e9e6; font-weight: 650; }
+.authAside { padding: 26px; border-left: 5px solid var(--yellow); background: #fff9df; }
+.authAside strong { font-family: var(--display); font-size: 28px; }
+.authAside ul { padding-left: 20px; margin-bottom: 0; color: #565037; }
+.authAside li + li { margin-top: 10px; }
 
 @media (max-width: 720px) {
   body { font-size: 16px; }
@@ -378,6 +394,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .lawmakerHero h1 { font-size: 45px; }
   .lawmakerHero .projectHero__actions { grid-column: 1 / -1; }
   .lawmakerVoteGrid { grid-template-columns: 1fr; }
+  .authPage { width: calc(100% - 24px); padding: 36px 0; grid-template-columns: 1fr; gap: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

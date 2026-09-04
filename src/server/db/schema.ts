@@ -26,6 +26,14 @@ export const voteChoiceEnum = pgEnum("vote_choice", [
   "outro",
   "indisponivel",
 ]);
+export const alertTypeEnum = pgEnum("alert_type", [
+  "status_change",
+  "vote_scheduled",
+  "vote_result",
+  "sanction_or_veto",
+  "archived",
+  "in_force",
+]);
 
 export const bills = pgTable(
   "bills",
@@ -236,6 +244,87 @@ export const aiSummaries = pgTable(
   ],
 );
 
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  ...timestamps,
+}, (table) => [uniqueIndex("users_email_uq").on(table.email)]);
+
+export const sessions = pgTable("sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("sessions_token_hash_uq").on(table.tokenHash),
+  index("sessions_user_id_idx").on(table.userId),
+  index("sessions_expires_at_idx").on(table.expiresAt),
+]);
+
+export const followedBills = pgTable("followed_bills", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  billId: uuid("bill_id").notNull().references(() => bills.id, { onDelete: "cascade" }),
+  alertsEnabled: boolean("alerts_enabled").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("followed_bills_user_bill_uq").on(table.userId, table.billId),
+  index("followed_bills_bill_id_idx").on(table.billId),
+]);
+
+export const followedLawmakers = pgTable("followed_lawmakers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  lawmakerId: uuid("lawmaker_id").notNull().references(() => lawmakers.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("followed_lawmakers_user_lawmaker_uq").on(table.userId, table.lawmakerId),
+  index("followed_lawmakers_lawmaker_id_idx").on(table.lawmakerId),
+]);
+
+export const alertEvents = pgTable("alert_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  billId: uuid("bill_id").notNull().references(() => bills.id, { onDelete: "cascade" }),
+  type: alertTypeEnum("type").notNull(),
+  dedupeKey: text("dedupe_key").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  title: text("title").notNull(),
+  officialDescription: text("official_description").notNull(),
+  officialUrl: text("official_url").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("alert_events_dedupe_key_uq").on(table.dedupeKey),
+  index("alert_events_bill_id_idx").on(table.billId),
+]);
+
+export const userAlerts = pgTable("user_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  alertEventId: uuid("alert_event_id").notNull().references(() => alertEvents.id, { onDelete: "cascade" }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("user_alerts_user_event_uq").on(table.userId, table.alertEventId),
+  index("user_alerts_user_created_idx").on(table.userId, table.createdAt),
+]);
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("push_subscriptions_endpoint_uq").on(table.endpoint),
+  index("push_subscriptions_user_id_idx").on(table.userId),
+]);
+
 export type NewBill = typeof bills.$inferInsert;
 export type NewLawmaker = typeof lawmakers.$inferInsert;
 export type NewBillAuthor = typeof billAuthors.$inferInsert;
@@ -246,3 +335,10 @@ export type NewIndividualVote = typeof individualVotes.$inferInsert;
 export type NewSyncCheckpoint = typeof syncCheckpoints.$inferInsert;
 export type NewSourceHealth = typeof sourceHealth.$inferInsert;
 export type NewAiSummary = typeof aiSummaries.$inferInsert;
+export type NewUser = typeof users.$inferInsert;
+export type NewSession = typeof sessions.$inferInsert;
+export type NewFollowedBill = typeof followedBills.$inferInsert;
+export type NewFollowedLawmaker = typeof followedLawmakers.$inferInsert;
+export type NewAlertEvent = typeof alertEvents.$inferInsert;
+export type NewUserAlert = typeof userAlerts.$inferInsert;
+export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;
