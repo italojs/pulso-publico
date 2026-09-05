@@ -52,6 +52,19 @@ describe("ElectoralMediaStore", () => {
     expect(Buffer.concat(chunks).toString()).toBe("jpeg-data");
   });
 
+  it("publishes a prepared empty generation and removes only a named published generation", async () => {
+    const { root, store } = await createStore();
+    const keepKey = await store.stage("keep-run", mediaEntry("keep"));
+    await store.publish("keep-run");
+    await store.prepare("empty-run");
+    await store.publish("empty-run");
+
+    await store.removePublished("empty-run");
+
+    await expect(readFile(join(root, keepKey), "utf8")).resolves.toBe("keep");
+    await expect(readFile(join(root, "empty-run"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("rejects traversal in run IDs, filenames and lookup keys", async () => {
     const { store } = await createStore();
 

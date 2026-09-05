@@ -44,6 +44,16 @@ export const TSE_REGIONAL_MEDIA = {
 export type TseResourceName = keyof typeof TSE_RESOURCES;
 export type TseRegionalMediaKind = keyof typeof TSE_REGIONAL_MEDIA;
 export type TseRow = Record<string, string>;
+export type TseTabularEntryKind = Exclude<TseResourceName, "campaignAccounts">
+  | "campaignReceipts"
+  | "campaignContractedExpenses"
+  | "campaignPaidExpenses";
+
+export interface TseRowEntry {
+  readonly row: TseRow;
+  readonly entryKind: TseTabularEntryKind;
+  readonly sourceArchiveUrl: string;
+}
 
 export interface TseMediaEntry {
   readonly kind: TseRegionalMediaKind;
@@ -173,6 +183,20 @@ function isTseRegion(value: string): value is TseRegion {
   return (TSE_REGIONS as readonly string[]).includes(value);
 }
 
+function tabularEntryKind(
+  resource: TseResourceName,
+  filename: string,
+): TseTabularEntryKind {
+  if (resource !== "campaignAccounts") return resource;
+  const normalized = filename.toLocaleLowerCase("pt-BR");
+  if (normalized.startsWith("receitas_candidatos_")) return "campaignReceipts";
+  if (normalized.startsWith("despesas_contratadas_candidatos_")) {
+    return "campaignContractedExpenses";
+  }
+  if (normalized.startsWith("despesas_pagas_candidatos_")) return "campaignPaidExpenses";
+  throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
+}
+
 function mediaContract(kind: TseRegionalMediaKind): {
   extension: RegExp;
   mimeType: TseMediaEntry["mimeType"];
@@ -291,6 +315,19 @@ export class TseOpenDataClient {
     resource: TseResourceName,
     signal?: AbortSignal,
   ): AsyncGenerator<TseRow> {
+    for await (const entry of this.streamRowEntries(resource, signal)) yield entry.row;
+  }
+
+  resourceUrl(resource: TseResourceName): string {
+    const path = TSE_RESOURCES[resource];
+    if (!path) throw new TseContractError("UNKNOWN_TSE_RESOURCE");
+    return new URL(path, this.#baseUrl).toString();
+  }
+
+  async *streamRowEntries(
+    resource: TseResourceName,
+    signal?: AbortSignal,
+  ): AsyncGenerator<TseRowEntry> {
     const path = TSE_RESOURCES[resource];
     if (!path) throw new TseContractError("UNKNOWN_TSE_RESOURCE");
     const request = await this.#requestArchive(path, signal);
@@ -337,7 +374,10 @@ export class TseOpenDataClient {
       const completion = pipeline(entry, limiter, decoder, parser, { signal: request.signal });
       void completion.catch(() => undefined);
       try {
-        for await (const row of parser) yield row as TseRow;
+        const entryKind = tabularEntryKind(resource, filename);
+        for await (const row of parser) {
+          yield { row: row as TseRow, entryKind, sourceArchiveUrl: request.url };
+        }
         await completion;
       } catch (error) {
         await completion.catch(() => undefined);

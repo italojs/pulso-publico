@@ -75,6 +75,14 @@ export interface ElectoralSyncFailure {
   startedAt?: Date;
 }
 
+export interface CandidateLawmakerLinkSuggestion {
+  electionYear: number;
+  candidateExternalId: string;
+  lawmakerSource: "camara" | "senado";
+  lawmakerExternalId: string;
+  method: string;
+}
+
 interface CampaignAggregate {
   candidateExternalId: string;
   revenueCents: bigint | null;
@@ -610,6 +618,58 @@ export class ElectoralRepository {
     return candidate ?? null;
   }
 
+  async findLatestSuccessfulSyncRun(electionYear: number): Promise<string | null> {
+    const [run] = await this.#database.select({
+      syncRunId: electoralSyncRuns.syncRunId,
+    }).from(electoralSyncRuns).where(and(
+      eq(electoralSyncRuns.electionYear, electionYear),
+      eq(electoralSyncRuns.status, "successful"),
+    )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1);
+    return run?.syncRunId ?? null;
+  }
+
+  async findLawmaker(source: "camara" | "senado", externalId: string) {
+    const [lawmaker] = await this.#database.select({
+      id: lawmakers.id,
+      source: lawmakers.source,
+      externalId: lawmakers.externalId,
+      name: lawmakers.name,
+      electoralName: lawmakers.electoralName,
+      role: lawmakers.role,
+      party: lawmakers.party,
+      region: lawmakers.region,
+    }).from(lawmakers).where(and(
+      eq(lawmakers.source, source),
+      eq(lawmakers.externalId, externalId),
+    )).limit(1);
+    return lawmaker ?? null;
+  }
+
+  async listLawmakersForCandidateReconciliation() {
+    return this.#database.select({
+      id: lawmakers.id,
+      source: lawmakers.source,
+      externalId: lawmakers.externalId,
+      name: lawmakers.name,
+      electoralName: lawmakers.electoralName,
+      role: lawmakers.role,
+      party: lawmakers.party,
+      region: lawmakers.region,
+    }).from(lawmakers);
+  }
+
+  async createPendingLawmakerLinkByExternalReferences(
+    suggestion: CandidateLawmakerLinkSuggestion,
+  ): Promise<void> {
+    const [candidate, lawmaker] = await Promise.all([
+      this.findCandidate(suggestion.electionYear, suggestion.candidateExternalId),
+      this.findLawmaker(suggestion.lawmakerSource, suggestion.lawmakerExternalId),
+    ]);
+    if (!candidate) throw new Error("Candidate does not exist in the current snapshot");
+    if (!lawmaker) throw new Error("Lawmaker does not exist");
+    await this.createPendingLawmakerLink(candidate.id, lawmaker.id, suggestion.method);
+  }
+
   async createPendingLawmakerLink(
     candidateId: string,
     lawmakerId: string,
@@ -656,6 +716,7 @@ export class ElectoralRepository {
     assertOfficialEvidenceUrl(evidenceUrl);
     const [updated] = await this.#database.update(candidateLawmakerLinks).set({
       status,
+      matchMethod: "operator_review",
       evidenceUrl,
       reviewedAt: asDate(reviewedAt, "reviewedAt"),
       updatedAt: new Date(),

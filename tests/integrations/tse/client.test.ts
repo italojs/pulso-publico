@@ -372,6 +372,51 @@ describe("TseOpenDataClient", () => {
     }
   });
 
+  it("exposes the controlled archive subtype and official provenance for campaign rows", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([
+        {
+          name: "receitas_candidatos_2026_ES.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n2026;260001234567;10,00\r\n",
+        },
+        {
+          name: "despesas_contratadas_candidatos_2026_ES.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_DESPESA_CONTRATADA\r\n2026;260001234567;8,00\r\n",
+        },
+        {
+          name: "despesas_pagas_candidatos_2026_ES.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_PAGTO\r\n2026;260001234567;7,00\r\n",
+        },
+      ]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const entries = [];
+
+    for await (const entry of client.streamRowEntries("campaignAccounts")) entries.push(entry);
+
+    expect(entries.map(({ entryKind, sourceArchiveUrl, row }) => ({
+      entryKind,
+      sourceArchiveUrl,
+      value: row.VR_RECEITA ?? row.VR_DESPESA_CONTRATADA ?? row.VR_PAGTO,
+    }))).toEqual([
+      {
+        entryKind: "campaignReceipts",
+        sourceArchiveUrl: "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
+        value: "10,00",
+      },
+      {
+        entryKind: "campaignContractedExpenses",
+        sourceArchiveUrl: "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
+        value: "8,00",
+      },
+      {
+        entryKind: "campaignPaidExpenses",
+        sourceArchiveUrl: "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
+        value: "7,00",
+      },
+    ]);
+  });
+
   it("rejects traversal before exposing a regional media entry", async () => {
     const client = new TseOpenDataClient({
       fetch: fakeZipFetch([{

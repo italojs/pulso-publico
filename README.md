@@ -36,17 +36,30 @@ npm test
 npm run typecheck
 npm run build
 npm run sync
+npm run sync:election
 npm run reconcile -- --source=all
 npm run summaries -- 20
 npm run alerts:dispatch
 ```
 
 - `sync`: atualização incremental das duas casas e tentativa de entrega de push;
+- `sync:election`: retrato completo e atômico das candidaturas de 2026 a partir dos arquivos oficiais do TSE;
 - `reconcile`: reconciliação diária da janela oficial do dia anterior;
 - `summaries`: geração opcional em lote, ignorada com segurança sem chave;
 - `alerts:dispatch`: reenvio dos pushes pendentes, também inofensivo sem VAPID.
 
 Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a cada 30 minutos e `npm run reconcile -- --source=all` uma vez ao dia. Ambos usam advisory lock no PostgreSQL para impedir execuções concorrentes.
+
+O sincronizador eleitoral também usa advisory lock no PostgreSQL, baixa os seis recursos tabulares e os arquivos regionais de fotos, propostas de governo e certidões, e só troca o retrato público depois que toda a carga foi validada. `ELECTORAL_MEDIA_DIRECTORY` é resolvido como caminho absoluto na inicialização e precisa apontar para um volume persistente em produção. Uma falha preserva o último retrato e sua geração de mídia. O TSE não exige chave de API.
+
+Vínculos sugeridos entre candidatura e mandato permanecem pendentes e não aparecem publicamente até revisão explícita. O operador confirma ou rejeita uma correspondência usando somente identificadores públicos e uma evidência oficial:
+
+```bash
+npm run candidates:link -- confirm --year=2026 --candidate=260001234567 --source=camara --lawmaker=220530 --evidence=https://dadosabertos.camara.leg.br/api/v2/deputados/220530
+npm run candidates:link -- reject --year=2026 --candidate=260001234567 --source=camara --lawmaker=220530 --evidence=https://dadosabertos.tse.jus.br/dataset/candidatos-2026
+```
+
+Os comandos imprimem apenas um resultado JSON sanitizado; nenhuma linha bruta do TSE é exibida. Nesta entrega, apenas `ELECTION_YEAR=2026` é aceito em execução. Use `GEO_PROVIDER=none` em desenvolvimento local.
 
 ## Dados e privacidade
 

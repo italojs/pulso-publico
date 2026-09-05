@@ -105,6 +105,11 @@ export class ElectoralMediaStore {
     this.#stagingRoot = resolve(this.#root, ".staging");
   }
 
+  async prepare(runId: string): Promise<void> {
+    validateRunId(runId);
+    await ensureDirectoryChain(this.#root, [".staging", runId]);
+  }
+
   async stage(runId: string, entry: TseMediaEntry): Promise<string> {
     validateRunId(runId);
     validateFilename(entry.originalFilename);
@@ -184,6 +189,14 @@ export class ElectoralMediaStore {
       stagingExists ? rm(staging, { recursive: true, force: true }) : Promise.resolve(),
       publishedExists ? rm(published, { recursive: true, force: true }) : Promise.resolve(),
     ]);
+  }
+
+  async removePublished(runId: string): Promise<void> {
+    validateRunId(runId);
+    const published = resolveBelow(this.#root, runId);
+    if (await assertNoSymlinkComponents(this.#root, [runId])) {
+      await rm(published, { recursive: true, force: true });
+    }
   }
 
   open(storageKey: string): ReadStream {

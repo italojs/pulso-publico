@@ -425,6 +425,31 @@ describe("ElectoralRepository", () => {
     }
   });
 
+  it("resolves the latest media generation and public candidate/lawmaker references", async () => {
+    await repository.persistSnapshot(snapshot("run-2026-01"));
+    await repository.persistSnapshot(snapshot("run-2026-02"));
+    const { lawmakerId } = await seedLawmakerAndUser();
+
+    await expect(repository.findLatestSuccessfulSyncRun(2026)).resolves.toBe("run-2026-02");
+    await expect(repository.findLawmaker("camara", "220530")).resolves.toMatchObject({
+      id: lawmakerId,
+      externalId: "220530",
+    });
+    await expect(repository.listLawmakersForCandidateReconciliation()).resolves.toEqual([
+      expect.objectContaining({ id: lawmakerId, source: "camara", externalId: "220530" }),
+    ]);
+
+    await repository.createPendingLawmakerLinkByExternalReferences({
+      electionYear: 2026,
+      candidateExternalId: primaryCandidateId,
+      lawmakerSource: "camara",
+      lawmakerExternalId: "220530",
+      method: "exact_name_region_party_office",
+    });
+    expect(await testDb.select({ status: candidateLawmakerLinks.status })
+      .from(candidateLawmakerLinks)).toEqual([{ status: "pending" }]);
+  });
+
   it("uses a total order to resolve successful runs with identical timestamps", async () => {
     const first = snapshot("same-time-a");
     first.extractedAt = new Date("2026-09-05T15:00:00.000Z");
@@ -533,6 +558,8 @@ describe("ElectoralRepository", () => {
       id: lawmakerId,
       externalId: "220530",
     });
+    expect(await testDb.select({ matchMethod: candidateLawmakerLinks.matchMethod })
+      .from(candidateLawmakerLinks)).toEqual([{ matchMethod: "operator_review" }]);
   });
 
   it("preserves follows and reviewed links when a present candidate is refreshed", async () => {

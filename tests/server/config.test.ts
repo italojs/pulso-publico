@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isAbsolute } from "node:path";
 
 import { parseEnv } from "#/server/config";
 
@@ -17,5 +18,16 @@ describe("parseEnv", () => {
     expect(value.HTTP_TIMEOUT_MS).toBe(10_000);
     expect(value.HTTP_MAX_ATTEMPTS).toBe(3);
     expect(value.INITIAL_HISTORY_MONTHS).toBe(36);
+    expect(value.TSE_DATA_BASE_URL).toBe("https://cdn.tse.jus.br");
+    expect(value.ELECTION_YEAR).toBe(2026);
+    expect(value.GEO_PROVIDER).toBe("none");
+    expect(isAbsolute(value.ELECTORAL_MEDIA_DIRECTORY)).toBe(true);
+    expect(value.ELECTORAL_MEDIA_DIRECTORY.endsWith("/.data/electoral-assets")).toBe(true);
+  });
+
+  it("rejects an electoral year before 2026 and an unknown geo provider", () => {
+    const database = { DATABASE_URL: "postgres://app:app@localhost:5432/legislativo" };
+    expect(() => parseEnv({ ...database, ELECTION_YEAR: "2024" })).toThrow(/ELECTION_YEAR/);
+    expect(() => parseEnv({ ...database, GEO_PROVIDER: "arbitrary" })).toThrow(/GEO_PROVIDER/);
   });
 });
