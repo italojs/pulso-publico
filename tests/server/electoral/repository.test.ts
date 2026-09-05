@@ -48,12 +48,23 @@ const tabularResources = [
   "social",
   "campaignAccounts",
 ] as const;
+const tabularArchivePaths: Record<typeof tabularResources[number], string> = {
+  candidates: "estatistica/sead/odsele/consulta_cand/consulta_cand_2026.zip",
+  complements: "estatistica/sead/odsele/consulta_cand_complementar/consulta_cand_complementar_2026.zip",
+  assets: "estatistica/sead/odsele/bem_candidato/bem_candidato_2026.zip",
+  coalitions: "estatistica/sead/odsele/consulta_coligacao/consulta_coligacao_2026.zip",
+  social: "estatistica/sead/odsele/consulta_cand/rede_social_candidato_2026.zip",
+  campaignAccounts: "estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
+};
+const photoArchiveUrl = "https://cdn.tse.jus.br/estatistica/sead/eleicoes/eleicoes2026/fotos/foto_cand2026_ES_div.zip";
+const planArchiveUrl = "https://cdn.tse.jus.br/estatistica/sead/odsele/proposta_governo/proposta_governo_2026_ES.zip";
+const certificateArchiveUrl = "https://cdn.tse.jus.br/estatistica/sead/odsele/certidao_criminal/certidao_criminal_2026_ES.zip";
 
 function resourceProvenance(
   overrides: Partial<Record<typeof tabularResources[number], Date | null>> = {},
 ) {
   return Object.fromEntries(tabularResources.map((resource) => [resource, {
-    sourceArchiveUrl: `https://cdn.tse.jus.br/${resource}.zip`,
+    sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths[resource]}`,
     sourceExtractedAt: overrides[resource] === undefined
       ? new Date(sourceExtractedAt)
       : overrides[resource],
@@ -101,12 +112,12 @@ function candidate(
       checkedAt,
     }),
     photoStorageKey: `run-2026-01/photos/${externalId}/foto.jpg`,
-    photoSourceArchiveUrl: "https://cdn.tse.jus.br/fotos.zip",
+    photoSourceArchiveUrl: photoArchiveUrl,
     photoOriginalFilename: "foto.jpg",
     photoMimeType: "image/jpeg",
-    photoSourceExtractedAt: sourceExtractedAt,
+    photoSourceExtractedAt: null,
     photoCheckedAt: checkedAt,
-    sourceArchiveUrl: "https://cdn.tse.jus.br/candidates.zip",
+    sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.candidates}`,
     sourceExtractedAt,
     ...overrides,
   };
@@ -133,7 +144,7 @@ function snapshot(
         description: "Imóvel residencial",
         valueCents: 25_000_000n,
         }),
-        sourceArchiveUrl: "https://cdn.tse.jus.br/assets.zip",
+        sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.assets}`,
         sourceExtractedAt,
         checkedAt,
       },
@@ -145,7 +156,7 @@ function snapshot(
         description: null,
         valueCents: 0n,
         }),
-        sourceArchiveUrl: "https://cdn.tse.jus.br/assets.zip",
+        sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.assets}`,
         sourceExtractedAt,
         checkedAt,
       },
@@ -159,7 +170,7 @@ function snapshot(
         category: "Recursos próprios",
         valueCents: 0n,
         }),
-        sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+        sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
         sourceExtractedAt,
         checkedAt,
       },
@@ -172,7 +183,7 @@ function snapshot(
         label: "Site",
         url: "https://candidata.example.test/",
         }),
-        sourceArchiveUrl: "https://cdn.tse.jus.br/social.zip",
+        sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.social}`,
         sourceExtractedAt,
         checkedAt,
       },
@@ -181,28 +192,28 @@ function snapshot(
       ...CandidateGovernmentPlanRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
-        officialUrl: "https://cdn.tse.jus.br/plano.pdf",
+        officialUrl: `${planArchiveUrl}#entry=plano.pdf`,
         storageKey: "run-2026-01/governmentPlans/260001234567/plano.pdf",
         originalFilename: "plano.pdf",
-        sourceExtractedAt,
+        sourceExtractedAt: null,
         checkedAt,
       }),
       mimeType: "application/pdf",
-      sourceArchiveUrl: "https://cdn.tse.jus.br/planos.zip",
+      sourceArchiveUrl: planArchiveUrl,
     }],
     documents: [{
       ...CandidateDocumentRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
         label: "Certidão pública",
-        officialUrl: "https://cdn.tse.jus.br/certidao.pdf",
+        officialUrl: `${certificateArchiveUrl}#entry=certidao.pdf`,
         storageKey: "run-2026-01/certificates/260001234567/certidao.pdf",
         originalFilename: "certidao.pdf",
-        sourceExtractedAt,
+        sourceExtractedAt: null,
         checkedAt,
       }),
       mimeType: "application/pdf",
-      sourceArchiveUrl: "https://cdn.tse.jus.br/certidoes.zip",
+      sourceArchiveUrl: certificateArchiveUrl,
     }],
   };
 }
@@ -271,7 +282,7 @@ describe("ElectoralRepository", () => {
       mimeType: electoralCandidates.photoMimeType,
     }).from(electoralCandidates)).toEqual([{
       storageKey: "run-2026-01/photos/260001234567/foto.jpg",
-      sourceArchiveUrl: "https://cdn.tse.jus.br/fotos.zip",
+      sourceArchiveUrl: photoArchiveUrl,
       originalFilename: "foto.jpg",
       mimeType: "image/jpeg",
     }]);
@@ -282,7 +293,7 @@ describe("ElectoralRepository", () => {
       mimeType: candidateGovernmentPlans.mimeType,
     }).from(candidateGovernmentPlans)).toEqual([{
       storageKey: "run-2026-01/governmentPlans/260001234567/plano.pdf",
-      sourceArchiveUrl: "https://cdn.tse.jus.br/planos.zip",
+      sourceArchiveUrl: planArchiveUrl,
       originalFilename: "plano.pdf",
       mimeType: "application/pdf",
     }]);
@@ -303,7 +314,7 @@ describe("ElectoralRepository", () => {
       candidateSnapshot.documents[0]!,
       {
         ...candidateSnapshot.documents[0]!,
-        officialUrl: "https://cdn.tse.jus.br/certidoes.zip#entry=segunda-certidao.pdf",
+        officialUrl: `${certificateArchiveUrl}#entry=segunda-certidao.pdf`,
         storageKey: "run-two-certificates/certificates/260001234567/segunda-certidao.pdf",
         originalFilename: "segunda-certidao.pdf",
       },
@@ -315,6 +326,87 @@ describe("ElectoralRepository", () => {
       officialUrl: candidateDocuments.officialUrl,
       originalFilename: candidateDocuments.originalFilename,
     }).from(candidateDocuments)).toHaveLength(2);
+  });
+
+  it("rejects noncanonical manifest archive URLs before opening publication", async () => {
+    const cases = [
+      ["non-https", "candidates", "http://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2026.zip"],
+      ["off-domain", "assets", "https://example.test/estatistica/sead/odsele/bem_candidato/bem_candidato_2026.zip"],
+      ["wrong-resource", "social", `https://cdn.tse.jus.br/${tabularArchivePaths.assets}`],
+      ["credentials", "coalitions", "https://user:secret@cdn.tse.jus.br/estatistica/sead/odsele/consulta_coligacao/consulta_coligacao_2026.zip"],
+    ] as const;
+
+    for (const [label, resource, url] of cases) {
+      const invalid = snapshot(`invalid-manifest-${label}`);
+      invalid.resourceProvenance[resource] = {
+        ...invalid.resourceProvenance[resource],
+        sourceArchiveUrl: url,
+      };
+      await expect(repository.persistSnapshot(invalid))
+        .rejects.toThrow(`Invalid electoral resource provenance URL: ${resource}`);
+    }
+  });
+
+  it("requires every persisted tabular row archive URL to match its manifest", async () => {
+    const mismatches: Array<[string, (value: ElectoralSnapshot) => void]> = [
+      ["candidate", (value) => {
+        value.candidates[0]!.sourceArchiveUrl = `https://cdn.tse.jus.br/${tabularArchivePaths.assets}`;
+      }],
+      ["asset", (value) => {
+        value.assets[0]!.sourceArchiveUrl = `https://cdn.tse.jus.br/${tabularArchivePaths.social}`;
+      }],
+      ["social", (value) => {
+        value.socialLinks[0]!.sourceArchiveUrl = `https://cdn.tse.jus.br/${tabularArchivePaths.candidates}`;
+      }],
+      ["campaign", (value) => {
+        value.campaignEntries[0]!.sourceArchiveUrl = `https://cdn.tse.jus.br/${tabularArchivePaths.coalitions}`;
+      }],
+    ];
+
+    for (const [label, mutate] of mismatches) {
+      const invalid = snapshot(`mismatched-row-${label}`);
+      mutate(invalid);
+      await expect(repository.persistSnapshot(invalid))
+        .rejects.toThrow(`${label} sourceArchiveUrl must match its resource provenance`);
+    }
+  });
+
+  it("rejects unsafe media URLs while allowing official fragments for multiple certificates", async () => {
+    const invalidPhoto = snapshot("unsafe-photo-source");
+    invalidPhoto.candidates[0]!.photoSourceArchiveUrl = "http://cdn.tse.jus.br/photo.zip";
+    await expect(repository.persistSnapshot(invalidPhoto))
+      .rejects.toThrow("Invalid official TSE media URL: photo sourceArchiveUrl");
+
+    const invalidPlan = snapshot("unsafe-plan-official");
+    invalidPlan.governmentPlans[0]!.officialUrl = "https://example.test/plano.pdf";
+    await expect(repository.persistSnapshot(invalidPlan))
+      .rejects.toThrow("Invalid official TSE media URL: government plan officialUrl");
+
+    const invalidDocument = snapshot("unsafe-document-source");
+    invalidDocument.documents[0]!.sourceArchiveUrl = "https://example.test/certidoes.zip";
+    await expect(repository.persistSnapshot(invalidDocument))
+      .rejects.toThrow("Invalid official TSE media URL: document sourceArchiveUrl");
+  });
+
+  it("rejects invented media extraction timestamps", async () => {
+    const cases: Array<[string, (value: ElectoralSnapshot) => void]> = [
+      ["photo", (value) => {
+        value.candidates[0]!.photoSourceExtractedAt = sourceExtractedAt;
+      }],
+      ["government plan", (value) => {
+        value.governmentPlans[0]!.sourceExtractedAt = sourceExtractedAt;
+      }],
+      ["document", (value) => {
+        value.documents[0]!.sourceExtractedAt = sourceExtractedAt;
+      }],
+    ];
+
+    for (const [label, mutate] of cases) {
+      const invalid = snapshot(`invented-${label.replace(" ", "-")}-timestamp`);
+      mutate(invalid);
+      await expect(repository.persistSnapshot(invalid))
+        .rejects.toThrow(`${label} sourceExtractedAt must be null`);
+    }
   });
 
   it("persists all six resource versions and their corresponding block provenance", async () => {
@@ -428,6 +520,54 @@ describe("ElectoralRepository", () => {
       .from(electoralSyncRuns)).toEqual([{ syncRunId: "resource-version-first" }]);
   });
 
+  it("uses a legacy successful extractedAt as the candidates-only migration baseline", async () => {
+    const legacyExtractedAt = new Date("2026-09-06T12:00:00.000Z");
+    await testDb.insert(electoralSyncRuns).values({
+      syncRunId: "legacy-empty-manifest",
+      electionYear: 2026,
+      status: "successful",
+      sourceUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.candidates}`,
+      startedAt: legacyExtractedAt,
+      completedAt: legacyExtractedAt,
+      extractedAt: legacyExtractedAt,
+      resourceProvenance: {},
+    });
+    const older = snapshot("post-migration-older-candidates");
+
+    await expect(repository.persistSnapshot(older))
+      .rejects.toThrow("Cannot publish a stale electoral resource: candidates");
+  });
+
+  it("does not invent legacy baselines for resources other than candidates", async () => {
+    const legacyExtractedAt = new Date("2026-09-05T12:00:00.000Z");
+    await testDb.insert(electoralSyncRuns).values({
+      syncRunId: "legacy-candidates-only-baseline",
+      electionYear: 2026,
+      status: "successful",
+      sourceUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.candidates}`,
+      startedAt: legacyExtractedAt,
+      completedAt: legacyExtractedAt,
+      extractedAt: legacyExtractedAt,
+      resourceProvenance: {},
+    });
+    const current = snapshot("post-migration-independent-assets");
+    current.extractedAt = new Date("2026-09-06T12:00:00.000Z");
+    current.resourceProvenance = resourceProvenance({
+      candidates: current.extractedAt,
+      assets: new Date("2026-09-01T12:00:00.000Z"),
+    });
+    current.candidates = current.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: current.extractedAt,
+    }));
+    current.assets = current.assets.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-01T12:00:00.000Z",
+    }));
+
+    await expect(repository.persistSnapshot(current)).resolves.toBeUndefined();
+  });
+
   it("does not replace a previously known resource timestamp with an empty null version", async () => {
     const first = snapshot("known-campaign-version");
     await repository.persistSnapshot(first);
@@ -459,7 +599,7 @@ describe("ElectoralRepository", () => {
     }).from(electoralSyncRuns)).toEqual([{
       resourceProvenance: expect.objectContaining({
         campaignAccounts: {
-          sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+          sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
           sourceExtractedAt: null,
         },
       }),
@@ -475,7 +615,7 @@ describe("ElectoralRepository", () => {
         category: "Doações",
         valueCents: 100n,
       }),
-      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-a.zip",
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
       sourceExtractedAt: "2026-09-05T09:00:00.000Z",
       checkedAt: "2026-09-05T10:00:00.000Z",
     };
@@ -487,7 +627,7 @@ describe("ElectoralRepository", () => {
         category: "Doações",
         valueCents: 200n,
       }),
-      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-b.zip",
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
       sourceExtractedAt: "2026-09-05T09:00:00.000Z",
       checkedAt: "2026-09-05T11:00:00.000Z",
     };
@@ -508,7 +648,7 @@ describe("ElectoralRepository", () => {
       sourceExtractedAt: candidateCampaignTotals.sourceExtractedAt,
       checkedAt: candidateCampaignTotals.checkedAt,
     }).from(candidateCampaignTotals)).toEqual([{
-      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-a.zip",
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
       sourceExtractedAt: new Date("2026-09-05T09:00:00.000Z"),
       checkedAt: new Date("2026-09-05T10:00:00.000Z"),
     }]);

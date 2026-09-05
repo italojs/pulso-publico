@@ -7,6 +7,15 @@ import { parse } from "csv-parse";
 import type { Entry } from "unzipper";
 
 import {
+  TSE_DATA_ORIGIN,
+  TSE_REGIONAL_MEDIA_PATHS,
+  TSE_REGIONS,
+  TSE_RESOURCE_PATHS,
+  type TseRegion,
+  type TseRegionalMediaKind,
+  type TseResourceName,
+} from "#/domain/tse-source";
+import {
   assertSafeArchivePath,
   assertDeclaredEntrySize,
   drainBoundedArchiveEntry,
@@ -21,32 +30,10 @@ import {
   TseContractError,
 } from "#/integrations/tse/mapper";
 
-export const TSE_RESOURCES = {
-  candidates: "estatistica/sead/odsele/consulta_cand/consulta_cand_2026.zip",
-  complements: "estatistica/sead/odsele/consulta_cand_complementar/consulta_cand_complementar_2026.zip",
-  assets: "estatistica/sead/odsele/bem_candidato/bem_candidato_2026.zip",
-  coalitions: "estatistica/sead/odsele/consulta_coligacao/consulta_coligacao_2026.zip",
-  social: "estatistica/sead/odsele/consulta_cand/rede_social_candidato_2026.zip",
-  campaignAccounts: "estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
-} as const;
-
-export const TSE_REGIONS = [
-  "BR",
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
-  "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
-  "SP", "SE", "TO",
-] as const;
-
-export type TseRegion = typeof TSE_REGIONS[number];
-
-export const TSE_REGIONAL_MEDIA = {
-  photos: (region: TseRegion) => `estatistica/sead/eleicoes/eleicoes2026/fotos/foto_cand2026_${region}_div.zip`,
-  governmentPlans: (region: TseRegion) => `estatistica/sead/odsele/proposta_governo/proposta_governo_2026_${region}.zip`,
-  certificates: (region: TseRegion) => `estatistica/sead/odsele/certidao_criminal/certidao_criminal_2026_${region}.zip`,
-} as const;
-
-export type TseResourceName = keyof typeof TSE_RESOURCES;
-export type TseRegionalMediaKind = keyof typeof TSE_REGIONAL_MEDIA;
+export const TSE_RESOURCES = TSE_RESOURCE_PATHS;
+export const TSE_REGIONAL_MEDIA = TSE_REGIONAL_MEDIA_PATHS;
+export { TSE_REGIONS };
+export type { TseRegion, TseRegionalMediaKind, TseResourceName };
 export type TseRow = Record<string, string>;
 export type TseTabularEntryKind = Exclude<TseResourceName, "campaignAccounts">
   | "campaignReceipts"
@@ -181,7 +168,7 @@ function validateTabularHeaders(
 
 function assertOfficialUrl(url: URL, errorCode = "UNSAFE_ARCHIVE_REDIRECT"): void {
   if (
-    url.origin !== "https://cdn.tse.jus.br"
+    url.origin !== TSE_DATA_ORIGIN
     || url.username.length > 0
     || url.password.length > 0
   ) {
@@ -300,7 +287,7 @@ export class TseOpenDataClient {
 
   constructor(options: TseOpenDataClientOptions = {}) {
     this.#fetch = options.fetch ?? fetch;
-    this.#baseUrl = new URL(options.baseUrl ?? "https://cdn.tse.jus.br/");
+    this.#baseUrl = new URL(options.baseUrl ?? `${TSE_DATA_ORIGIN}/`);
     assertOfficialUrl(this.#baseUrl, "INVALID_TSE_BASE_URL");
     if (this.#baseUrl.pathname !== "/" || this.#baseUrl.search || this.#baseUrl.hash) {
       throw new TseContractError("INVALID_TSE_BASE_URL");

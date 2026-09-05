@@ -12,6 +12,13 @@ import type {
   ElectoralCandidate,
 } from "#/domain/electoral";
 import {
+  isCanonicalTseMediaArchiveUrl,
+  isCanonicalTseResourceArchiveUrl,
+  isSafeOfficialTseUrl,
+  TSE_RESOURCE_PATHS,
+  type TseResourceName,
+} from "#/domain/tse-source";
+import {
   candidateAssets,
   candidateCampaignTotals,
   candidateDocuments,
@@ -27,16 +34,9 @@ import * as schema from "#/server/db/schema";
 type Database = PostgresJsDatabase<typeof schema>;
 type DateInput = Date | string;
 
-const electoralTabularResources = [
-  "candidates",
-  "complements",
-  "assets",
-  "coalitions",
-  "social",
-  "campaignAccounts",
-] as const;
+const electoralTabularResources = Object.keys(TSE_RESOURCE_PATHS) as TseResourceName[];
 
-export type ElectoralTabularResourceName = typeof electoralTabularResources[number];
+export type ElectoralTabularResourceName = TseResourceName;
 export type ElectoralTabularResourceProvenance = Record<
   ElectoralTabularResourceName,
   {
@@ -145,8 +145,8 @@ function normalizeResourceProvenance(
 
   return Object.fromEntries(electoralTabularResources.map((resource) => {
     const entry = provenance[resource];
-    if (!entry || typeof entry.sourceArchiveUrl !== "string" || !entry.sourceArchiveUrl.trim()) {
-      throw new Error(`Invalid electoral resource provenance: ${resource}`);
+    if (!entry || !isCanonicalTseResourceArchiveUrl(resource, entry.sourceArchiveUrl)) {
+      throw new Error(`Invalid electoral resource provenance URL: ${resource}`);
     }
     return [resource, {
       sourceArchiveUrl: entry.sourceArchiveUrl,
@@ -159,6 +159,39 @@ function normalizeResourceProvenance(
     sourceArchiveUrl: string;
     sourceExtractedAt: Date | null;
   }>;
+}
+
+function assertResourceArchiveUrl(
+  value: string | null | undefined,
+  expected: string,
+  label: string,
+): void {
+  if (value !== expected) {
+    throw new Error(`${label} sourceArchiveUrl must match its resource provenance`);
+  }
+}
+
+function assertMediaSourceArchiveUrl(
+  value: string | null | undefined,
+  kind: "photos" | "governmentPlans" | "certificates",
+  label: string,
+): void {
+  if (!value || !isCanonicalTseMediaArchiveUrl(kind, value)) {
+    throw new Error(`Invalid official TSE media URL: ${label} sourceArchiveUrl`);
+  }
+}
+
+function assertMediaOfficialUrl(value: string, label: string): void {
+  if (!isSafeOfficialTseUrl(value)) {
+    throw new Error(`Invalid official TSE media URL: ${label} officialUrl`);
+  }
+}
+
+function assertNullMediaTimestamp(
+  value: DateInput | null | undefined,
+  label: string,
+): void {
+  if (value != null) throw new Error(`${label} sourceExtractedAt must be null`);
 }
 
 function resourceProvenanceJson(
@@ -251,10 +284,23 @@ function assertSnapshot(
       candidateExtractedAt,
       "candidate",
     );
+    assertResourceArchiveUrl(
+      candidate.sourceArchiveUrl,
+      provenance.candidates.sourceArchiveUrl,
+      "candidate",
+    );
     if (candidates.has(candidate.externalId)) {
       throw new Error(`Duplicate candidate ${candidate.externalId}`);
     }
     assertOpaqueStorageKey(candidate.photoStorageKey);
+    const hasPhoto = candidate.photoStorageKey != null
+      || candidate.photoSourceArchiveUrl != null
+      || candidate.photoOriginalFilename != null
+      || candidate.photoMimeType != null;
+    if (hasPhoto) {
+      assertMediaSourceArchiveUrl(candidate.photoSourceArchiveUrl, "photos", "photo");
+    }
+    assertNullMediaTimestamp(candidate.photoSourceExtractedAt, "photo");
     candidates.set(candidate.externalId, candidate);
   }
 
@@ -267,6 +313,11 @@ function assertSnapshot(
       throw new Error("Asset money must be a non-negative bigint");
     }
     assertResourceTimestamp(asset.sourceExtractedAt, provenance.assets.sourceExtractedAt, "asset");
+    assertResourceArchiveUrl(
+      asset.sourceArchiveUrl,
+      provenance.assets.sourceArchiveUrl,
+      "asset",
+    );
     const key = JSON.stringify([
       asset.candidateExternalId,
       asset.category,
@@ -295,18 +346,34 @@ function assertSnapshot(
       provenance.campaignAccounts.sourceExtractedAt,
       "campaign",
     );
+    assertResourceArchiveUrl(
+      entry.sourceArchiveUrl,
+      provenance.campaignAccounts.sourceArchiveUrl,
+      "campaign",
+    );
   }
   for (const link of snapshot.socialLinks) {
     validateResource(link);
     assertResourceTimestamp(link.sourceExtractedAt, provenance.social.sourceExtractedAt, "social");
+    assertResourceArchiveUrl(
+      link.sourceArchiveUrl,
+      provenance.social.sourceArchiveUrl,
+      "social",
+    );
   }
   for (const plan of snapshot.governmentPlans) {
     validateResource(plan);
     assertOpaqueStorageKey(plan.storageKey);
+    assertMediaSourceArchiveUrl(plan.sourceArchiveUrl, "governmentPlans", "government plan");
+    assertMediaOfficialUrl(plan.officialUrl, "government plan");
+    assertNullMediaTimestamp(plan.sourceExtractedAt, "government plan");
   }
   for (const document of snapshot.documents) {
     validateResource(document);
     assertOpaqueStorageKey(document.storageKey);
+    assertMediaSourceArchiveUrl(document.sourceArchiveUrl, "certificates", "document");
+    assertMediaOfficialUrl(document.officialUrl, "document");
+    assertNullMediaTimestamp(document.sourceExtractedAt, "document");
   }
   return candidates;
 }
@@ -485,6 +552,7 @@ export class ElectoralRepository {
 
       const [latestSuccessful] = await tx.select({
         syncRunId: electoralSyncRuns.syncRunId,
+        extractedAt: electoralSyncRuns.extractedAt,
         resourceProvenance: electoralSyncRuns.resourceProvenance,
       }).from(electoralSyncRuns).where(and(
         eq(electoralSyncRuns.electionYear, snapshot.electionYear),
@@ -492,8 +560,15 @@ export class ElectoralRepository {
       )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1);
       if (latestSuccessful && latestSuccessful.syncRunId !== snapshot.syncRunId) {
         for (const resource of electoralTabularResources) {
-          const previousValue = latestSuccessful.resourceProvenance?.[resource]
-            ?.sourceExtractedAt;
+          const hasResourceManifest = Object.hasOwn(
+            latestSuccessful.resourceProvenance ?? {},
+            resource,
+          );
+          const previousValue = hasResourceManifest
+            ? latestSuccessful.resourceProvenance?.[resource]?.sourceExtractedAt
+            : resource === "candidates"
+              ? latestSuccessful.extractedAt
+              : null;
           if (!previousValue) continue;
           const previous = asDate(previousValue, `${resource} previous sourceExtractedAt`);
           const current = resourceProvenance[resource].sourceExtractedAt;
