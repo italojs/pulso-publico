@@ -3,8 +3,16 @@ import { z } from "zod";
 import { currentUserFromCookie } from "#/auth/current-user";
 import type { UserRepository } from "#/auth/user-repository";
 import { CandidateOffice } from "#/domain/electoral";
+import {
+  assertCandidateFilterBounds,
+  centsToReais,
+  MAX_CANDIDATE_AGE,
+  MAX_CANDIDATE_ASSET_COUNT,
+  MAX_CANDIDATE_PAGE,
+  MAX_CANDIDATE_PAGE_SIZE,
+  reaisToCents,
+} from "#/server/candidates/filter-validation";
 import type { CandidateFilters } from "#/server/candidates/read-models";
-import { centsToReais, reaisToCents } from "#/server/candidates/search-params";
 
 const MAX_FILTER_VALUES = 20;
 const MAX_TEXT_LENGTH = 200;
@@ -33,8 +41,8 @@ export const candidateFilterInputSchema = z.object({
   statuses: values(text).optional(),
   federations: values(text).optional(),
   coalitions: values(text).optional(),
-  ageMin: nonNegativeInteger.max(150).optional(),
-  ageMax: nonNegativeInteger.max(150).optional(),
+  ageMin: nonNegativeInteger.max(MAX_CANDIDATE_AGE).optional(),
+  ageMax: nonNegativeInteger.max(MAX_CANDIDATE_AGE).optional(),
   genders: values(text).optional(),
   races: values(text).optional(),
   educations: values(text).optional(),
@@ -42,8 +50,8 @@ export const candidateFilterInputSchema = z.object({
   declaredAssets: z.enum(["yes", "no"]).optional(),
   assetMin: money.optional(),
   assetMax: money.optional(),
-  assetCountMin: nonNegativeInteger.max(1_000_000).optional(),
-  assetCountMax: nonNegativeInteger.max(1_000_000).optional(),
+  assetCountMin: nonNegativeInteger.max(MAX_CANDIDATE_ASSET_COUNT).optional(),
+  assetCountMax: nonNegativeInteger.max(MAX_CANDIDATE_ASSET_COUNT).optional(),
   assetCategories: values(text).optional(),
   revenueMin: money.optional(),
   revenueMax: money.optional(),
@@ -61,10 +69,10 @@ export const candidateFilterInputSchema = z.object({
   lawmakerHouses: values(z.enum(["camara", "senado"])).optional(),
   activeMandate: z.boolean().optional(),
   topics: values(text).optional(),
-  followedOnly: z.boolean().optional(),
+  followedOnly: z.literal(true).optional(),
   order: z.enum(orderValues).optional(),
-  page: positiveInteger.max(100_000).optional(),
-  pageSize: positiveInteger.max(50).optional(),
+  page: positiveInteger.max(MAX_CANDIDATE_PAGE).optional(),
+  pageSize: positiveInteger.max(MAX_CANDIDATE_PAGE_SIZE).optional(),
 }).strict().superRefine((input, context) => {
   for (const [minimumKey, maximumKey] of [
     ["ageMin", "ageMax"], ["assetCountMin", "assetCountMax"],
@@ -112,7 +120,9 @@ export function parseCandidateFilterInput(input: unknown): CandidateFilters {
 }
 
 export function toCandidateFilterInput(filters: CandidateFilters): CandidateFilterInput {
+  assertCandidateFilterBounds(filters);
   const wire = { ...filters } as Record<string, unknown>;
+  if (!filters.followedOnly) delete wire.followedOnly;
   for (const [wireKey, domainKey] of moneyPairs) {
     const value = filters[domainKey];
     delete wire[domainKey];

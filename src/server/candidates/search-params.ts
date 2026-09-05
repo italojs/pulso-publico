@@ -1,11 +1,21 @@
 import { CandidateOffice, type CandidateOffice as CandidateOfficeName } from "#/domain/electoral";
 import type { CandidateFilters, CandidateOrder } from "#/server/candidates/read-models";
+import {
+  assertCandidateFilterBounds,
+  centsToReais,
+  MAX_CANDIDATE_AGE,
+  MAX_CANDIDATE_ASSET_COUNT,
+  MAX_CANDIDATE_PAGE,
+  MAX_CANDIDATE_PAGE_SIZE,
+  reaisToCents,
+} from "#/server/candidates/filter-validation";
+
+export { centsToReais, reaisToCents } from "#/server/candidates/filter-validation";
 
 export type CandidateRawSearchParams = Record<string, string | string[] | undefined>;
 
 const MAX_VALUES = 20;
 const MAX_TEXT_LENGTH = 200;
-const MAX_BIGINT_CENTS = 9_223_372_036_854_775_807n;
 const REGIONS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
   "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "BR",
@@ -76,22 +86,6 @@ function boolean(value: string | string[] | undefined): boolean | undefined {
   return undefined;
 }
 
-export function reaisToCents(value: string): bigint | undefined {
-  if (!/^(?:0|[1-9]\d{0,16})(?:\.\d{1,2})?$/.test(value)) return undefined;
-  const [whole = "0", fraction = ""] = value.split(".");
-  const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  return cents <= MAX_BIGINT_CENTS ? cents : undefined;
-}
-
-export function centsToReais(value: bigint): string | undefined {
-  if (value < 0n || value > MAX_BIGINT_CENTS) return undefined;
-  const whole = value / 100n;
-  const fraction = value % 100n;
-  return fraction === 0n
-    ? whole.toString()
-    : `${whole}.${fraction.toString().padStart(2, "0").replace(/0$/, "")}`;
-}
-
 function money(value: string | string[] | undefined): bigint | undefined {
   const selected = values(value)[0];
   return selected === undefined ? undefined : reaisToCents(selected);
@@ -119,8 +113,8 @@ function setRange<KMin extends keyof CandidateFilters, KMax extends keyof Candid
 
 export function parseCandidateSearchParams(params: CandidateRawSearchParams): CandidateFilters {
   const filters: CandidateFilters = {
-    page: firstInteger(params.pagina, 1, 100_000) ?? 1,
-    pageSize: firstInteger(params.porPagina, 1, 50) ?? 20,
+    page: firstInteger(params.pagina, 1, MAX_CANDIDATE_PAGE) ?? 1,
+    pageSize: firstInteger(params.porPagina, 1, MAX_CANDIDATE_PAGE_SIZE) ?? 20,
   };
   const query = text(params.q);
   if (query) filters.query = query;
@@ -132,7 +126,7 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   setArray(filters, "statuses", texts(params.situacao));
   setArray(filters, "federations", texts(params.federacao));
   setArray(filters, "coalitions", texts(params.coligacao));
-  setRange(filters, "ageMin", "ageMax", firstInteger(params.idadeMin, 0, 150), firstInteger(params.idadeMax, 0, 150));
+  setRange(filters, "ageMin", "ageMax", firstInteger(params.idadeMin, 0, MAX_CANDIDATE_AGE), firstInteger(params.idadeMax, 0, MAX_CANDIDATE_AGE));
   setArray(filters, "genders", texts(params.genero));
   setArray(filters, "races", texts(params.raca));
   setArray(filters, "educations", texts(params.escolaridade));
@@ -140,7 +134,7 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   const declaredAssets = enums(params.declarouBens, ["yes", "no"] as const)[0];
   if (declaredAssets) filters.declaredAssets = declaredAssets;
   setRange(filters, "assetMinCents", "assetMaxCents", money(params.patrimonioMin), money(params.patrimonioMax));
-  setRange(filters, "assetCountMin", "assetCountMax", firstInteger(params.quantidadeBensMin, 0, 1_000_000), firstInteger(params.quantidadeBensMax, 0, 1_000_000));
+  setRange(filters, "assetCountMin", "assetCountMax", firstInteger(params.quantidadeBensMin, 0, MAX_CANDIDATE_ASSET_COUNT), firstInteger(params.quantidadeBensMax, 0, MAX_CANDIDATE_ASSET_COUNT));
   setArray(filters, "assetCategories", texts(params.categoriaBem));
   setRange(filters, "revenueMinCents", "revenueMaxCents", money(params.receitaMin), money(params.receitaMax));
   setRange(filters, "expenseMinCents", "expenseMaxCents", money(params.despesaMin), money(params.despesaMax));
@@ -150,13 +144,13 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
     ["hasPhoto", "comFoto"], ["hasSocial", "comRedes"], ["hasGovernmentPlan", "comProposta"],
     ["hasCertificates", "comCertidoes"], ["hasFinance", "comFinancas"],
     ["hasConfirmedLawmaker", "comHistorico"], ["activeMandate", "mandatoAtivo"],
-    ["followedOnly", "acompanhando"],
   ] as const) {
     const selected = boolean(params[parameter]);
     if (selected !== undefined) filters[key] = selected;
   }
   setArray(filters, "lawmakerHouses", enums(params.casa, LAWMAKER_HOUSES));
   setArray(filters, "topics", texts(params.tema));
+  if (values(params.acompanhando)[0] === "1") filters.followedOnly = true;
   const order = enums(params.ordem, ORDERS)[0];
   if (order) filters.order = order;
   return filters;
@@ -184,6 +178,7 @@ function appendBoolean(params: URLSearchParams, key: string, selected: boolean |
 }
 
 export function buildCandidateHref(filters: Partial<CandidateFilters>, page = filters.page ?? 1): string {
+  assertCandidateFilterBounds(filters, page);
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set("q", filters.query.trim().slice(0, MAX_TEXT_LENGTH));
   appendValues(params, "ano", filters.electionYears);
@@ -222,7 +217,7 @@ export function buildCandidateHref(filters: Partial<CandidateFilters>, page = fi
   appendValues(params, "casa", filters.lawmakerHouses);
   appendBoolean(params, "mandatoAtivo", filters.activeMandate);
   appendValues(params, "tema", filters.topics);
-  appendBoolean(params, "acompanhando", filters.followedOnly);
+  if (filters.followedOnly) params.set("acompanhando", "1");
   if (filters.order) params.set("ordem", filters.order);
   if (Number.isSafeInteger(page) && page > 1) params.set("pagina", String(page));
   if (filters.pageSize !== undefined && filters.pageSize !== 20) params.set("porPagina", String(filters.pageSize));
@@ -245,7 +240,7 @@ export function countCandidateFilters(filters: CandidateFilters): number {
     filters.expenseMinCents ?? filters.expenseMaxCents, filters.balanceMinCents ?? filters.balanceMaxCents,
     filters.fundingKinds, filters.hasPhoto, filters.hasSocial, filters.hasGovernmentPlan,
     filters.hasCertificates, filters.hasFinance, filters.hasConfirmedLawmaker, filters.lawmakerHouses,
-    filters.activeMandate, filters.topics, filters.followedOnly,
+    filters.activeMandate, filters.topics, filters.followedOnly || undefined,
   ];
   return groups.filter(present).length;
 }

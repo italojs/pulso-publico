@@ -139,4 +139,57 @@ describe("candidate search params", () => {
     expect(countCandidateFilters(filters)).toBe(4);
     expect(buildCandidateHref(filters, 1)).not.toContain("pagina=");
   });
+
+  it("treats followed-only as true-or-absent while preserving false availability filters", () => {
+    const parsed = parseCandidateSearchParams({ acompanhando: "0", comFoto: "0" });
+
+    expect(parsed).not.toHaveProperty("followedOnly");
+    expect(parsed.hasPhoto).toBe(false);
+    expect(countCandidateFilters({ followedOnly: false, hasPhoto: false })).toBe(1);
+    expect(buildCandidateHref({ followedOnly: false, hasPhoto: false }, 1)).toBe("/candidatos?comFoto=0");
+  });
+
+  it.each([
+    [{ ageMin: -1 }],
+    [{ ageMax: 151 }],
+    [{ ageMin: 61, ageMax: 30 }],
+    [{ assetCountMin: -1 }],
+    [{ assetCountMax: 1_000_001 }],
+    [{ assetCountMin: 2, assetCountMax: 1 }],
+    [{ assetMinCents: -1n }],
+    [{ assetMaxCents: 9_223_372_036_854_775_808n }],
+    [{ assetMinCents: 2n, assetMaxCents: 1n }],
+    [{ revenueMinCents: 2n, revenueMaxCents: 1n }],
+    [{ expenseMinCents: 2n, expenseMaxCents: 1n }],
+    [{ balanceMinCents: 2n, balanceMaxCents: 1n }],
+    [{ pageSize: 0 }],
+    [{ pageSize: 51 }],
+  ] as const)("rejects non-canonical programmatic filter bounds %#", (filters) => {
+    expect(() => buildCandidateHref(filters, 1)).toThrow(RangeError);
+  });
+
+  it.each([0, 100_001, 1.5])("rejects invalid programmatic page %s", (page) => {
+    expect(() => buildCandidateHref({}, page)).toThrow(RangeError);
+  });
+
+  it("round-trips the valid scalar boundaries without changing them", () => {
+    const filters: CandidateFilters = {
+      ageMin: 0,
+      ageMax: 150,
+      assetCountMin: 0,
+      assetCountMax: 1_000_000,
+      assetMinCents: 0n,
+      assetMaxCents: 9_223_372_036_854_775_807n,
+      revenueMinCents: 0n,
+      revenueMaxCents: 9_223_372_036_854_775_807n,
+      expenseMinCents: 0n,
+      expenseMaxCents: 9_223_372_036_854_775_807n,
+      balanceMinCents: 0n,
+      balanceMaxCents: 9_223_372_036_854_775_807n,
+      page: 100_000,
+      pageSize: 50,
+    };
+
+    expect(parseCandidateSearchParams(rawFromHref(buildCandidateHref(filters, filters.page)))).toEqual(filters);
+  });
 });

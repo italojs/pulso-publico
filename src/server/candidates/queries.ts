@@ -5,7 +5,6 @@ import {
   desc,
   eq,
   gte,
-  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -127,6 +126,11 @@ function existenceCondition(exists: SQL, expected: boolean): SQL {
   return expected ? exists : sql`not (${exists})`;
 }
 
+function literalIlike(column: SQLWrapper, value: string): SQL {
+  const escaped = value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+  return sql`${column} ilike ${`%${escaped}%`} escape ${"\\"}`;
+}
+
 function correlatedExists(table: typeof candidateAssets | typeof candidateCampaignTotals): SQL {
   return sql`exists (
     select 1 from ${table}
@@ -178,12 +182,11 @@ function candidateConditions(filters: CandidateFilters, scope: CandidateQuerySco
   const conditions: SQL[] = [currentSnapshot];
   const query = filters.query?.trim();
   if (query) {
-    const pattern = `%${query}%`;
     const numeric = /^\d+$/.test(query) ? Number(query) : undefined;
     const queryConditions: SQL[] = [
-      ilike(electoralCandidates.fullName, pattern),
-      ilike(electoralCandidates.ballotName, pattern),
-      ilike(electoralCandidates.socialName, pattern),
+      literalIlike(electoralCandidates.fullName, query),
+      literalIlike(electoralCandidates.ballotName, query),
+      literalIlike(electoralCandidates.socialName, query),
     ];
     if (numeric !== undefined && Number.isSafeInteger(numeric)) {
       queryConditions.push(eq(electoralCandidates.number, numeric));
@@ -415,14 +418,19 @@ function cardFromRow(row: CardRow): PublicCandidateCard {
 }
 
 function ordering(order: CandidateOrder | undefined): SQL[] {
-  if (order === "number") return [asc(electoralCandidates.number), asc(electoralCandidates.externalId)];
-  if (order === "updated") return [desc(electoralCandidates.checkedAt), asc(electoralCandidates.externalId)];
-  if (order === "assets_desc") return [sql`${assetTotalExpression} desc nulls last`, asc(electoralCandidates.externalId)];
-  if (order === "revenue_desc") return [sql`${candidateCampaignTotals.revenueCents} desc nulls last`, asc(electoralCandidates.externalId)];
-  if (order === "expenses_desc") return [sql`${candidateCampaignTotals.expenseCents} desc nulls last`, asc(electoralCandidates.externalId)];
-  if (order === "projects_desc") return [desc(projectCountExpression), asc(electoralCandidates.externalId)];
-  if (order === "votes_desc") return [desc(voteCountExpression), asc(electoralCandidates.externalId)];
-  return [asc(electoralCandidates.ballotName), asc(electoralCandidates.externalId)];
+  const tieBreakers = [
+    asc(electoralCandidates.electionYear),
+    asc(electoralCandidates.externalId),
+    asc(electoralCandidates.id),
+  ];
+  if (order === "number") return [asc(electoralCandidates.number), ...tieBreakers];
+  if (order === "updated") return [desc(electoralCandidates.checkedAt), ...tieBreakers];
+  if (order === "assets_desc") return [sql`${assetTotalExpression} desc nulls last`, ...tieBreakers];
+  if (order === "revenue_desc") return [sql`${candidateCampaignTotals.revenueCents} desc nulls last`, ...tieBreakers];
+  if (order === "expenses_desc") return [sql`${candidateCampaignTotals.expenseCents} desc nulls last`, ...tieBreakers];
+  if (order === "projects_desc") return [desc(projectCountExpression), ...tieBreakers];
+  if (order === "votes_desc") return [desc(voteCountExpression), ...tieBreakers];
+  return [asc(electoralCandidates.ballotName), ...tieBreakers];
 }
 
 export async function countCandidates(
@@ -484,7 +492,7 @@ export async function listCandidateFilterOptions(database: Database): Promise<Ca
   const current = currentSnapshot;
   const [
     snapshotRows, yearRows, officeRows, regionRows, partyRows, roundRows, statusRows, federationRows, coalitionRows,
-    genderRows, raceRows, educationRows, occupationRows, assetRows, campaignRows, houseRows, topicRows,
+    genderRows, raceRows, educationRows, occupationRows, assetRows, houseRows, topicRows,
   ] = await Promise.all([
     database.select({
       electionYear: electoralSyncRuns.electionYear,
@@ -505,8 +513,6 @@ export async function listCandidateFilterOptions(database: Database): Promise<Ca
     database.selectDistinct({ value: electoralCandidates.occupation }).from(electoralCandidates).where(and(current, isNotNull(electoralCandidates.occupation))).orderBy(asc(electoralCandidates.occupation)),
     database.selectDistinct({ value: candidateAssets.category }).from(candidateAssets)
       .innerJoin(electoralCandidates, eq(candidateAssets.candidateId, electoralCandidates.id)).where(current).orderBy(asc(candidateAssets.category)),
-    database.select({ categories: candidateCampaignTotals.revenueByCategory }).from(candidateCampaignTotals)
-      .innerJoin(electoralCandidates, eq(candidateCampaignTotals.candidateId, electoralCandidates.id)).where(current),
     database.selectDistinct({ value: lawmakers.source }).from(candidateLawmakerLinks)
       .innerJoin(electoralCandidates, eq(candidateLawmakerLinks.candidateId, electoralCandidates.id))
       .innerJoin(lawmakers, eq(candidateLawmakerLinks.lawmakerId, lawmakers.id))
@@ -518,13 +524,13 @@ export async function listCandidateFilterOptions(database: Database): Promise<Ca
       .where(and(current, eq(candidateLawmakerLinks.status, "confirmed"))).orderBy(asc(billTopics.label)),
   ]);
 
-  const availableFunding = new Set<CandidateFundingKind>();
-  for (const row of campaignRows) {
-    for (const [kind, label] of Object.entries(fundingLabels) as Array<[CandidateFundingKind, string]>) {
-      if (BigInt(row.categories[label] ?? "0") > 0n) availableFunding.add(kind);
-    }
-  }
   const fundingOrder: CandidateFundingKind[] = ["public", "private", "own"];
+  const fundingCounts = await Promise.all(
+    fundingOrder.map((kind) => countCandidates(database, { fundingKinds: [kind] })),
+  );
+  const availableFunding = new Set(
+    fundingOrder.filter((_kind, index) => (fundingCounts[index] ?? 0) > 0),
+  );
   const latestSnapshots = new Map<number, Date | null>();
   for (const row of snapshotRows) {
     if (!latestSnapshots.has(row.electionYear)) latestSnapshots.set(row.electionYear, row.extractedAt);

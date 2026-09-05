@@ -84,6 +84,12 @@ describe("candidate filter wire contract", () => {
     expect(() => toCandidateFilterInput({ assetMaxCents: 9_223_372_036_854_775_808n })).toThrow();
   });
 
+  it("accepts followed-only only as true and omits a programmatic false value", () => {
+    expect(candidateFilterRequestSchema.safeParse({ filters: { followedOnly: false } }).success).toBe(false);
+    expect(toCandidateFilterInput({ followedOnly: false })).toEqual({});
+    expect(toCandidateFilterInput({ followedOnly: true })).toEqual({ followedOnly: true });
+  });
+
   it.each([
     { assetMin: "-0.01" },
     { assetMin: "01" },

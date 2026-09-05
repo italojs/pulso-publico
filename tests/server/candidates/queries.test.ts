@@ -108,7 +108,7 @@ async function seedCandidates() {
     }),
     candidate("1010", {
       ballotName: "Ana Cidadã",
-      fullName: "Ana Maria Cidadã",
+      fullName: "Ana 100%_Cidadã\\Literal",
       number: 1010,
       photoStorageKey: "current-2026/photos/1010/foto.jpg",
     }),
@@ -355,6 +355,15 @@ describe("candidate catalog queries", () => {
     expect((await ids(filters as Parameters<typeof listCandidates>[1])).toSorted()).toEqual([...expected].toSorted());
   });
 
+  it.each([
+    ["%", ["1010"]],
+    ["_", ["1010"]],
+    ["\\", ["1010"]],
+    ["ana", ["1010"]],
+  ] as const)("treats search text %s literally", async (query, expected) => {
+    expect(await ids({ query })).toEqual(expected);
+  });
+
   it("distinguishes declared zero assets, missing assets, and exact aggregate boundaries", async () => {
     expect((await ids({ declaredAssets: "yes" })).toSorted()).toEqual(["1010", "3030"]);
     expect(await ids({ declaredAssets: "no" })).toEqual(["2020"]);
@@ -409,6 +418,7 @@ describe("candidate catalog queries", () => {
   it("scopes followed-only to the authenticated user", async () => {
     await expect(ids({ followedOnly: true })).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
     expect(await ids({ followedOnly: true }, seeded.user.id)).toEqual(["1010"]);
+    expect(await ids({ followedOnly: false })).toEqual(["1010", "2020", "3030"]);
   });
 
   it.each([
@@ -422,6 +432,40 @@ describe("candidate catalog queries", () => {
     ["votes_desc", ["1010", "3030", "2020"]],
   ] as const)("orders deterministically by %s", async (order, expected) => {
     expect(await ids({ order })).toEqual(expected);
+  });
+
+  it.each([
+    "name", "number", "updated", "assets_desc", "revenue_desc", "expenses_desc", "projects_desc", "votes_desc",
+  ] as const)("uses election year before identifiers to paginate equal %s keys", async (order) => {
+    await testDb.insert(electoralSyncRuns).values({
+      syncRunId: "current-2027",
+      electionYear: 2027,
+      status: "successful",
+      startedAt: checkedAt,
+      completedAt: checkedAt,
+      extractedAt,
+    });
+    await testDb.insert(electoralCandidates).values([
+      candidate("9000", {
+        ballotName: "Mesmo Nome",
+        fullName: "Mesmo Nome",
+        number: 999,
+      }),
+      candidate("1000", {
+        electionYear: 2027,
+        snapshotRunId: "current-2027",
+        ballotName: "Mesmo Nome",
+        fullName: "Mesmo Nome",
+        number: 999,
+      }),
+    ]);
+
+    const first = await listCandidates(testDb, { query: "Mesmo Nome", order, page: 1, pageSize: 1 });
+    const second = await listCandidates(testDb, { query: "Mesmo Nome", order, page: 2, pageSize: 1 });
+
+    expect([first.items[0]?.electionYear, second.items[0]?.electionYear]).toEqual([2026, 2027]);
+    expect(first.total).toBe(2);
+    expect(second.total).toBe(2);
   });
 
   it("keeps count, list and pagination totals in parity", async () => {
@@ -448,6 +492,10 @@ describe("candidate catalog queries", () => {
     expect(options.assetCategories).not.toContain("Antigo");
     expect(options.topics).toEqual(["Direitos humanos", "Educação", "Saúde", "Trabalho"]);
     expect(options.topics).not.toContain("Tema pendente");
+    expect(options.fundingKinds.map((option) => option.value)).toEqual(["public"]);
+    for (const option of options.fundingKinds) {
+      expect(await countCandidates(testDb, { fundingKinds: [option.value] })).toBeGreaterThan(0);
+    }
   });
 
   it("returns a current detail with official children and confirmed history only", async () => {
