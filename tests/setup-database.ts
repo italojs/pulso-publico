@@ -19,6 +19,15 @@ export async function migrateTestDatabase() {
 export async function truncateLegislativeTables() {
   await testDb.execute(sql`
     truncate table
+      followed_candidates,
+      candidate_lawmaker_links,
+      candidate_documents,
+      candidate_government_plans,
+      candidate_social_links,
+      candidate_campaign_totals,
+      candidate_assets,
+      electoral_candidates,
+      electoral_sync_runs,
       push_subscriptions,
       user_alerts,
       alert_events,

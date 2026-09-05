@@ -1,7 +1,10 @@
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -48,6 +51,28 @@ export const alertTypeEnum = pgEnum("alert_type", [
   "sanction_or_veto",
   "archived",
   "in_force",
+]);
+export const candidateOfficeEnum = pgEnum("candidate_office", [
+  "presidente",
+  "vice_presidente",
+  "governador",
+  "vice_governador",
+  "senador",
+  "primeiro_suplente",
+  "segundo_suplente",
+  "deputado_federal",
+  "deputado_estadual",
+  "deputado_distrital",
+]);
+export const candidateLawmakerLinkStatusEnum = pgEnum("candidate_lawmaker_link_status", [
+  "pending",
+  "confirmed",
+  "rejected",
+]);
+export const electoralSyncStatusEnum = pgEnum("electoral_sync_status", [
+  "running",
+  "successful",
+  "failed",
 ]);
 
 export const bills = pgTable(
@@ -349,6 +374,188 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   index("push_subscriptions_user_id_idx").on(table.userId),
 ]);
 
+export const electoralSyncRuns = pgTable("electoral_sync_runs", {
+  syncRunId: text("sync_run_id").primaryKey(),
+  electionYear: integer("election_year").notNull(),
+  status: electoralSyncStatusEnum("status").notNull(),
+  sourceUrl: text("source_url"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  extractedAt: timestamp("extracted_at", { withTimezone: true }),
+  candidateCount: integer("candidate_count").default(0).notNull(),
+  assetCount: integer("asset_count").default(0).notNull(),
+  campaignEntryCount: integer("campaign_entry_count").default(0).notNull(),
+  socialLinkCount: integer("social_link_count").default(0).notNull(),
+  governmentPlanCount: integer("government_plan_count").default(0).notNull(),
+  documentCount: integer("document_count").default(0).notNull(),
+  errorCode: text("error_code"),
+  ...timestamps,
+}, (table) => [
+  index("electoral_sync_runs_latest_idx").on(
+    table.electionYear,
+    table.status,
+    table.extractedAt,
+  ),
+]);
+
+export const electoralCandidates = pgTable("electoral_candidates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  electionYear: integer("election_year").notNull(),
+  externalId: text("external_id").notNull(),
+  snapshotRunId: text("snapshot_run_id").notNull().references(() => electoralSyncRuns.syncRunId),
+  fullName: text("full_name").notNull(),
+  ballotName: text("ballot_name").notNull(),
+  socialName: text("social_name"),
+  number: integer("number").notNull(),
+  office: candidateOfficeEnum("office").notNull(),
+  round: integer("round").notNull(),
+  region: text("region").notNull(),
+  electoralUnit: text("electoral_unit").notNull(),
+  status: text("status").notNull(),
+  statusDetail: text("status_detail"),
+  partyAcronym: text("party_acronym").notNull(),
+  partyNumber: integer("party_number").notNull(),
+  partyName: text("party_name").notNull(),
+  federation: text("federation"),
+  coalition: text("coalition"),
+  seekingReelection: boolean("seeking_reelection").notNull(),
+  birthDate: date("birth_date"),
+  ageAtInauguration: integer("age_at_inauguration"),
+  gender: text("gender"),
+  race: text("race"),
+  education: text("education"),
+  occupation: text("occupation"),
+  maritalStatus: text("marital_status"),
+  nationality: text("nationality"),
+  birthRegion: text("birth_region"),
+  birthCity: text("birth_city"),
+  officialUrl: text("official_url").notNull(),
+  sourceArchiveUrl: text("source_archive_url"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }).notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  photoStorageKey: text("photo_storage_key"),
+  photoSourceArchiveUrl: text("photo_source_archive_url"),
+  photoOriginalFilename: text("photo_original_filename"),
+  photoMimeType: text("photo_mime_type"),
+  photoSourceExtractedAt: timestamp("photo_source_extracted_at", { withTimezone: true }),
+  photoCheckedAt: timestamp("photo_checked_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("electoral_candidates_year_external_uq").on(table.electionYear, table.externalId),
+  index("electoral_candidates_catalog_idx").on(
+    table.electionYear,
+    table.region,
+    table.office,
+    table.partyAcronym,
+  ),
+  index("electoral_candidates_status_idx").on(table.status),
+  index("electoral_candidates_snapshot_run_idx").on(table.snapshotRunId),
+]);
+
+export const candidateAssets = pgTable("candidate_assets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  category: text("category").notNull(),
+  description: text("description"),
+  valueCents: bigint("value_cents", { mode: "bigint" }).notNull(),
+  sourceArchiveUrl: text("source_archive_url"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }).notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  index("candidate_assets_candidate_idx").on(table.candidateId),
+  index("candidate_assets_money_idx").on(table.valueCents),
+]);
+
+export const candidateCampaignTotals = pgTable("candidate_campaign_totals", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  revenueCents: bigint("revenue_cents", { mode: "bigint" }),
+  expenseCents: bigint("expense_cents", { mode: "bigint" }),
+  balanceCents: bigint("balance_cents", { mode: "bigint" }),
+  revenueByCategory: jsonb("revenue_by_category").$type<Record<string, string>>().default({}).notNull(),
+  expenseByCategory: jsonb("expense_by_category").$type<Record<string, string>>().default({}).notNull(),
+  sourceArchiveUrl: text("source_archive_url"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }).notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("candidate_campaign_totals_candidate_uq").on(table.candidateId),
+  index("candidate_campaign_totals_money_idx").on(table.revenueCents, table.expenseCents),
+]);
+
+export const candidateSocialLinks = pgTable("candidate_social_links", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  url: text("url").notNull(),
+  sourceArchiveUrl: text("source_archive_url"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }).notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("candidate_social_links_candidate_url_uq").on(table.candidateId, table.url),
+  index("candidate_social_links_candidate_idx").on(table.candidateId),
+]);
+
+export const candidateGovernmentPlans = pgTable("candidate_government_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  officialUrl: text("official_url").notNull(),
+  storageKey: text("storage_key"),
+  sourceArchiveUrl: text("source_archive_url"),
+  originalFilename: text("original_filename"),
+  mimeType: text("mime_type"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("candidate_government_plans_candidate_url_uq").on(table.candidateId, table.officialUrl),
+  index("candidate_government_plans_candidate_idx").on(table.candidateId),
+]);
+
+export const candidateDocuments = pgTable("candidate_documents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  officialUrl: text("official_url").notNull(),
+  storageKey: text("storage_key"),
+  sourceArchiveUrl: text("source_archive_url"),
+  originalFilename: text("original_filename"),
+  mimeType: text("mime_type"),
+  sourceExtractedAt: timestamp("source_extracted_at", { withTimezone: true }),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("candidate_documents_candidate_url_uq").on(table.candidateId, table.officialUrl),
+  index("candidate_documents_candidate_idx").on(table.candidateId),
+]);
+
+export const candidateLawmakerLinks = pgTable("candidate_lawmaker_links", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id),
+  lawmakerId: uuid("lawmaker_id").notNull().references(() => lawmakers.id),
+  status: candidateLawmakerLinkStatusEnum("status").default("pending").notNull(),
+  matchMethod: text("match_method").notNull(),
+  evidenceUrl: text("evidence_url"),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("candidate_lawmaker_links_candidate_lawmaker_uq").on(table.candidateId, table.lawmakerId),
+  index("candidate_lawmaker_links_status_idx").on(table.status),
+  index("candidate_lawmaker_links_lawmaker_idx").on(table.lawmakerId),
+]);
+
+export const followedCandidates = pgTable("followed_candidates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("followed_candidates_user_candidate_uq").on(table.userId, table.candidateId),
+  index("followed_candidates_candidate_idx").on(table.candidateId),
+]);
+
 export type NewBill = typeof bills.$inferInsert;
 export type NewLawmaker = typeof lawmakers.$inferInsert;
 export type NewBillAuthor = typeof billAuthors.$inferInsert;
@@ -366,3 +573,12 @@ export type NewFollowedLawmaker = typeof followedLawmakers.$inferInsert;
 export type NewAlertEvent = typeof alertEvents.$inferInsert;
 export type NewUserAlert = typeof userAlerts.$inferInsert;
 export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;
+export type NewElectoralSyncRun = typeof electoralSyncRuns.$inferInsert;
+export type NewElectoralCandidate = typeof electoralCandidates.$inferInsert;
+export type NewCandidateAsset = typeof candidateAssets.$inferInsert;
+export type NewCandidateCampaignTotal = typeof candidateCampaignTotals.$inferInsert;
+export type NewCandidateSocialLink = typeof candidateSocialLinks.$inferInsert;
+export type NewCandidateGovernmentPlan = typeof candidateGovernmentPlans.$inferInsert;
+export type NewCandidateDocument = typeof candidateDocuments.$inferInsert;
+export type NewCandidateLawmakerLink = typeof candidateLawmakerLinks.$inferInsert;
+export type NewFollowedCandidate = typeof followedCandidates.$inferInsert;
