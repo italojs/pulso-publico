@@ -124,13 +124,10 @@ describe("advanced public filter routes", () => {
     expect(response.status).toBe(200);
   });
 
-  it("rejects more than two hundred anonymous bill references", async () => {
+  it("rejects the legacy anonymous bill-reference payload", async () => {
     const response = await countPost(post("/api/projects/filter-count", {
       filters: { followedOnly: true },
-      anonymousBillKeys: Array.from({ length: 201 }, (_, index) => ({
-        source: "camara",
-        externalId: `bill-${index}`,
-      })),
+      anonymousBillKeys: [{ source: "camara", externalId: "route-camara" }],
     }));
 
     expect(response.status).toBe(400);
@@ -182,10 +179,6 @@ describe("advanced public filter routes", () => {
   it("returns a paginated search page", async () => {
     const response = await searchPost(post("/api/projects/search", {
       filters: { page: 2, pageSize: 1, order: "presented_desc" },
-      anonymousBillKeys: [
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-      ],
     }));
 
     expect(response.status).toBe(200);
@@ -198,28 +191,20 @@ describe("advanced public filter routes", () => {
     });
   });
 
-  it("uses anonymous keys for follows without echoing them", async () => {
-    const response = await searchPost(post("/api/projects/search", {
-      filters: { followedOnly: true },
-      anonymousBillKeys: [
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-      ],
-    }));
+  it("requires authentication for followed-only searches and previews", async () => {
+    for (const handler of [searchPost, countPost]) {
+      const response = await handler(post("/api/projects/search", {
+        filters: { followedOnly: true },
+      }));
 
-    expect(response.status).toBe(200);
-    const payload = await response.json();
-    expect(payload).toMatchObject({
-      total: 1,
-      items: [{ externalId: seeded.camaraBill.externalId }],
-    });
-    expect(payload).not.toHaveProperty("anonymousBillKeys");
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ code: "AUTH_REQUIRED" });
+    }
   });
 
   it("derives an authenticated follow scope from the session instead of client keys", async () => {
     const response = await searchPost(post("/api/projects/search", {
       filters: { followedOnly: true },
-      anonymousBillKeys: [{ source: "camara", externalId: seeded.camaraBill.externalId }],
     }, { cookie: `pulso_session=${seeded.session.token}` }));
 
     expect(response.status).toBe(200);
@@ -287,35 +272,25 @@ describe("advanced public filter routes", () => {
     expect("filters" in parsed && parsed.filters).not.toHaveProperty("activityEnd");
   });
 
-  it("rejects unknown root and bill-reference keys", async () => {
+  it("rejects unknown root keys including the removed anonymous-reference field", async () => {
     const root = await countPost(post("/api/projects/filter-count", {
       filters: {},
       unknown: true,
     }));
-    const reference = await countPost(post("/api/projects/filter-count", {
+    const anonymous = await countPost(post("/api/projects/filter-count", {
       filters: {},
-      anonymousBillKeys: [{ source: "camara", externalId: "route-camara", unknown: true }],
+      anonymousBillKeys: [{ source: "camara", externalId: "route-camara" }],
     }));
 
     expect(root.status).toBe(400);
-    expect(reference.status).toBe(400);
+    expect(anonymous.status).toBe(400);
   });
 
-  it("deduplicates anonymous bill keys before constructing their scope", async () => {
+  it("returns an authentication error instead of constructing an anonymous follow scope", async () => {
     const parsed = await readPublicFilterRequest(post("/api/projects/search", {
       filters: { followedOnly: true },
-      anonymousBillKeys: [
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-        { source: "senado", externalId: seeded.senadoBill.externalId },
-      ],
     }), new UserRepository(testDb));
 
-    expect("scope" in parsed && parsed.scope).toEqual({
-      anonymousBillKeys: [
-        { source: "camara", externalId: seeded.camaraBill.externalId },
-        { source: "senado", externalId: seeded.senadoBill.externalId },
-      ],
-    });
+    expect(parsed).toEqual({ error: "AUTH_REQUIRED" });
   });
 });

@@ -1,58 +1,76 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation.js";
 
 import type { LocalFollow } from "#/follows/local";
-import { LOCAL_FOLLOWS_CHANGED_EVENT, LOCAL_FOLLOWS_KEY, localFollowKey, parseLocalFollows, toggleLocalFollow } from "#/follows/local";
+import { localFollowKey } from "#/follows/local";
 import { BellIcon, BookmarkIcon } from "#/ui/icons";
 
 type FollowButtonProps = LocalFollow & { compact?: boolean };
 
 export function FollowButton(props: Readonly<FollowButtonProps>) {
+  const router = useRouter();
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [followed, setFollowed] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const local = parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY));
-    setFollowed(local.some((item) => localFollowKey(item) === localFollowKey(props)));
     fetch("/api/follows", { headers: { Accept: "application/json" } })
-      .then(async (response) => response.ok ? response.json() as Promise<{ items: Array<LocalFollow & { alertsEnabled?: boolean }> }> : null)
+      .then(async (response) => {
+        if (response.status === 401) {
+          setAuthenticated(false);
+          return null;
+        }
+        if (!response.ok) return null;
+        setAuthenticated(true);
+        return response.json() as Promise<{ items: Array<LocalFollow & { alertsEnabled?: boolean }> }>;
+      })
       .then((data) => {
         const stored = data?.items.find((item) => localFollowKey(item) === localFollowKey(props));
         if (stored) {
           setFollowed(true);
           setAlertsEnabled(Boolean(stored.alertsEnabled));
-          const merged = toggleLocalFollow(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY)), props, true);
-          localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify(merged));
         }
       })
       .catch(() => undefined);
   }, [props.kind, props.source, props.externalId, props.label, props.href, props.subtitle]);
 
-  function persistLocal(value: boolean) {
-    const next = toggleLocalFollow(parseLocalFollows(localStorage.getItem(LOCAL_FOLLOWS_KEY)), props, value);
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify(next));
-    window.dispatchEvent(new Event(LOCAL_FOLLOWS_CHANGED_EVENT));
+  function goToLogin() {
+    router.push(`/entrar?next=${encodeURIComponent(props.href)}`);
   }
 
   async function toggle() {
+    if (authenticated === false) {
+      goToLogin();
+      return;
+    }
     const next = !followed;
-    setFollowed(next);
-    if (!next) setAlertsEnabled(false);
-    persistLocal(next);
-    setMessage(next ? "Salvo neste dispositivo." : "Removido dos itens seguidos.");
-    await fetch("/api/follows", {
+    const response = await fetch("/api/follows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: next ? "follow" : "unfollow", kind: props.kind, source: props.source, externalId: props.externalId }),
-    }).catch(() => undefined);
+    }).catch(() => null);
+    if (response?.status === 401) {
+      setAuthenticated(false);
+      goToLogin();
+      return;
+    }
+    if (!response?.ok) {
+      setMessage("Não foi possível atualizar seu acompanhamento agora.");
+      return;
+    }
+    setAuthenticated(true);
+    setFollowed(next);
+    if (!next) setAlertsEnabled(false);
+    setMessage(next ? "Projeto salvo na sua conta." : "Removido dos itens seguidos.");
   }
 
   async function enableAlerts() {
-    if (!followed) {
-      setFollowed(true);
-      persistLocal(true);
+    if (authenticated === false) {
+      goToLogin();
+      return;
     }
     const response = await fetch("/api/follows", {
       method: "POST",
@@ -60,10 +78,13 @@ export function FollowButton(props: Readonly<FollowButtonProps>) {
       body: JSON.stringify({ action: "follow", kind: "bill", source: props.source, externalId: props.externalId, alertsEnabled: true }),
     }).catch(() => null);
     if (response?.status === 401) {
-      window.location.assign(`/entrar?next=${encodeURIComponent(window.location.pathname)}`);
+      setAuthenticated(false);
+      goToLogin();
       return;
     }
     if (response?.ok) {
+      setAuthenticated(true);
+      setFollowed(true);
       setAlertsEnabled(true);
       setMessage("Alertas ativados para este projeto.");
     } else {

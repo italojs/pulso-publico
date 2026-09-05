@@ -8,8 +8,6 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PublicBillFilters, PublicFilterOptions } from "#/server/public/read-models";
-import { LOCAL_FOLLOWS_KEY } from "#/follows/local";
-import { AnonymousFollowedResults } from "#/ui/anonymous-followed-results";
 import { FeedFilters } from "#/ui/feed-filters";
 import { Pagination } from "#/ui/pagination";
 
@@ -39,50 +37,8 @@ afterEach(() => {
   routerPush.mockReset();
 });
 
-const project = {
-  source: "camara" as const,
-  externalId: "501",
-  officialCode: "PEC 8/2025",
-  officialTitle: "Proposta de Emenda à Constituição nº 8, de 2025",
-  officialSummary: "Reduz a jornada semanal e altera a escala de trabalho.",
-  officialUrl: "https://www.camara.leg.br/propostas-legislativas/501",
-  statusLabel: "Aguardando parecer na comissão",
-  originHouse: "camara" as const,
-  currentHouse: "camara" as const,
-  presentedAt: "2025-02-01T12:00:00.000Z",
-  checkedAt: "2026-09-03T12:00:00.000Z",
-  latestActivityAt: "2026-08-31T18:00:00.000Z",
-  topics: ["Trabalho e Emprego"],
-  authors: [{
-    source: "camara" as const,
-    name: "Ana Cidadã",
-    party: "ABC",
-    kind: "Deputada Federal",
-    primary: true,
-    lawmakerExternalId: "100",
-    officialUrl: "https://www.camara.leg.br/deputados/100",
-  }],
-};
-
-const localBill = {
-  kind: "bill" as const,
-  source: "camara" as const,
-  externalId: "501",
-  label: "PEC 8/2025",
-  href: "/projetos/camara/501",
-  subtitle: "Aguardando parecer na comissão",
-};
-
-const localLawmaker = {
-  kind: "lawmaker" as const,
-  source: "senado" as const,
-  externalId: "200",
-  label: "Bruno Federal",
-  href: "/parlamentares/senado/200",
-};
-
-function renderFilters(filters: PublicBillFilters = {}, customOptions = options) {
-  return render(<FeedFilters filters={filters} options={customOptions} />);
+function renderFilters(filters: PublicBillFilters = {}, customOptions = options, authenticated = true) {
+  return render(<FeedFilters authenticated={authenticated} filters={filters} options={customOptions} />);
 }
 
 function openDialog() {
@@ -91,132 +47,19 @@ function openDialog() {
 }
 
 describe("advanced feed filters", () => {
-  it("loads anonymous followed bills without exposing references and paginates through POST", async () => {
-    window.history.replaceState(null, "", "/?acompanhando=1&tema=Trabalho");
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill, localLawmaker]));
-    const searchRequests: Array<{ anonymousBillKeys: unknown[]; filters: PublicBillFilters }> = [];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) !== "/api/projects/search") return new Response(null, { status: 401 });
-      const body = JSON.parse(String(init?.body)) as { anonymousBillKeys: unknown[]; filters: PublicBillFilters };
-      searchRequests.push(body);
-      return new Response(JSON.stringify({
-        items: [project], page: body.filters.page, pageSize: 1, total: 2, totalPages: 2,
-      }), { headers: { "content-type": "application/json" }, status: 200 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] }} />);
-
-    expect(await screen.findByRole("link", { name: /PEC 8\/2025/ })).toHaveAttribute("href", "/projetos/camara/501");
-    expect(searchRequests[0]).toEqual({
-      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
-      filters: { followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] },
-    });
-    expect(window.location.search).toBe("?acompanhando=1&tema=Trabalho");
-
-    fireEvent.click(screen.getByRole("button", { name: "Próxima página" }));
-    await waitFor(() => expect(searchRequests).toHaveLength(2));
-    expect(searchRequests[1]).toEqual({
-      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
-      filters: { followedOnly: true, page: 2, pageSize: 1, topics: ["Trabalho"] },
-    });
-    expect(window.location.search).toBe("?acompanhando=1&tema=Trabalho");
-  });
-
-  it("resets anonymous pagination before searching with changed URL filters", async () => {
-    window.history.replaceState(null, "", "/?acompanhando=1&tema=Trabalho");
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill]));
-    const searchRequests: PublicBillFilters[] = [];
-    const healthProject = {
-      ...project,
-      source: "senado" as const,
-      externalId: "601",
-      officialCode: "PL 12/2024",
-      officialTitle: "Projeto de Lei nº 12, de 2024",
-      topics: ["Saúde"],
-    };
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) !== "/api/projects/search") return new Response(null, { status: 401 });
-      const body = JSON.parse(String(init?.body)) as { filters: PublicBillFilters };
-      searchRequests.push(body.filters);
-      const item = body.filters.topics?.includes("Saúde") ? healthProject : project;
-      return new Response(JSON.stringify({
-        items: [item], page: body.filters.page, pageSize: 1, total: 2, totalPages: 2,
-      }), { headers: { "content-type": "application/json" }, status: 200 });
-    }));
-
-    const view = render(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Trabalho"] }} />);
-    await screen.findByRole("link", { name: /PEC 8\/2025/ });
-    fireEvent.click(screen.getByRole("button", { name: "Próxima página" }));
-    await waitFor(() => expect(searchRequests).toHaveLength(2));
-    expect(searchRequests[1]?.page).toBe(2);
-
-    window.history.replaceState(null, "", "/?acompanhando=1&tema=Sa%C3%BAde");
-    view.rerender(<AnonymousFollowedResults filters={{ followedOnly: true, page: 1, pageSize: 1, topics: ["Saúde"] }} />);
-
-    expect(await screen.findByRole("link", { name: /PL 12\/2024/ })).toHaveAttribute("href", "/projetos/senado/601");
-    expect(searchRequests).toHaveLength(3);
-    expect(searchRequests[2]).toEqual({ followedOnly: true, page: 1, pageSize: 1, topics: ["Saúde"] });
-    expect(new URLSearchParams(window.location.search).has("pagina")).toBe(false);
-  });
-
-  it("shows how to follow a project when anonymous storage has no bill", async () => {
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localLawmaker]));
+  it("requires an account before enabling the followed-project filter", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AnonymousFollowedResults filters={{ followedOnly: true }} />);
-
-    expect(await screen.findByText("Você ainda não acompanha nenhum projeto.")).toBeInTheDocument();
-    expect(screen.getByText(/use o botão “Seguir projeto”/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("loads, deduplicates and refreshes anonymous references when followed-only is first enabled", async () => {
-    vi.useFakeTimers();
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill, localBill, localLawmaker]));
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ total: 1 }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderFilters();
+    renderFilters({}, options, false);
     const dialog = openDialog();
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Mostrar somente projetos que acompanho" }));
-    await act(async () => vi.advanceTimersByTimeAsync(300));
 
-    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
-      anonymousBillKeys: [{ source: "camara", externalId: "501" }],
-      filters: { followedOnly: true },
-    });
-
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, "[]");
-    await act(async () => window.dispatchEvent(new Event("pulso:follows-changed")));
-    await act(async () => vi.advanceTimersByTimeAsync(300));
-    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual({
-      anonymousBillKeys: [],
-      filters: { followedOnly: true },
-    });
-  });
-
-  it("refreshes anonymous followed results after unfollow and follow events on the open page", async () => {
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill]));
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { filters: PublicBillFilters };
-      return new Response(JSON.stringify({
-        items: [project], page: body.filters.page ?? 1, pageSize: 20, total: 1, totalPages: 1,
-      }), { headers: { "content-type": "application/json" }, status: 200 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    render(<AnonymousFollowedResults filters={{ followedOnly: true }} />);
-    await screen.findByRole("link", { name: /PEC 8\/2025/ });
-
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, "[]");
-    window.dispatchEvent(new Event("pulso:follows-changed"));
-    expect(await screen.findByText("Você ainda não acompanha nenhum projeto.")).toBeInTheDocument();
-
-    localStorage.setItem(LOCAL_FOLLOWS_KEY, JSON.stringify([localBill]));
-    window.dispatchEvent(new Event("pulso:follows-changed"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("link", { name: /PEC 8\/2025/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Mostrar somente projetos que acompanho" })).toBeDisabled();
+    expect(within(dialog).getByRole("link", { name: "Entrar para usar este filtro" })).toHaveAttribute(
+      "href",
+      "/entrar?next=%2F%3Facompanhando%3D1",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("preserves advanced filters in SSR pagination and changes only the page", () => {
@@ -251,7 +94,7 @@ describe("advanced feed filters", () => {
   });
 
   it("server-renders the native dialog, invoker attributes, and named GET controls", () => {
-    const html = renderToString(<FeedFilters filters={{
+    const html = renderToString(<FeedFilters authenticated filters={{
       proposalTypes: ["PEC"], proposalNumber: 12, yearFrom: 2024, yearTo: 2026,
       sources: ["camara", "senado"], statuses: ["Em análise"], topics: ["Educação"],
       originHouses: ["camara"], currentHouses: ["senado"], stages: ["committees"],
@@ -271,7 +114,7 @@ describe("advanced feed filters", () => {
     for (const name of ["tipo", "numero", "anoInicio", "anoFim", "fonte", "situacao", "tema", "origem", "casaAtual", "fase", "apresentadaInicio", "apresentadaFim", "atividadeRecente", "votacao", "tipoVotacao", "votosIndividuais", "resultado", "casaVotacao", "autor", "partido", "uf", "acompanhando", "ordem"]) {
       expect(html).toContain(`name="${name}"`);
     }
-    const customActivityHtml = renderToString(<FeedFilters filters={{ activityStart: "2025-01-01", activityEnd: "2025-12-31" }} options={options} />);
+    const customActivityHtml = renderToString(<FeedFilters authenticated filters={{ activityStart: "2025-01-01", activityEnd: "2025-12-31" }} options={options} />);
     expect(customActivityHtml).toContain('name="atividadeInicio"');
     expect(customActivityHtml).toContain('name="atividadeFim"');
     const dialogHtml = html.slice(html.indexOf("<dialog"));
@@ -329,7 +172,7 @@ describe("advanced feed filters", () => {
   it("resynchronizes both controlled forms after canonical URL navigation", () => {
     const view = renderFilters({ query: "jornada", sources: ["camara"], statuses: ["Em análise"] });
 
-    view.rerender(<FeedFilters filters={{ query: "saúde", sources: ["senado"], statuses: ["Pronta para pauta"], topics: ["Educação"] }} options={options} />);
+    view.rerender(<FeedFilters authenticated filters={{ query: "saúde", sources: ["senado"], statuses: ["Pronta para pauta"], topics: ["Educação"] }} options={options} />);
 
     const quickForm = screen.getByRole("form", { name: "Filtros rápidos" });
     expect(within(quickForm).getByRole("searchbox", { name: "Buscar projetos" })).toHaveValue("saúde");
@@ -559,7 +402,7 @@ describe("advanced feed filters", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ anonymousBillKeys: [], filters: {
+    expect(JSON.parse(String(init.body))).toEqual({ filters: {
       query: "jornada", proposalTypes: ["PEC"], sources: ["camara", "senado"], statuses: ["Em análise"], topics: ["Educação"], recentActivity: "7d", votePresence: "with",
     } });
     expect(screen.getByRole("status")).toHaveTextContent("42 projetos encontrados");

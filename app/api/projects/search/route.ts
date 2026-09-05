@@ -11,7 +11,8 @@ export async function POST(request: Request) {
 
   const parsed = await readPublicFilterRequest(request, users);
   if ("error" in parsed) {
-    return Response.json({ code: parsed.error }, { status: parsed.error === "REQUEST_TOO_LARGE" ? 413 : 400 });
+    const status = parsed.error === "AUTH_REQUIRED" ? 401 : parsed.error === "REQUEST_TOO_LARGE" ? 413 : 400;
+    return Response.json({ code: parsed.error }, { status });
   }
 
   return Response.json(await listPublicBills(db, parsed.filters, parsed.scope));

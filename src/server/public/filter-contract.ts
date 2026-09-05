@@ -90,21 +90,13 @@ export const publicBillFiltersSchema = z.object({
   return withoutCustomActivity;
 });
 
-const billReference = z.object({
-  source: z.enum(sourceValues),
-  externalId: z.string().min(1).max(MAX_TEXT_LENGTH),
-}).strict();
-
 export const filterRequest = z.object({
   filters: publicBillFiltersSchema,
-  anonymousBillKeys: z.array(billReference).max(200).default([]),
 }).strict();
-
-type FilterRequest = z.infer<typeof filterRequest>;
 
 type FilterRequestRead =
   | { filters: PublicBillFilters; scope: PublicBillScope }
-  | { error: "INVALID_FILTER_REQUEST" | "REQUEST_TOO_LARGE" };
+  | { error: "AUTH_REQUIRED" | "INVALID_FILTER_REQUEST" | "REQUEST_TOO_LARGE" };
 type BoundedJsonRead = { body: unknown } | { error: "INVALID_FILTER_REQUEST" | "REQUEST_TOO_LARGE" };
 
 function announcedRequestIsTooLarge(request: Request) {
@@ -146,26 +138,16 @@ async function readBoundedJson(request: Request): Promise<BoundedJsonRead> {
   }
 }
 
-function anonymousScope(keys: FilterRequest["anonymousBillKeys"]): PublicBillScope {
-  const seen = new Set<string>();
-  const anonymousBillKeys = keys.filter((key) => {
-    const identity = `${key.source}:${key.externalId}`;
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  });
-  return { anonymousBillKeys };
-}
-
 export async function readPublicFilterRequest(request: Request, users: UserRepository): Promise<FilterRequestRead> {
   const user = await currentUserFromCookie(request.headers.get("cookie"), users);
   const body = await readBoundedJson(request);
   if ("error" in body) return body;
   const parsed = filterRequest.safeParse(body.body);
   if (!parsed.success) return { error: "INVALID_FILTER_REQUEST" };
+  if (parsed.data.filters.followedOnly && !user) return { error: "AUTH_REQUIRED" };
 
   return {
     filters: parsed.data.filters,
-    scope: user ? { userId: user.id } : anonymousScope(parsed.data.anonymousBillKeys),
+    scope: user ? { userId: user.id } : {},
   };
 }

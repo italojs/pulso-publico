@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation.js";
 
-import { LOCAL_FOLLOWS_CHANGED_EVENT, LOCAL_FOLLOWS_KEY, parseLocalBillReferences } from "#/follows/local";
 import type { PublicBillFilters, PublicFilterOptions } from "#/server/public/read-models";
 import { buildFeedHref } from "#/server/public/search-params";
 import { ActiveFilterChips } from "#/ui/active-filter-chips";
@@ -11,6 +10,7 @@ import { AdvancedFilters } from "#/ui/advanced-filters";
 import { SearchIcon } from "#/ui/icons";
 
 interface FeedFiltersProps {
+  authenticated: boolean;
   filters: PublicBillFilters;
   options: PublicFilterOptions;
 }
@@ -25,9 +25,8 @@ function quickTextOptions(catalog: readonly string[], selected: readonly string[
   }));
 }
 
-export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
+export function FeedFilters({ authenticated, filters, options }: Readonly<FeedFiltersProps>) {
   const router = useRouter();
-  const [anonymousBillKeys, setAnonymousBillKeys] = useState<Array<{ source: "camara" | "senado"; externalId: string }>>([]);
   const initialSources = filters.sources ?? (filters.source ? [filters.source] : []);
   const initialStatuses = filters.statuses ?? (filters.status ? [filters.status] : []);
   const initialTopics = filters.topics ?? (filters.topic ? [filters.topic] : []);
@@ -41,12 +40,6 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
     setStatuses(filters.statuses ?? (filters.status ? [filters.status] : []));
     setTopics(filters.topics ?? (filters.topic ? [filters.topic] : []));
   }, [filters]);
-  useEffect(() => {
-    const refresh = () => setAnonymousBillKeys(parseLocalBillReferences(localStorage.getItem(LOCAL_FOLLOWS_KEY)));
-    refresh();
-    window.addEventListener(LOCAL_FOLLOWS_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(LOCAL_FOLLOWS_CHANGED_EVENT, refresh);
-  }, []);
   const preserved = new URL(buildFeedHref(filters, 1), "https://local.invalid").searchParams;
   for (const quickDimension of ["q", "fonte", "situacao", "tema", "pagina"]) preserved.delete(quickDimension);
   const sourceCatalog = [
@@ -87,7 +80,7 @@ export function FeedFilters({ filters, options }: Readonly<FeedFiltersProps>) {
       </fieldset>
       {[...preserved.entries()].map(([name, value], index) => <input key={`${name}-${value}-${index}`} name={name} type="hidden" value={value} />)}
       </form>
-      <AdvancedFilters anonymousBillKeys={anonymousBillKeys} filters={filters} options={options} />
+      <AdvancedFilters authenticated={authenticated} filters={filters} options={options} />
       <ActiveFilterChips filters={filters} />
     </div>
   );

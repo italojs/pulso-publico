@@ -53,7 +53,7 @@ export function AlertsPage() {
   }
 
   if (state === "loading") return <p className="sectionEmpty" aria-busy="true">Carregando seus alertas…</p>;
-  if (state === "anonymous") return <div className="emptyState"><span aria-hidden="true">○</span><h2>Entre para receber alertas.</h2><p>Você pode continuar seguindo itens sem conta. O cadastro é necessário apenas para sincronizar e avisar sobre mudanças importantes.</p><a href="/entrar?next=%2Falertas">Entrar ou criar conta</a></div>;
+  if (state === "anonymous") return <div className="emptyState"><span aria-hidden="true">○</span><h2>Entre para receber alertas.</h2><p>Uma conta é necessária para seguir projetos e parlamentares e avisar você sobre mudanças importantes.</p><a href="/entrar?next=%2Falertas">Entrar ou criar conta</a></div>;
   if (state === "error") return <p className="sectionEmpty" role="alert">Não foi possível abrir os alertas agora. Tente recarregar a página.</p>;
   if (!items.length) return <div className="emptyState"><span aria-hidden="true">○</span><h2>Nenhuma mudança importante por enquanto.</h2><p>Quando um projeto com alertas ativos avançar, o aviso aparecerá aqui.</p><a href="/seguindo">Ver itens seguidos</a></div>;
   const unread = items.filter((item) => !item.readAt).length;

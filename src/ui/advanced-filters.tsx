@@ -6,10 +6,8 @@ import { normalizeProposalType } from "#/domain/bill-facets";
 import type { PublicBillFilters, PublicFilterOption, PublicFilterOptions, PublicRecentActivity } from "#/server/public/read-models";
 import { buildFeedHref, countActiveFilters } from "#/server/public/search-params";
 
-type AnonymousBillKey = { externalId: string; source: "camara" | "senado" };
 type PreviewState = "idle" | "loading" | "ready" | "error";
 type ActivityMode = "" | PublicRecentActivity | "custom";
-const EMPTY_BILL_KEYS: AnonymousBillKey[] = [];
 const MAX_SELECTED_VALUES = 20;
 const MAX_VISIBLE_SUGGESTIONS = 8;
 const focusableSelector = "button:not([disabled]),[href],input:not([type='hidden']):not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex='-1'])";
@@ -230,12 +228,12 @@ function FilterSection({ children, id, title }: Readonly<{ children: ReactNode; 
 }
 
 interface AdvancedFiltersProps {
-  anonymousBillKeys?: AnonymousBillKey[];
+  authenticated: boolean;
   filters: PublicBillFilters;
   options: PublicFilterOptions;
 }
 
-export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, options }: Readonly<AdvancedFiltersProps>) {
+export function AdvancedFilters({ authenticated, filters, options }: Readonly<AdvancedFiltersProps>) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(() => canonicalFilters(filters));
@@ -298,7 +296,7 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
     const timeout = window.setTimeout(async () => {
       try {
         const response = await fetch("/api/projects/filter-count", {
-          body: JSON.stringify({ filters: publicFilterRequestFilters(draft), anonymousBillKeys }),
+          body: JSON.stringify({ filters: publicFilterRequestFilters(draft) }),
           headers: { "content-type": "application/json" }, method: "POST", signal: controller.signal,
         });
         if (!response.ok) throw new Error("Count request failed");
@@ -310,7 +308,7 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
       }
     }, 300);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [anonymousBillKeys, draft, isOpen, rangeInvalid]);
+  }, [draft, isOpen, rangeInvalid]);
 
   const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDialogElement>) => {
     if (event.key === "Escape") { event.preventDefault(); closeDialog(); return; }
@@ -404,7 +402,8 @@ export function AdvancedFilters({ anonymousBillKeys = EMPTY_BILL_KEYS, filters, 
         <FilterSection id={`${titleId}-acompanhamento`} title="Acompanhamento">
           <fieldset className="advancedFilters__choiceGroup advancedFilters__followedGroup">
             <legend>Projetos acompanhados</legend>
-            <label className="advancedFilters__standaloneChoice"><input checked={draft.followedOnly ?? false} name="acompanhando" onChange={(event) => update("followedOnly", event.currentTarget.checked || undefined)} type="checkbox" value="1" /><span>Mostrar somente projetos que acompanho</span></label>
+            <label className="advancedFilters__standaloneChoice"><input checked={draft.followedOnly ?? false} disabled={!authenticated} name="acompanhando" onChange={(event) => update("followedOnly", event.currentTarget.checked || undefined)} type="checkbox" value="1" /><span>Mostrar somente projetos que acompanho</span></label>
+            {!authenticated ? <a href={`/entrar?next=${encodeURIComponent(buildFeedHref({ ...draft, followedOnly: true }, 1))}`}>Entrar para usar este filtro</a> : null}
           </fieldset>
         </FilterSection>
         <FilterSection id={`${titleId}-ordem`} title="Ordenação">

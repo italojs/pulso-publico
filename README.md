@@ -52,7 +52,7 @@ Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a 
 
 - A carga local inicial usa uma janela móvel de 36 meses (`INITIAL_HISTORY_MONTHS=36`).
 - Documentos e anexos permanecem nas fontes oficiais; o banco guarda dados estruturados e links.
-- Itens seguidos são salvos no dispositivo enquanto o usuário estiver anônimo e unidos de forma idempotente à conta no primeiro acesso autenticado.
+- Seguir projetos ou parlamentares exige uma conta. Acompanhamentos antigos que ainda estejam salvos no navegador são migrados de forma idempotente no primeiro acesso autenticado e, depois, removidos do armazenamento local.
 - Senhas usam `scrypt`; tokens de sessão ficam em cookie `HttpOnly` e somente seus hashes são armazenados.
 
 ## Filtros avançados do feed
@@ -63,7 +63,7 @@ Os filtros que podem ser compartilhados ficam na URL. Seleções múltiplas usam
 
 Para tornar a busca rápida, o banco normaliza facetas sem alterar os textos oficiais: tipo, número e ano da proposta; uma fase geral determinística da tramitação; e uma categoria de resultado de votação (`aprovada`, `rejeitada`, `outros` ou `não informado`). Siglas oficiais compostas por segmentos alfabéticos separados por hífen, ponto ou sublinhado — como `SBT-A`, `R.C` e `ATA_PRE` — são reconhecidas com limite de 20 caracteres. Uma sigla fora dessa gramática fica sem a faceta de tipo, mas o projeto e seu texto oficial são preservados e continuam pesquisáveis. A tela continua mostrando os títulos, situações e resultados oficiais quando eles existem.
 
-“Mostrar somente projetos que acompanho” funciona para contas e para navegação anônima. No modo anônimo, as chaves dos projetos permanecem no armazenamento local do dispositivo e seguem somente no corpo das consultas necessárias; elas nunca são adicionadas à URL compartilhável. Se a pessoa entrar em uma conta, o filtro é resolvido no servidor pelos acompanhamentos da conta.
+“Mostrar somente projetos que acompanho” exige autenticação e é resolvido no servidor pelos acompanhamentos da conta. Para visitantes, o filtro fica desabilitado e leva à entrada ou criação de conta, preservando o endereço de retorno.
 
 Todos os filtros usam exclusivamente dados oficiais já sincronizados da Câmara dos Deputados e do Senado Federal. Aplicar, contar ou combinar filtros não faz requisição de IA.
 
