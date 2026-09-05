@@ -267,3 +267,71 @@ export interface PublicCandidateDetail extends PublicCandidateCard {
   documents: PublicCandidateDocument[];
   history: PublicConfirmedCandidateHistory | null;
 }
+
+export interface PublicCandidateComparisonProject {
+  source: CandidateLawmakerHouse;
+  externalId: string;
+  officialCode: string;
+  proposalType: string | null;
+  proposalNumber: number | null;
+  proposalYear: number | null;
+  officialTitle: string;
+  topics: string[];
+  presentedAt: string | null;
+  chamber: "camara" | "senado" | "congresso";
+  statusLabel: string;
+  officialUrl: string;
+  primary: boolean;
+  coauthored: boolean;
+}
+
+export interface PublicCandidateComparisonEvidence<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  truncated: boolean;
+}
+
+export interface PublicCandidateComparisonHistory {
+  projectCount: number;
+  primaryProjectCount: number;
+  coauthoredProjectCount: number;
+  voteCount: number;
+  projects: PublicCandidateComparisonEvidence<PublicCandidateComparisonProject>;
+  votes: PublicCandidateComparisonEvidence<PublicCandidateVote>;
+  coverage: PublicCandidateHistoryCoverage;
+}
+
+export interface PublicCandidateComparisonCandidate {
+  electionYear: number;
+  externalId: string;
+  ballotName: string;
+  fullName: string;
+  number: number;
+  office: CandidateOffice;
+  region: string;
+  electoralUnit: string;
+  partyAcronym: string;
+  partyName: string;
+  status: string;
+  officialUrl: string;
+  profileUrl: string;
+  history: PublicCandidateComparisonHistory | null;
+}
+
+export interface PublicCandidateComparisonChoice {
+  electionYear: number;
+  externalId: string;
+  ballotName: string;
+  office: CandidateOffice;
+  electoralUnit: string;
+}
+
+export type CandidateComparisonError =
+  | "INCOMPATIBLE_CANDIDATES"
+  | "TOO_MANY_CANDIDATES"
+  | "CANDIDATES_NOT_FOUND";
+
+export type PublicCandidateComparison =
+  | { candidates: PublicCandidateComparisonCandidate[] }
+  | { error: CandidateComparisonError };

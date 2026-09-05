@@ -45,9 +45,19 @@ function financeLine(label: string, value: string | null) {
   return `${label}: ${formatted ?? "não informado pela fonte"}`;
 }
 
-export function CandidateCard({ candidate }: Readonly<{ candidate: PublicCandidateCard }>) {
+export interface CandidateCardComparisonControl {
+  selected: boolean;
+  onToggle: () => void;
+  disabledReason?: string;
+}
+
+export function CandidateCard({ candidate, comparison }: Readonly<{
+  candidate: PublicCandidateCard;
+  comparison?: CandidateCardComparisonControl;
+}>) {
   const profileHref = `/candidatos/${candidate.electionYear}/${encodeURIComponent(candidate.externalId)}`;
   const assetTotal = formatCandidateCents(candidate.assetTotalCents);
+  const comparisonDescriptionId = `candidate-comparison-${candidate.electionYear}-${candidate.externalId}`;
   return (
     <article className="candidateCard">
       <CandidatePortrait candidate={candidate} />
@@ -85,9 +95,27 @@ export function CandidateCard({ candidate }: Readonly<{ candidate: PublicCandida
           <li>{candidate.hasConfirmedLawmaker ? "Histórico parlamentar confirmado" : "Histórico parlamentar não confirmado"}</li>
         </ul>
 
-        <a aria-label={`Ver perfil de ${candidate.ballotName}`} className="candidateCard__action" href={profileHref}>
-          Ver perfil <ArrowIcon />
-        </a>
+        <div className="candidateCard__actions">
+          <a aria-label={`Ver perfil de ${candidate.ballotName}`} className="candidateCard__action" href={profileHref}>
+            Ver perfil <ArrowIcon />
+          </a>
+          {comparison ? (
+            <button
+              aria-describedby={comparison.disabledReason ? comparisonDescriptionId : undefined}
+              aria-label={`${comparison.selected ? "Remover" : "Adicionar"} ${candidate.ballotName} ${comparison.selected ? "da" : "à"} comparação`}
+              aria-pressed={comparison.selected}
+              className="candidateCard__compareAction"
+              disabled={Boolean(comparison.disabledReason) && !comparison.selected}
+              onClick={comparison.onToggle}
+              type="button"
+            >
+              {comparison.selected ? "Selecionada" : "Comparar"}
+            </button>
+          ) : null}
+        </div>
+        {comparison?.disabledReason && !comparison.selected ? (
+          <p className="candidateCard__compareReason" id={comparisonDescriptionId}>{comparison.disabledReason}</p>
+        ) : null}
       </div>
     </article>
   );

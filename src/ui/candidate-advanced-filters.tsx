@@ -20,7 +20,11 @@ import {
   type CandidateFilterBoundField,
 } from "#/server/candidates/filter-validation";
 import { centsToReais, reaisToCents } from "#/server/candidates/search-params";
-import { buildCandidateHref, countCandidateFilters } from "#/server/candidates/search-params";
+import {
+  buildCandidateCatalogHref,
+  countCandidateFilters,
+  type CandidateComparisonSelection,
+} from "#/server/candidates/search-params";
 
 type PreviewState = "idle" | "loading" | "ready" | "error";
 type MoneyKey = "assetMinCents" | "assetMaxCents" | "revenueMinCents" | "revenueMaxCents" | "expenseMinCents" | "expenseMaxCents" | "balanceMinCents" | "balanceMaxCents";
@@ -240,9 +244,10 @@ export interface CandidateAdvancedFiltersProps {
   authenticated: boolean;
   filters: CandidateFilters;
   options: CandidateFilterOptions;
+  comparison?: CandidateComparisonSelection;
 }
 
-export function CandidateAdvancedFilters({ authenticated, filters, options }: Readonly<CandidateAdvancedFiltersProps>) {
+export function CandidateAdvancedFilters({ authenticated, comparison, filters, options }: Readonly<CandidateAdvancedFiltersProps>) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(() => candidateDraft(filters));
@@ -389,7 +394,7 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
   const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canonicalDraft.success || moneySyntaxInvalid) return;
-    router.push(buildCandidateHref(canonicalDraft.filters, 1));
+    router.push(buildCandidateCatalogHref(canonicalDraft.filters, 1, comparison));
     closeDialog();
   };
   const activeCount = countCandidateFilters(filters);
@@ -415,7 +420,9 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
       ? currentCanonical.filters
       : {};
   const loginIntent = safelyCanonicalizeCandidateFilters({ ...loginBase, followedOnly: true }, 1);
-  const loginTarget = loginIntent.success ? buildCandidateHref(loginIntent.filters, 1) : "/candidatos?acompanhando=1";
+  const loginTarget = loginIntent.success
+    ? buildCandidateCatalogHref(loginIntent.filters, 1, comparison)
+    : buildCandidateCatalogHref({ followedOnly: true }, 1, comparison);
 
   return (
     <>
@@ -443,6 +450,8 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
         ref={dialogRef}
       >
         <form action="/candidatos" className="advancedFilters__form" method="get" onSubmit={applyFilters}>
+          {comparison?.ids.length ? <input name="compararAno" type="hidden" value={comparison.year} /> : null}
+          {comparison?.ids.map((id) => <input key={id} name="compararId" type="hidden" value={id} />)}
           {draft.query ? <input name="q" type="hidden" value={draft.query} /> : null}
           {draft.allBrazil ? <input name="abrangencia" type="hidden" value="brasil" /> : null}
           {moneyKeys.map((key) => {
@@ -556,7 +565,10 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
           <footer className="advancedFilters__footer">
             <p aria-live="polite" role="status">{countMessage}</p>
             <div>
-              <a className="advancedFilters__clear" href={draft.allBrazil ? "/candidatos?abrangencia=brasil" : "/candidatos"}>Limpar tudo</a>
+              <a
+                className="advancedFilters__clear"
+                href={buildCandidateCatalogHref(draft.allBrazil ? { allBrazil: true } : {}, 1, comparison)}
+              >Limpar tudo</a>
               <button className="advancedFilters__apply" disabled={filtersInvalid} type="submit">
                 {lastValidCount === undefined ? "Aplicar filtros" : `Ver ${lastValidCount.toLocaleString("pt-BR")} ${lastValidCount === 1 ? "candidatura" : "candidaturas"}`}
               </button>

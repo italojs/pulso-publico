@@ -1,15 +1,26 @@
-import type { CandidateFilters, PublicCandidatePage } from "#/server/candidates/read-models";
-import { buildCandidateHref } from "#/server/candidates/search-params";
-import { CandidateCard } from "#/ui/candidate-card";
+import type {
+  CandidateFilters,
+  PublicCandidateComparisonChoice,
+  PublicCandidatePage,
+} from "#/server/candidates/read-models";
+import {
+  buildCandidateCatalogHref,
+  buildCandidateHref,
+  type CandidateComparisonSelection,
+} from "#/server/candidates/search-params";
+import { CandidateComparePicker } from "#/ui/candidate-compare-picker";
 import { CandidatePagination } from "#/ui/candidate-pagination";
 import { formatDateTime } from "#/ui/format";
 
-export function CandidateResults({ candidates, filters, snapshotExtractedAt }: Readonly<{
+export function CandidateResults({ candidates, comparison, initialComparedCandidates = [], filters, snapshotExtractedAt }: Readonly<{
   candidates: PublicCandidatePage;
+  comparison?: CandidateComparisonSelection;
+  initialComparedCandidates?: PublicCandidateComparisonChoice[];
   filters: CandidateFilters;
   snapshotExtractedAt: string | null;
 }>) {
-  const resetHref = buildCandidateHref(filters.allBrazil ? { allBrazil: true } : {}, 1);
+  const resetHref = buildCandidateCatalogHref(filters.allBrazil ? { allBrazil: true } : {}, 1, comparison);
+  const catalogHref = buildCandidateHref(filters, candidates.page);
   return (
     <section aria-labelledby="candidate-results-title" className="feedResults candidateResults">
       <header className="resultsHeader">
@@ -23,21 +34,20 @@ export function CandidateResults({ candidates, filters, snapshotExtractedAt }: R
           {snapshotExtractedAt ? <> · atualizado em <time dateTime={snapshotExtractedAt}>{formatDateTime(snapshotExtractedAt)}</time></> : null}
         </p>
       </header>
-      {candidates.items.length ? (
-        <div className="candidateGrid">
-          {candidates.items.map((candidate) => (
-            <CandidateCard candidate={candidate} key={`${candidate.electionYear}-${candidate.externalId}`} />
-          ))}
-        </div>
-      ) : (
+      <CandidateComparePicker
+        candidates={candidates.items}
+        catalogHref={catalogHref}
+        initialCandidates={initialComparedCandidates}
+      />
+      {!candidates.items.length ? (
         <div className="emptyState">
           <span aria-hidden="true">○</span>
           <h3>Nenhuma candidatura apareceu com esses filtros.</h3>
           <p>Remova um critério ou amplie a região para consultar outros registros oficiais.</p>
           <a href={resetHref}>Ver todas as candidaturas</a>
         </div>
-      )}
-      <CandidatePagination filters={filters} page={candidates.page} totalPages={candidates.totalPages} />
+      ) : null}
+      <CandidatePagination comparison={comparison} filters={filters} page={candidates.page} totalPages={candidates.totalPages} />
     </section>
   );
 }

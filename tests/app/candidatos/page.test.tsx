@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cookieText: "",
   headers: vi.fn(),
   currentUser: vi.fn(),
+  compareCandidates: vi.fn(),
   listCandidates: vi.fn(),
   listOptions: vi.fn(),
   routerPush: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("#/auth/user-repository", () => ({ UserRepository: class UserRepository 
 vi.mock("#/server/config", () => ({ env: { GEO_PROVIDER: "cloudflare" } }));
 vi.mock("#/server/db/client", () => ({ db: { kind: "candidate-route-test-db" } }));
 vi.mock("#/server/candidates/queries", () => ({
+  compareCandidates: mocks.compareCandidates,
   listCandidates: mocks.listCandidates,
   listCandidateFilterOptions: mocks.listOptions,
 }));
@@ -49,6 +51,7 @@ describe("candidate catalog route", () => {
     mocks.cookieText = "";
     mocks.headers.mockResolvedValue(new Headers());
     mocks.currentUser.mockResolvedValue(null);
+    mocks.compareCandidates.mockResolvedValue({ candidates: [] });
     mocks.listCandidates.mockResolvedValue(emptyPage);
     mocks.listOptions.mockResolvedValue(emptyOptions);
   });
@@ -193,5 +196,64 @@ describe("candidate catalog route", () => {
     expect(view.getByText("ABC · Partido ABC")).toBeInTheDocument();
     expect(view.getByText("Retrato oficial do TSE")).toBeInTheDocument();
     expect(view.getByText("5 de set. de 2026, 08:00")).toBeInTheDocument();
+  });
+
+  it("restores canonical comparison IDs for the catalog independently of its filters", async () => {
+    mocks.listOptions.mockResolvedValue({
+      ...emptyOptions,
+      snapshots: [{ electionYear: 2026, extractedAt: "2026-09-05T11:00:00.000Z" }],
+    });
+    mocks.compareCandidates.mockResolvedValue({
+      candidates: [
+        {
+          electionYear: 2026,
+          externalId: "4040",
+          ballotName: "Duda Popular",
+          fullName: "Eduarda Popular",
+          number: 4040,
+          office: "deputado_federal",
+          region: "ES",
+          electoralUnit: "ESPÍRITO SANTO",
+          partyAcronym: "XYZ",
+          partyName: "Partido XYZ",
+          status: "APTO",
+          officialUrl: "https://divulgacandcontas.tse.jus.br/candidato/4040",
+          profileUrl: "/candidatos/2026/4040",
+          history: null,
+        },
+        {
+          electionYear: 2026,
+          externalId: "1010",
+          ballotName: "Ana Cidadã",
+          fullName: "Ana Maria Cidadã",
+          number: 1010,
+          office: "deputado_federal",
+          region: "ES",
+          electoralUnit: "ESPÍRITO SANTO",
+          partyAcronym: "ABC",
+          partyName: "Partido ABC",
+          status: "APTO",
+          officialUrl: "https://divulgacandcontas.tse.jus.br/candidato/1010",
+          profileUrl: "/candidatos/2026/1010",
+          history: null,
+        },
+      ],
+    });
+
+    render(await CandidateCatalogPage({ searchParams: Promise.resolve({
+      uf: "SP",
+      compararAno: "2026",
+      compararId: ["4040", "1010"],
+    }) }));
+
+    expect(mocks.compareCandidates).toHaveBeenCalledWith(expect.anything(), 2026, ["4040", "1010"]);
+    expect(mocks.listCandidates).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ regions: ["SP"] }),
+      {},
+    );
+    const tray = screen.getByRole("region", { name: "Seleção para comparação" });
+    expect(tray).toHaveTextContent("Duda Popular");
+    expect(tray).toHaveTextContent("Ana Cidadã");
   });
 });

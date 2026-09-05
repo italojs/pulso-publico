@@ -24,6 +24,7 @@ import {
 } from "#/server/db/schema";
 import * as databaseSchema from "#/server/db/schema";
 import {
+  compareCandidates,
   countCandidates,
   getCandidateDetail,
   listCandidateFilterOptions,
@@ -268,12 +269,14 @@ async function seedCandidates() {
   const [anaBill1, anaBill2, caioBill, pendingBill] = await testDb.insert(bills).values([
     {
       source: "camara", externalId: "ana-1", officialCode: "PL 1/2026", officialTitle: "Trabalho digno",
-      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-1",
+      proposalType: "PL", proposalNumber: 1, proposalYear: 2026,
+      officialSummary: "", originHouse: "camara", currentHouse: "camara", statusLabel: "Em análise", officialUrl: "https://www.camara.leg.br/propostas-legislativas/ana-1",
       presentedAt: new Date("2024-01-02T12:00:00.000Z"), checkedAt,
     },
     {
       source: "camara", externalId: "ana-2", officialCode: "PL 2/2026", officialTitle: "Saúde pública",
-      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-2",
+      proposalType: "PL", proposalNumber: 2, proposalYear: 2026,
+      officialSummary: "", originHouse: "camara", currentHouse: "camara", statusLabel: "Em análise", officialUrl: "https://www.camara.leg.br/propostas-legislativas/ana-2",
       presentedAt: new Date("2025-02-03T12:00:00.000Z"), checkedAt,
     },
     {
@@ -302,15 +305,15 @@ async function seedCandidates() {
   ]);
 
   const [anaEvent1, anaEvent2, caioEvent, pendingEvent] = await testDb.insert(voteEvents).values([
-    { source: "camara", externalId: "vote-a1", billId: anaBill1.id, occurredAt: new Date("2024-03-04T12:00:00.000Z"), house: "camara", description: "Votação A1", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a1", checkedAt },
-    { source: "camara", externalId: "vote-a2", billId: anaBill2.id, occurredAt: new Date("2025-04-05T12:00:00.000Z"), house: "camara", description: "Votação A2", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a2", checkedAt },
+    { source: "camara", externalId: "vote-a1", billId: anaBill1.id, occurredAt: new Date("2024-03-04T12:00:00.000Z"), house: "camara", description: "Votação A1", result: "Aprovado", isNominal: true, isSecret: false, officialUrl: "https://www.camara.leg.br/votacao/vote-a1", checkedAt },
+    { source: "camara", externalId: "vote-a2", billId: anaBill2.id, occurredAt: new Date("2025-04-05T12:00:00.000Z"), house: "camara", description: "Votação A2", result: "Rejeitado", isNominal: true, isSecret: false, officialUrl: "https://www.camara.leg.br/votacao/vote-a2", checkedAt },
     { source: "senado", externalId: "vote-c1", billId: caioBill.id, occurredAt: checkedAt, house: "senado", description: "Votação C1", isNominal: true, isSecret: false, officialUrl: "https://senado.test/v-c1", checkedAt },
     { source: "senado", externalId: "vote-p1", billId: pendingBill.id, occurredAt: checkedAt, house: "senado", description: "Votação P1", isNominal: true, isSecret: false, officialUrl: "https://senado.test/v-p1", checkedAt },
   ]).returning();
   if (!anaEvent1 || !anaEvent2 || !caioEvent || !pendingEvent) throw new Error("vote fixture failed");
   await testDb.insert(individualVotes).values([
-    { source: "camara", externalId: "individual-a1", voteEventId: anaEvent1.id, lawmakerId: camara.id, choice: "sim", rawChoice: "Sim", officialUrl: "https://camara.test/iv-a1", checkedAt },
-    { source: "camara", externalId: "individual-a2", voteEventId: anaEvent2.id, lawmakerId: camara.id, choice: "nao", rawChoice: "Não", officialUrl: "https://camara.test/iv-a2", checkedAt },
+    { source: "camara", externalId: "individual-a1", voteEventId: anaEvent1.id, lawmakerId: camara.id, choice: "sim", rawChoice: "Sim", officialUrl: "https://www.camara.leg.br/votacao/individual-a1", checkedAt },
+    { source: "camara", externalId: "individual-a2", voteEventId: anaEvent2.id, lawmakerId: camara.id, choice: "nao", rawChoice: "Não", officialUrl: "https://www.camara.leg.br/votacao/individual-a2", checkedAt },
     { source: "senado", externalId: "individual-c1", voteEventId: caioEvent.id, lawmakerId: senado.id, choice: "sim", rawChoice: "Sim", officialUrl: "https://senado.test/iv-c1", checkedAt },
     { source: "senado", externalId: "individual-p1", voteEventId: pendingEvent.id, lawmakerId: pending.id, choice: "sim", rawChoice: "Sim", officialUrl: "https://senado.test/iv-p1", checkedAt },
   ]);
@@ -340,6 +343,16 @@ afterAll(async () => {
 async function ids(filters: Parameters<typeof listCandidates>[1], userId?: string) {
   const page = await listCandidates(testDb, { pageSize: 50, ...filters }, userId ? { userId } : {});
   return page.items.map((item) => item.externalId);
+}
+
+async function seedCompatibleCandidate(externalId = "4040") {
+  const [row] = await testDb.insert(electoralCandidates).values(candidate(externalId, {
+    ballotName: `Duda ${externalId}`,
+    fullName: `Eduarda ${externalId}`,
+    number: Number(externalId),
+  })).returning();
+  if (!row) throw new Error("compatible candidate fixture failed");
+  return row;
 }
 
 type CandidateDatabase = Parameters<typeof getCandidateDetail>[0];
@@ -805,6 +818,203 @@ describe("candidate catalog queries", () => {
       projects: { page: 1, totalPages: 1 },
       votes: { page: 1, totalPages: 1 },
     });
+  });
+
+  it("rejects too many, incompatible and missing current-snapshot candidacies without partial data", async () => {
+    await expect(compareCandidates(testDb, 2026, ["1010", "2020", "3030", "4040"]))
+      .resolves.toEqual({ error: "TOO_MANY_CANDIDATES" });
+    await expect(compareCandidates(testDb, 2026, ["1010", "3030"]))
+      .resolves.toEqual({ error: "INCOMPATIBLE_CANDIDATES" });
+    await expect(compareCandidates(testDb, 2026, ["1010", "9999"]))
+      .resolves.toEqual({ error: "CANDIDATES_NOT_FOUND" });
+    await expect(compareCandidates(testDb, 2026, ["1010", "4040"]))
+      .resolves.toEqual({ error: "CANDIDATES_NOT_FOUND" });
+  });
+
+  it("preserves deduped selection order and returns only confirmed, deduplicated official conduct", async () => {
+    const compatible = await seedCompatibleCandidate();
+    const [historicalIdentity] = await testDb.insert(lawmakers).values({
+      source: "camara",
+      externalId: "law-ana-comparison-history",
+      name: "Ana Maria Cidadã",
+      electoralName: "Ana Cidadã",
+      role: "deputado_federal",
+      party: "ABC",
+      region: "ES",
+      active: false,
+      officialUrl: "https://www.camara.leg.br/deputados/law-ana-comparison-history",
+      checkedAt,
+    }).returning();
+    if (!historicalIdentity) throw new Error("historical comparison identity fixture failed");
+    await testDb.insert(candidateLawmakerLinks).values({
+      candidateId: seeded.ana.id,
+      lawmakerId: historicalIdentity.id,
+      status: "confirmed",
+      matchMethod: "operator_review",
+    });
+    await testDb.insert(billAuthors).values({
+      source: "camara",
+      externalId: "author-a1-comparison-coauthor",
+      billId: seeded.anaBill1.id,
+      lawmakerId: historicalIdentity.id,
+      officialName: "Ana Cidadã",
+      authorKind: "coautora",
+      isPrimary: false,
+      officialUrl: "https://www.camara.leg.br/deputados/law-ana-comparison-history/autoria",
+      checkedAt,
+    });
+
+    const result = await compareCandidates(testDb, 2026, [compatible.externalId, "1010", compatible.externalId]);
+    if ("error" in result) throw new Error(result.error);
+
+    expect(result.candidates.map((item) => item.externalId)).toEqual(["4040", "1010"]);
+    expect(result.candidates[0]?.history).toBeNull();
+    const ana = result.candidates[1]!;
+    expect(ana).toMatchObject({
+      ballotName: "Ana Cidadã",
+      fullName: "Ana 100%_Cidadã\\Literal",
+      number: 1010,
+      office: "deputado_federal",
+      region: "ES",
+      electoralUnit: "ESPÍRITO SANTO",
+      partyAcronym: "ABC",
+      status: "APTO",
+      history: {
+        projectCount: 2,
+        primaryProjectCount: 2,
+        coauthoredProjectCount: 1,
+        voteCount: 2,
+        coverage: {
+          projectFrom: "2024-01-02T12:00:00.000Z",
+          projectTo: "2025-02-03T12:00:00.000Z",
+          voteFrom: "2024-03-04T12:00:00.000Z",
+          voteTo: "2025-04-05T12:00:00.000Z",
+        },
+      },
+    });
+    expect(ana).not.toHaveProperty("finance");
+    expect(ana).not.toHaveProperty("assets");
+    expect(ana).not.toHaveProperty("documents");
+    expect(ana).not.toHaveProperty("socialLinks");
+    expect(ana).not.toHaveProperty("governmentPlan");
+    expect(ana.history?.projects.items).toHaveLength(2);
+    expect(ana.history?.projects.items.find((project) => project.externalId === "ana-1"))
+      .toMatchObject({
+        proposalType: "PL",
+        proposalNumber: 1,
+        proposalYear: 2026,
+        topics: ["Direitos humanos", "Trabalho"],
+        chamber: "camara",
+        statusLabel: "Em análise",
+        primary: true,
+        coauthored: true,
+        officialUrl: "https://www.camara.leg.br/propostas-legislativas/ana-1",
+      });
+    expect(ana.history?.votes.items.map((vote) => [vote.externalId, vote.rawChoice, vote.result, vote.officialUrl]))
+      .toEqual([
+        ["individual-a2", "Não", "Rejeitado", "https://www.camara.leg.br/votacao/individual-a2"],
+        ["individual-a1", "Sim", "Aprovado", "https://www.camara.leg.br/votacao/individual-a1"],
+      ]);
+    expect(JSON.stringify(result)).not.toMatch(/Tema pendente|pending-1|individual-p1/);
+  });
+
+  it("bounds comparison evidence while reporting truthful totals and truncation", async () => {
+    await seedCompatibleCandidate();
+    const extraBills = await testDb.insert(bills).values(Array.from({ length: 9 }, (_, index) => ({
+      source: "camara" as const,
+      externalId: `comparison-extra-${index + 1}`,
+      officialCode: `PL ${index + 10}/2026`,
+      proposalType: "PL",
+      proposalNumber: index + 10,
+      proposalYear: 2026,
+      officialTitle: `Projeto comparável ${index + 1}`,
+      officialSummary: "",
+      originHouse: "camara" as const,
+      currentHouse: "camara" as const,
+      statusLabel: "Em análise",
+      officialUrl: `https://www.camara.leg.br/propostas-legislativas/comparison-extra-${index + 1}`,
+      presentedAt: new Date(`2026-06-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`),
+      checkedAt,
+    }))).returning();
+    await testDb.insert(billAuthors).values(extraBills.map((bill, index) => ({
+      source: "camara" as const,
+      externalId: `comparison-author-${index + 1}`,
+      billId: bill.id,
+      lawmakerId: seeded.camara.id,
+      officialName: "Ana Cidadã",
+      authorKind: "deputada",
+      isPrimary: true,
+      officialUrl: `https://www.camara.leg.br/deputados/law-ana/autoria-${index + 1}`,
+      checkedAt,
+    })));
+
+    const result = await compareCandidates(testDb, 2026, ["1010", "4040"]);
+    if ("error" in result) throw new Error(result.error);
+    const evidence = result.candidates[0]!.history!.projects;
+
+    expect(evidence).toMatchObject({ total: 11, limit: 10, truncated: true });
+    expect(evidence.items).toHaveLength(10);
+    expect(evidence.items.map((item) => item.externalId)).toEqual([
+      "comparison-extra-9", "comparison-extra-8", "comparison-extra-7", "comparison-extra-6",
+      "comparison-extra-5", "comparison-extra-4", "comparison-extra-3", "comparison-extra-2",
+      "comparison-extra-1", "ana-2",
+    ]);
+  });
+
+  it("reads comparison identity and evidence from one repeatable-read snapshot", async () => {
+    await seedCompatibleCandidate();
+    const publisherSql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    const publisherDb = drizzle(publisherSql, { schema: databaseSchema });
+    let markFirstSelect!: () => void;
+    const firstSelectFinished = new Promise<void>((resolve) => { markFirstSelect = resolve; });
+    let resumeComparison!: () => void;
+    const resume = new Promise<void>((resolve) => { resumeComparison = resolve; });
+    const database = pauseFirstSelectAfterResolution(testDb, markFirstSelect, resume);
+    const comparisonPromise = compareCandidates(database, 2026, ["1010", "4040"]);
+
+    try {
+      await firstSelectFinished;
+      await publisherDb.transaction(async (transaction) => {
+        const [newBill] = await transaction.insert(bills).values({
+          source: "camara",
+          externalId: "comparison-concurrent",
+          officialCode: "PL 999/2026",
+          officialTitle: "Projeto publicado durante a leitura",
+          officialSummary: "",
+          originHouse: "camara",
+          statusLabel: "Em análise",
+          officialUrl: "https://www.camara.leg.br/propostas-legislativas/comparison-concurrent",
+          presentedAt: new Date("2026-09-05T12:30:00.000Z"),
+          checkedAt,
+        }).returning();
+        if (!newBill) throw new Error("concurrent comparison bill fixture failed");
+        await transaction.insert(billAuthors).values({
+          source: "camara",
+          externalId: "comparison-concurrent-author",
+          billId: newBill.id,
+          lawmakerId: seeded.camara.id,
+          officialName: "Ana Cidadã",
+          authorKind: "deputada",
+          isPrimary: true,
+          officialUrl: "https://www.camara.leg.br/deputados/law-ana/autoria-concurrent",
+          checkedAt,
+        });
+      });
+      resumeComparison();
+
+      const result = await comparisonPromise;
+      if ("error" in result) throw new Error(result.error);
+      expect(result.candidates[0]).toMatchObject({
+        ballotName: "Ana Cidadã",
+        history: { projectCount: 2 },
+      });
+      expect(result.candidates[0]?.history?.projects.items)
+        .not.toEqual(expect.arrayContaining([expect.objectContaining({ externalId: "comparison-concurrent" })]));
+    } finally {
+      resumeComparison();
+      await comparisonPromise.catch(() => undefined);
+      await publisherSql.end({ timeout: 5 });
+    }
   });
 });
 

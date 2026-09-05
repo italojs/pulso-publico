@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation.js";
 
 import type { CandidateOffice } from "#/domain/electoral";
 import type { CandidateFilterOptions, CandidateFilters, CandidateRegionOrigin } from "#/server/candidates/read-models";
-import { buildCandidateHref } from "#/server/candidates/search-params";
+import {
+  buildCandidateCatalogHref,
+  type CandidateComparisonSelection,
+} from "#/server/candidates/search-params";
 import { CandidateAdvancedFilters } from "#/ui/candidate-advanced-filters";
 import { candidateOfficeLabels } from "#/ui/candidate-office";
 import { CandidateFilterChips } from "#/ui/candidate-filter-chips";
@@ -16,6 +19,7 @@ interface CandidateFiltersProps {
   filters: CandidateFilters;
   options: CandidateFilterOptions;
   regionOrigin?: CandidateRegionOrigin;
+  comparison?: CandidateComparisonSelection;
 }
 
 const optionCollator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
@@ -38,9 +42,9 @@ function officeOptions(catalog: CandidateFilterOptions["offices"], selected: rea
   }));
 }
 
-function safePreservedParams(filters: CandidateFilters) {
+function safePreservedParams(filters: CandidateFilters, comparison?: CandidateComparisonSelection) {
   try {
-    const params = new URL(buildCandidateHref(filters, 1), "https://local.invalid").searchParams;
+    const params = new URL(buildCandidateCatalogHref(filters, 1, comparison), "https://local.invalid").searchParams;
     for (const key of ["q", "cargo", "uf", "partido", "pagina"]) params.delete(key);
     return [...params.entries()];
   } catch {
@@ -48,7 +52,7 @@ function safePreservedParams(filters: CandidateFilters) {
   }
 }
 
-export function CandidateFilters({ authenticated, filters, options, regionOrigin }: Readonly<CandidateFiltersProps>) {
+export function CandidateFilters({ authenticated, comparison, filters, options, regionOrigin }: Readonly<CandidateFiltersProps>) {
   const router = useRouter();
   const [query, setQuery] = useState(filters.query ?? "");
   const [offices, setOffices] = useState<CandidateOffice[]>(filters.offices ?? []);
@@ -73,12 +77,12 @@ export function CandidateFilters({ authenticated, filters, options, regionOrigin
     parties: parties.length ? parties : undefined,
     page: undefined,
   };
-  const preserved = useMemo(() => safePreservedParams(quickFilters), [quickFilters]);
-  const showBrazilHref = buildCandidateHref({ ...filters, allBrazil: true, regions: undefined, page: undefined }, 1);
+  const preserved = useMemo(() => safePreservedParams(quickFilters, comparison), [quickFilters, comparison]);
+  const showBrazilHref = buildCandidateCatalogHref({ ...filters, allBrazil: true, regions: undefined, page: undefined }, 1, comparison);
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    router.push(buildCandidateHref(quickFilters, 1));
+    router.push(buildCandidateCatalogHref(quickFilters, 1, comparison));
   };
   const changeRegion = (value: string) => {
     if (value) {
@@ -135,7 +139,7 @@ export function CandidateFilters({ authenticated, filters, options, regionOrigin
         {preserved.map(([name, value], index) => <input key={`${name}-${value}-${index}`} name={name} type="hidden" value={value} />)}
       </form>
       <div className="candidateFilters__secondary">
-        <CandidateAdvancedFilters authenticated={authenticated} filters={filters} options={options} />
+        <CandidateAdvancedFilters authenticated={authenticated} comparison={comparison} filters={filters} options={options} />
         {regionOrigin === "ip" && filters.regions?.length ? (
           <p className="candidateFilters__inferred">
             <span>UF estimada: {filters.regions.join(", ")}</span>
@@ -143,7 +147,7 @@ export function CandidateFilters({ authenticated, filters, options, regionOrigin
           </p>
         ) : filters.allBrazil ? <p className="candidateFilters__scope">Brasil inteiro</p> : null}
       </div>
-      <CandidateFilterChips filters={filters} />
+      <CandidateFilterChips comparison={comparison} filters={filters} />
     </section>
   );
 }

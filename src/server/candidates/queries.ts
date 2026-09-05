@@ -25,6 +25,9 @@ import type {
   CandidateOrder,
   PublicCandidateCard,
   PublicCandidateDetail,
+  PublicCandidateComparison,
+  PublicCandidateComparisonCandidate,
+  PublicCandidateComparisonHistory,
   PublicCandidateFinance,
   PublicCandidatePage,
 } from "#/server/candidates/read-models";
@@ -865,6 +868,218 @@ export async function getCandidateDetail(
     ),
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
+}
+
+const candidateComparisonIdPattern = /^\d{1,30}$/;
+const comparisonEvidenceLimit = 10;
+
+async function getCandidateComparisonHistoryFromSnapshot(
+  database: CandidateDetailTransaction,
+  candidateId: string,
+): Promise<PublicCandidateComparisonHistory | null> {
+  const lawmakerRows = await database.selectDistinct({ id: lawmakers.id })
+    .from(candidateLawmakerLinks)
+    .innerJoin(lawmakers, eq(candidateLawmakerLinks.lawmakerId, lawmakers.id))
+    .where(and(
+      eq(candidateLawmakerLinks.candidateId, candidateId),
+      eq(candidateLawmakerLinks.status, "confirmed"),
+    ))
+    .orderBy(asc(lawmakers.id));
+  const lawmakerIds = lawmakerRows.map((row) => row.id);
+  if (lawmakerIds.length === 0) return null;
+
+  const [projectAggregateRows, voteAggregateRows] = await Promise.all([
+    database.select({
+      total: sql<number>`count(distinct ${billAuthors.billId})::integer`,
+      primaryTotal: sql<number>`count(distinct ${billAuthors.billId}) filter (where ${billAuthors.isPrimary})::integer`,
+      coauthoredTotal: sql<number>`count(distinct ${billAuthors.billId}) filter (where not ${billAuthors.isPrimary})::integer`,
+      from: sql<Date | null>`min(${bills.presentedAt})`,
+      to: sql<Date | null>`max(${bills.presentedAt})`,
+    }).from(billAuthors)
+      .innerJoin(bills, eq(bills.id, billAuthors.billId))
+      .where(inArray(billAuthors.lawmakerId, lawmakerIds)),
+    database.select({
+      total: sql<number>`count(distinct ${individualVotes.id})::integer`,
+      from: sql<Date | null>`min(${voteEvents.occurredAt})`,
+      to: sql<Date | null>`max(${voteEvents.occurredAt})`,
+    }).from(individualVotes)
+      .innerJoin(voteEvents, eq(voteEvents.id, individualVotes.voteEventId))
+      .where(inArray(individualVotes.lawmakerId, lawmakerIds)),
+  ]);
+  const projectAggregate = projectAggregateRows[0] ?? {
+    total: 0,
+    primaryTotal: 0,
+    coauthoredTotal: 0,
+    from: null,
+    to: null,
+  };
+  const voteAggregate = voteAggregateRows[0] ?? { total: 0, from: null, to: null };
+  const [projectRows, voteRows] = await Promise.all([
+    database.select({
+      source: bills.source,
+      externalId: bills.externalId,
+      officialCode: bills.officialCode,
+      proposalType: bills.proposalType,
+      proposalNumber: bills.proposalNumber,
+      proposalYear: bills.proposalYear,
+      officialTitle: bills.officialTitle,
+      topics: sql<string[]>`coalesce((
+        select array_agg(distinct comparison_topics."label" order by comparison_topics."label")
+        from "bill_topics" comparison_topics
+        where comparison_topics."bill_id" = ${bills.id}
+      ), array[]::text[])`,
+      presentedAt: bills.presentedAt,
+      chamber: bills.originHouse,
+      statusLabel: bills.statusLabel,
+      officialUrl: bills.officialUrl,
+      primary: sql<boolean>`bool_or(${billAuthors.isPrimary})`,
+      coauthored: sql<boolean>`bool_or(not ${billAuthors.isPrimary})`,
+    }).from(billAuthors)
+      .innerJoin(bills, eq(bills.id, billAuthors.billId))
+      .where(inArray(billAuthors.lawmakerId, lawmakerIds))
+      .groupBy(bills.id)
+      .orderBy(
+        sql`${bills.presentedAt} desc nulls last`,
+        desc(bills.checkedAt),
+        asc(bills.source),
+        asc(bills.externalId),
+      )
+      .limit(comparisonEvidenceLimit),
+    database.select({
+      source: individualVotes.source,
+      externalId: individualVotes.externalId,
+      occurredAt: voteEvents.occurredAt,
+      house: voteEvents.house,
+      description: voteEvents.description,
+      result: voteEvents.result,
+      choice: individualVotes.choice,
+      rawChoice: individualVotes.rawChoice,
+      officialUrl: individualVotes.officialUrl,
+      billSource: bills.source,
+      billExternalId: bills.externalId,
+      billOfficialCode: bills.officialCode,
+      billOfficialTitle: bills.officialTitle,
+      billOfficialUrl: bills.officialUrl,
+    }).from(individualVotes)
+      .innerJoin(voteEvents, eq(voteEvents.id, individualVotes.voteEventId))
+      .innerJoin(bills, eq(bills.id, voteEvents.billId))
+      .where(inArray(individualVotes.lawmakerId, lawmakerIds))
+      .orderBy(
+        desc(voteEvents.occurredAt),
+        desc(individualVotes.checkedAt),
+        asc(individualVotes.source),
+        asc(individualVotes.externalId),
+      )
+      .limit(comparisonEvidenceLimit),
+  ]);
+
+  return {
+    projectCount: projectAggregate.total,
+    primaryProjectCount: projectAggregate.primaryTotal,
+    coauthoredProjectCount: projectAggregate.coauthoredTotal,
+    voteCount: voteAggregate.total,
+    projects: {
+      items: projectRows.map((row) => ({
+        ...row,
+        topics: row.topics ?? [],
+        presentedAt: row.presentedAt ? iso(row.presentedAt) : null,
+      })),
+      total: projectAggregate.total,
+      limit: comparisonEvidenceLimit,
+      truncated: projectAggregate.total > projectRows.length,
+    },
+    votes: {
+      items: voteRows.map((row) => ({
+        source: row.source,
+        externalId: row.externalId,
+        occurredAt: iso(row.occurredAt),
+        house: row.house,
+        description: row.description,
+        result: row.result,
+        choice: row.choice,
+        rawChoice: row.rawChoice,
+        officialUrl: row.officialUrl,
+        bill: {
+          source: row.billSource,
+          externalId: row.billExternalId,
+          officialCode: row.billOfficialCode,
+          officialTitle: row.billOfficialTitle,
+          officialUrl: row.billOfficialUrl,
+        },
+      })),
+      total: voteAggregate.total,
+      limit: comparisonEvidenceLimit,
+      truncated: voteAggregate.total > voteRows.length,
+    },
+    coverage: {
+      projectFrom: projectAggregate.from ? iso(projectAggregate.from) : null,
+      projectTo: projectAggregate.to ? iso(projectAggregate.to) : null,
+      voteFrom: voteAggregate.from ? iso(voteAggregate.from) : null,
+      voteTo: voteAggregate.to ? iso(voteAggregate.to) : null,
+    },
+  };
+}
+
+export async function compareCandidates(
+  database: Database,
+  electionYear: number,
+  ids: readonly string[],
+): Promise<PublicCandidateComparison> {
+  const distinctIds = [...new Set(ids)];
+  if (distinctIds.length > 3) return { error: "TOO_MANY_CANDIDATES" };
+  if (
+    !Number.isSafeInteger(electionYear)
+    || electionYear < 2026
+    || electionYear > 9999
+    || distinctIds.some((id) => !candidateComparisonIdPattern.test(id))
+  ) {
+    return { error: "CANDIDATES_NOT_FOUND" };
+  }
+  if (distinctIds.length === 0) return { candidates: [] };
+
+  return database.transaction(async (transaction) => {
+    const rows = await transaction.select({
+      id: electoralCandidates.id,
+      electionYear: electoralCandidates.electionYear,
+      externalId: electoralCandidates.externalId,
+      ballotName: electoralCandidates.ballotName,
+      fullName: electoralCandidates.fullName,
+      number: electoralCandidates.number,
+      office: electoralCandidates.office,
+      region: electoralCandidates.region,
+      electoralUnit: electoralCandidates.electoralUnit,
+      partyAcronym: electoralCandidates.partyAcronym,
+      partyName: electoralCandidates.partyName,
+      status: electoralCandidates.status,
+      officialUrl: electoralCandidates.officialUrl,
+    }).from(electoralCandidates).where(and(
+      currentSnapshot,
+      eq(electoralCandidates.electionYear, electionYear),
+      inArray(electoralCandidates.externalId, distinctIds),
+    ));
+    if (rows.length !== distinctIds.length) return { error: "CANDIDATES_NOT_FOUND" } as const;
+
+    const byExternalId = new Map(rows.map((row) => [row.externalId, row]));
+    const orderedRows = distinctIds.map((id) => byExternalId.get(id)!);
+    const first = orderedRows[0]!;
+    if (orderedRows.some((row) => (
+      row.electionYear !== first.electionYear
+      || row.office !== first.office
+      || row.electoralUnit !== first.electoralUnit
+    ))) {
+      return { error: "INCOMPATIBLE_CANDIDATES" } as const;
+    }
+
+    const histories = await Promise.all(
+      orderedRows.map((row) => getCandidateComparisonHistoryFromSnapshot(transaction, row.id)),
+    );
+    const candidates: PublicCandidateComparisonCandidate[] = orderedRows.map(({ id: _id, ...row }, index) => ({
+      ...row,
+      profileUrl: `/candidatos/${row.electionYear}/${encodeURIComponent(row.externalId)}`,
+      history: histories[index] ?? null,
+    }));
+    return { candidates };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export interface CandidateMediaAsset {

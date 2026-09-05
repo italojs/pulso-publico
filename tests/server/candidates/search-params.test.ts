@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { CandidateFilters } from "#/server/candidates/read-models";
 import { parseCandidateFilterInput, toCandidateFilterInput } from "#/server/candidates/filter-contract";
 import {
+  buildCandidateCatalogHref,
+  buildCandidateComparisonHref,
   buildCandidateHref,
   countCandidateFilters,
+  parseCandidateCatalogComparisonSearchParams,
+  parseCandidateComparisonSearchParams,
   parseCandidateSearchParams,
   type CandidateRawSearchParams,
 } from "#/server/candidates/search-params";
@@ -17,6 +21,49 @@ function rawFromHref(href: string): CandidateRawSearchParams {
 }
 
 describe("candidate search params", () => {
+  it("preserves first-selected comparison order while deduplicating repeated IDs", () => {
+    const parsed = parseCandidateComparisonSearchParams({
+      ano: "2026",
+      id: ["3030", "1010", "3030"],
+    });
+
+    expect(parsed).toEqual({ year: 2026, ids: ["3030", "1010"], valid: true });
+    expect(buildCandidateComparisonHref(parsed.year, parsed.ids))
+      .toBe("/candidatos/comparar?ano=2026&id=3030&id=1010");
+    expect(buildCandidateComparisonHref(parsed.year, parsed.ids.filter((id) => id !== "3030")))
+      .toBe("/candidatos/comparar?ano=2026&id=1010");
+  });
+
+  it("rejects malformed comparison query values and unsafe programmatic URLs", () => {
+    expect(parseCandidateComparisonSearchParams({ ano: ["2026", "2027"], id: "1010" }))
+      .toEqual({ year: 2026, ids: [], valid: false });
+    expect(parseCandidateComparisonSearchParams({ ano: "2026", id: ["1010", "../2020"] }))
+      .toEqual({ year: 2026, ids: [], valid: false });
+    expect(() => buildCandidateComparisonHref(2025, ["1010"])).toThrow(RangeError);
+    expect(() => buildCandidateComparisonHref(2026, ["1010", "2020", "3030", "4040"]))
+      .toThrow(RangeError);
+  });
+
+  it("round-trips catalog comparison state without mixing it into candidate filters", () => {
+    const selection = parseCandidateCatalogComparisonSearchParams({
+      compararAno: "2026",
+      compararId: ["4040", "1010", "4040"],
+    });
+
+    expect(selection).toEqual({ year: 2026, ids: ["4040", "1010"], valid: true });
+    expect(buildCandidateCatalogHref({ regions: ["ES"] }, 2, selection))
+      .toBe("/candidatos?uf=ES&pagina=2&compararAno=2026&compararId=4040&compararId=1010");
+    expect(parseCandidateSearchParams({
+      uf: "ES",
+      compararAno: "2026",
+      compararId: ["4040", "1010"],
+    })).toEqual({ page: 1, pageSize: 20, regions: ["ES"] });
+    expect(parseCandidateCatalogComparisonSearchParams({
+      compararAno: "2026",
+      compararId: ["1010", "2020", "3030", "4040"],
+    })).toEqual({ year: 2026, ids: [], valid: false });
+  });
+
   it("round-trips every standard and advanced filter canonically", () => {
     const filters: CandidateFilters = {
       query: "ana 1234",

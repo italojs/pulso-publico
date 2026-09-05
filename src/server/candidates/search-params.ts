@@ -20,8 +20,65 @@ export { centsToReais, reaisToCents } from "#/server/candidates/filter-validatio
 
 export type CandidateRawSearchParams = Record<string, string | string[] | undefined>;
 
+export interface CandidateComparisonSelection {
+  year: number;
+  ids: string[];
+}
+
+export interface CandidateComparisonSearchParams extends CandidateComparisonSelection {
+  valid: boolean;
+}
+
 const MAX_VALUES = MAX_CANDIDATE_FILTER_VALUES;
 const MAX_TEXT_LENGTH = MAX_CANDIDATE_TEXT_LENGTH;
+const candidateComparisonIdPattern = /^\d{1,30}$/;
+
+export function parseCandidateComparisonSearchParams(
+  params: CandidateRawSearchParams,
+): CandidateComparisonSearchParams {
+  const rawYear = params.ano;
+  const yearText = rawYear === undefined ? "2026" : Array.isArray(rawYear) ? undefined : rawYear;
+  if (!yearText || !/^\d{4}$/.test(yearText)) return { year: 2026, ids: [], valid: false };
+  const year = Number(yearText);
+  if (!Number.isSafeInteger(year) || year < 2026 || year > 9999) {
+    return { year: 2026, ids: [], valid: false };
+  }
+  const sourceIds = params.id === undefined ? [] : Array.isArray(params.id) ? params.id : [params.id];
+  if (sourceIds.some((id) => !candidateComparisonIdPattern.test(id))) {
+    return { year, ids: [], valid: false };
+  }
+  return { year, ids: [...new Set(sourceIds)], valid: true };
+}
+
+export function parseCandidateCatalogComparisonSearchParams(
+  params: CandidateRawSearchParams,
+): CandidateComparisonSearchParams {
+  if (params.compararAno === undefined && params.compararId === undefined) {
+    return { year: 2026, ids: [], valid: true };
+  }
+  if (params.compararAno === undefined) return { year: 2026, ids: [], valid: false };
+  const selection = parseCandidateComparisonSearchParams({
+    ano: params.compararAno,
+    id: params.compararId,
+  });
+  return selection.valid && selection.ids.length <= 3
+    ? selection
+    : { year: selection.year, ids: [], valid: false };
+}
+
+export function buildCandidateComparisonHref(year: number, ids: readonly string[]): string {
+  if (!Number.isSafeInteger(year) || year < 2026 || year > 9999) {
+    throw new RangeError("Invalid candidate comparison election year");
+  }
+  if (ids.some((id) => !candidateComparisonIdPattern.test(id))) {
+    throw new RangeError("Invalid candidate comparison identifier");
+  }
+  const distinctIds = [...new Set(ids)];
+  if (distinctIds.length > 3) throw new RangeError("Candidate comparison accepts at most three identifiers");
+  const params = new URLSearchParams({ ano: String(year) });
+  for (const id of distinctIds) params.append("id", id);
+  return `/candidatos/comparar?${params.toString()}`;
+}
 
 function values(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
@@ -225,6 +282,33 @@ export function buildCandidateHref(filters: Partial<CandidateFilters>, page = fi
   if (filters.pageSize !== undefined && filters.pageSize !== 20) params.set("porPagina", String(filters.pageSize));
   const query = params.toString();
   return query ? `/candidatos?${query}` : "/candidatos";
+}
+
+export function buildCandidateCatalogHref(
+  filters: Partial<CandidateFilters>,
+  page = filters.page ?? 1,
+  comparison?: CandidateComparisonSelection,
+): string {
+  return buildCandidateCatalogSelectionHref(buildCandidateHref(filters, page), comparison);
+}
+
+export function buildCandidateCatalogSelectionHref(
+  href: string,
+  comparison?: CandidateComparisonSelection,
+): string {
+  const url = new URL(href, "https://catalog.invalid");
+  if (url.origin !== "https://catalog.invalid" || url.pathname !== "/candidatos") {
+    throw new RangeError("Invalid candidate catalog URL");
+  }
+  url.searchParams.delete("compararAno");
+  url.searchParams.delete("compararId");
+  if (comparison?.ids.length) {
+    buildCandidateComparisonHref(comparison.year, comparison.ids);
+    url.searchParams.set("compararAno", String(comparison.year));
+    for (const id of comparison.ids) url.searchParams.append("compararId", id);
+  }
+  const query = url.searchParams.toString();
+  return query ? `${url.pathname}?${query}` : url.pathname;
 }
 
 function present(value: unknown): boolean {

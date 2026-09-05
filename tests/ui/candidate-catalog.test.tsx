@@ -108,6 +108,7 @@ function renderFilters(
   authenticated = true,
   regionOrigin: "ip" | "url" | undefined = undefined,
   customOptions: CandidateFilterOptions = options,
+  comparison: { year: number; ids: string[] } | undefined = undefined,
 ) {
   return render(
     <CandidateFiltersPanel
@@ -115,6 +116,7 @@ function renderFilters(
       filters={filters}
       options={customOptions}
       regionOrigin={regionOrigin}
+      comparison={comparison}
     />,
   );
 }
@@ -188,6 +190,23 @@ describe("candidate catalog", () => {
     const params = new URL(String(routerPush.mock.calls[0]?.[0]), "https://local.invalid").searchParams;
     expect(params.get("uf")).toBe("TO");
     expect(params.get("partido")).toBe("P25");
+  });
+
+  it("preserves catalog comparison IDs through standard and advanced filters", () => {
+    const comparison = { year: 2026, ids: ["4040", "1010"] };
+    renderFilters({ regions: ["ES"] }, true, undefined, options, comparison);
+
+    const quickForm = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
+    fireEvent.submit(quickForm);
+    let params = new URL(String(routerPush.mock.calls.at(-1)?.[0]), "https://local.invalid").searchParams;
+    expect(params.get("compararAno")).toBe("2026");
+    expect(params.getAll("compararId")).toEqual(["4040", "1010"]);
+
+    const advanced = openAdvanced();
+    const advancedForm = advanced.querySelector("form")!;
+    params = new URLSearchParams(new FormData(advancedForm) as never);
+    expect(params.get("compararAno")).toBe("2026");
+    expect(params.getAll("compararId")).toEqual(["4040", "1010"]);
   });
 
   it("keeps the Brazil opt-out across unrelated changes and clears it for an explicit UF", () => {
@@ -610,17 +629,20 @@ describe("candidate catalog", () => {
   });
 
   it("removes one chip value without dropping other filters or the Brazil opt-out", () => {
-    render(<CandidateFilterChips filters={{
-      allBrazil: true,
-      query: "ana",
-      offices: ["deputado_federal", "senador"],
-      parties: ["ABC"],
-      ageMin: 30,
-      hasPhoto: false,
-      topics: ["Educação"],
-      order: "votes_desc",
-      page: 4,
-    }} />);
+    render(<CandidateFilterChips
+      comparison={{ year: 2026, ids: ["4040", "1010"] }}
+      filters={{
+        allBrazil: true,
+        query: "ana",
+        offices: ["deputado_federal", "senador"],
+        parties: ["ABC"],
+        ageMin: 30,
+        hasPhoto: false,
+        topics: ["Educação"],
+        order: "votes_desc",
+        page: 4,
+      }}
+    />);
 
     const href = screen.getByRole("link", { name: "Remover cargo Deputado federal" }).getAttribute("href") ?? "";
     const params = new URL(href, "https://local.invalid").searchParams;
@@ -631,8 +653,13 @@ describe("candidate catalog", () => {
     expect(params.get("comFoto")).toBe("0");
     expect(params.get("tema")).toBe("Educação");
     expect(params.get("abrangencia")).toBe("brasil");
+    expect(params.get("compararAno")).toBe("2026");
+    expect(params.getAll("compararId")).toEqual(["4040", "1010"]);
     expect(params.has("pagina")).toBe(false);
-    expect(screen.getByRole("link", { name: "Limpar todos os filtros" })).toHaveAttribute("href", "/candidatos?abrangencia=brasil");
+    expect(screen.getByRole("link", { name: "Limpar todos os filtros" })).toHaveAttribute(
+      "href",
+      "/candidatos?abrangencia=brasil&compararAno=2026&compararId=4040&compararId=1010",
+    );
   });
 
   it("keeps the Brazil opt-out when the last explicit UF chip is removed", () => {
@@ -655,7 +682,7 @@ describe("candidate catalog", () => {
       hasFinance: false,
       order: "revenue_desc",
       page: 2,
-    }} page={2} totalPages={4} />);
+    }} comparison={{ year: 2026, ids: ["4040", "1010"] }} page={2} totalPages={4} />);
 
     const previous = new URL(screen.getByRole("link", { name: "Página anterior" }).getAttribute("href")!, "https://local.invalid");
     const next = new URL(screen.getByRole("link", { name: "Próxima página" }).getAttribute("href")!, "https://local.invalid");
@@ -669,6 +696,8 @@ describe("candidate catalog", () => {
       expect(params.get("patrimonioMin")).toBe("0");
       expect(params.get("comFinancas")).toBe("0");
       expect(params.get("ordem")).toBe("revenue_desc");
+      expect(params.get("compararAno")).toBe("2026");
+      expect(params.getAll("compararId")).toEqual(["4040", "1010"]);
     }
   });
 

@@ -2,7 +2,11 @@
 
 import type { CandidateOffice } from "#/domain/electoral";
 import type { CandidateFilters } from "#/server/candidates/read-models";
-import { buildCandidateHref } from "#/server/candidates/search-params";
+import {
+  buildCandidateCatalogSelectionHref,
+  buildCandidateHref,
+  type CandidateComparisonSelection,
+} from "#/server/candidates/search-params";
 import { formatCandidateCents } from "#/ui/candidate-card";
 import { candidateOfficeLabels } from "#/ui/candidate-office";
 
@@ -81,7 +85,10 @@ function addBooleanChip(
   if (value !== undefined) addScalarChip(chips, filters, key, value ? yes : no);
 }
 
-export function CandidateFilterChips({ filters }: Readonly<{ filters: CandidateFilters }>) {
+export function CandidateFilterChips({ comparison, filters }: Readonly<{
+  comparison?: CandidateComparisonSelection;
+  filters: CandidateFilters;
+}>) {
   const chips: CandidateFilterChip[] = [];
   if (filters.query) addScalarChip(chips, filters, "query", `Busca: ${filters.query}`, `Remover busca ${filters.query}`);
   addArrayChips(chips, filters, "electionYears", filters.electionYears, "ano");
@@ -121,8 +128,15 @@ export function CandidateFilterChips({ filters }: Readonly<{ filters: CandidateF
   addBooleanChip(chips, filters, "activeMandate", filters.activeMandate, "Mandato em exercício", "Mandato anterior");
   addArrayChips(chips, filters, "topics", filters.topics, "tema");
   if (filters.followedOnly) addScalarChip(chips, filters, "followedOnly", "Somente candidatos seguidos");
+  if (comparison) {
+    for (const chip of chips) chip.href = buildCandidateCatalogSelectionHref(chip.href, comparison);
+  }
 
   if (!chips.length) return null;
+  const clearHref = buildCandidateCatalogSelectionHref(
+    filters.allBrazil ? "/candidatos?abrangencia=brasil" : "/candidatos",
+    comparison,
+  );
   return (
     <nav aria-label="Filtros ativos de candidatos" className="activeFilters candidateActiveFilters">
       <span className="activeFilters__label">Filtros ativos</span>
@@ -133,7 +147,7 @@ export function CandidateFilterChips({ filters }: Readonly<{ filters: CandidateF
           </a>
         ))}
       </div>
-      <a aria-label="Limpar todos os filtros" className="activeFilters__clear" href={filters.allBrazil ? "/candidatos?abrangencia=brasil" : "/candidatos"}>Limpar tudo</a>
+      <a aria-label="Limpar todos os filtros" className="activeFilters__clear" href={clearHref}>Limpar tudo</a>
     </nav>
   );
 }

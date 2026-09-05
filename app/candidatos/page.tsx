@@ -4,13 +4,15 @@ import { redirect } from "next/navigation.js";
 import { currentUserFromCookie } from "#/auth/current-user";
 import { UserRepository } from "#/auth/user-repository";
 import { inferRegion } from "#/server/candidates/inferred-region";
-import { listCandidateFilterOptions, listCandidates } from "#/server/candidates/queries";
+import { compareCandidates, listCandidateFilterOptions, listCandidates } from "#/server/candidates/queries";
 import type {
   CandidateFilters,
   CandidateRegionOrigin,
+  PublicCandidateComparisonChoice,
 } from "#/server/candidates/read-models";
 import {
-  buildCandidateHref,
+  buildCandidateCatalogHref,
+  parseCandidateCatalogComparisonSearchParams,
   parseCandidateSearchParams,
   type CandidateRawSearchParams,
 } from "#/server/candidates/search-params";
@@ -33,11 +35,16 @@ function regionScope(filters: CandidateFilters, origin: CandidateRegionOrigin) {
 export default async function CandidateCatalogPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<CandidateRawSearchParams> }>) {
-  const explicit = parseCandidateSearchParams(await searchParams);
+  const rawSearchParams = await searchParams;
+  const explicit = parseCandidateSearchParams(rawSearchParams);
+  const parsedComparison = parseCandidateCatalogComparisonSearchParams(rawSearchParams);
+  const requestedComparison = parsedComparison.valid && parsedComparison.ids.length
+    ? { year: parsedComparison.year, ids: parsedComparison.ids }
+    : undefined;
   const user = await currentUserFromCookie((await cookies()).toString(), users);
 
   if (explicit.followedOnly && !user) {
-    const returnUrl = buildCandidateHref(explicit, explicit.page ?? 1);
+    const returnUrl = buildCandidateCatalogHref(explicit, explicit.page ?? 1, requestedComparison);
     redirect(`/entrar?next=${encodeURIComponent(returnUrl)}`);
   }
 
@@ -53,10 +60,27 @@ export default async function CandidateCatalogPage({
       ? "ip"
       : undefined;
   const scope = user ? { userId: user.id } : {};
-  const [candidatePage, options] = await Promise.all([
+  const [candidatePage, options, comparisonResult] = await Promise.all([
     listCandidates(db, filters, scope),
     listCandidateFilterOptions(db),
+    requestedComparison
+      ? compareCandidates(db, requestedComparison.year, requestedComparison.ids)
+      : Promise.resolve({ candidates: [] } as const),
   ]);
+  const initialComparedCandidates: PublicCandidateComparisonChoice[] = requestedComparison
+    && "candidates" in comparisonResult
+    && comparisonResult.candidates.length === requestedComparison.ids.length
+    ? comparisonResult.candidates.map((candidate) => ({
+        electionYear: candidate.electionYear,
+        externalId: candidate.externalId,
+        ballotName: candidate.ballotName,
+        office: candidate.office,
+        electoralUnit: candidate.electoralUnit,
+      }))
+    : [];
+  const comparison = requestedComparison && initialComparedCandidates.length === requestedComparison.ids.length
+    ? requestedComparison
+    : undefined;
   const latestDatedSnapshot = options.snapshots
     .filter((snapshot): snapshot is { electionYear: number; extractedAt: string } => Boolean(snapshot.extractedAt))
     .toSorted((left, right) => right.extractedAt.localeCompare(left.extractedAt))[0];
@@ -85,13 +109,16 @@ export default async function CandidateCatalogPage({
         <>
           <CandidateFiltersPanel
             authenticated={Boolean(user)}
+            comparison={comparison}
             filters={filters}
             options={options}
             regionOrigin={regionOrigin}
           />
           <CandidateResults
             candidates={candidatePage}
+            comparison={comparison}
             filters={filters}
+            initialComparedCandidates={initialComparedCandidates}
             snapshotExtractedAt={latestDatedSnapshot?.extractedAt ?? null}
           />
         </>
