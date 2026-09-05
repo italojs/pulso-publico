@@ -100,3 +100,48 @@ TEST_DATABASE_URL=postgres://italojose@127.0.0.1:5435/legislativo_codex_test
   project and vote records; this task intentionally exposes only the exact summary
   aggregates and confirmed-lawmakers/topics foundation.
 - No Task 6 or later UI/routing behavior was implemented here.
+
+## Independent review — fix round 1/5
+
+Review base: `0c85ac5`; original implementation/report: `e71b67b..a76fa1a`;
+fix commit: `db5f740` (`fix: harden candidate filter consistency`).
+
+The review raised three Important and two Minor findings. All five received a
+focused failing regression before implementation:
+
+1. **Followed-only canonical semantics.** RED showed `acompanhando=0` becoming
+   `followedOnly: false`, false being serialized on URL/wire and counted as an
+   active filter. It is now true-or-absent in parser, builder and strict schema;
+   false availability booleans retain their real filtering meaning. Direct query
+   coverage confirms a programmatic false remains a public unfiltered request.
+2. **Builder bounds and range parity.** Seventeen RED cases showed the builder
+   emitting invalid ages, asset counts, bigint amounts, pages and reversed ranges.
+   A shared `filter-validation.ts` now owns scalar ceilings, exact reais/centavos
+   conversion and paired-range checks used by URL and wire paths. Invalid
+   programmatic filters raise `RangeError`; all maximum/minimum boundaries
+   round-trip without mutation.
+3. **Literal search.** RED showed `%` and `_` matching every candidate and a
+   backslash failing to find its literal occurrence. Search now escapes `\\`, `%`
+   and `_` and supplies a parameterized explicit SQL `ESCAPE` character. Normal
+   case-insensitive text remains covered.
+4. **Funding option/filter parity.** RED showed `private` offered merely because
+   it had a positive component even though `public` predominated and the private
+   filter returned zero candidates. Option discovery now calls the same
+   `countCandidates(...fundingKinds)` predicate used by catalog filtering, and
+   every offered option is asserted to produce a current-snapshot result.
+5. **Total multi-election ordering.** Eight RED cases showed equal primary sort
+   keys paging 2027 before 2026 based on external ID. Every ordering now appends
+   `electionYear`, `externalId` and candidate UUID as deterministic tie breakers;
+   the regression paginates equal-key candidates across 2026/2027 for all eight
+   order modes.
+
+Fresh fix-round verification under Node 26.8.1 and the documented test database:
+
+- `npm test -- tests/server/candidates` — 3 files, 86 tests passed.
+- `npm test -- tests/server/candidates/queries.test.ts` — 47 tests passed twice
+  consecutively.
+- `npm run typecheck` — zero errors.
+- `npm test` — 42 files, 429 tests passed.
+- `git diff --check` — clean before the implementation commit.
+
+No Task 6 code was started during this fix round.
