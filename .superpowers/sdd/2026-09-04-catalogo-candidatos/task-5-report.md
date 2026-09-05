@@ -145,3 +145,53 @@ Fresh fix-round verification under Node 26.8.1 and the documented test database:
 - `git diff --check` — clean before the implementation commit.
 
 No Task 6 code was started during this fix round.
+
+## Independent review — fix round 2/5
+
+Review range before this round: `0c85ac5..3c5acf1`; fix commit: `778f0f4`
+(`fix: canonicalize all candidate filters`).
+
+One Important finding remained: the programmatic URL builder enforced scalar
+ranges but did not validate the rest of `CandidateFilters`. As a result, invalid
+years, rounds, enum members, free text and runtime boolean values could be emitted
+and then silently discarded or changed by the hostile-URL parser.
+
+RED was recorded with 16 failing cases:
+
+- election years `2025` and `2026.5`;
+- rounds `0` and `1.5`;
+- region `ZZ`, office `prefeito`, funding kind `unknown`, house `congresso`,
+  declared-assets `maybe` and order `best`;
+- overlong query/status, empty party, 21 unique topics and a non-boolean photo
+  value;
+- a valid 21-element party list containing one duplicate also exposed drift:
+  URL canonicalization accepted its 20 unique values while wire serialization
+  rejected the raw array length.
+
+GREEN introduced one shared, complete `canonicalizeCandidateFilters` function in
+`filter-validation.ts`, used by both `buildCandidateHref` and
+`toCandidateFilterInput`. It:
+
+- validates every declared key and rejects unknown runtime keys;
+- validates all repeated enum, numeric and free-text arrays;
+- trims and deduplicates valid text/array values before applying the 20-unique
+  value cap;
+- rejects empty arrays, overlong text, unsupported enum members and wrong runtime
+  primitive types;
+- retains false for all availability/mandate booleans while canonicalizing
+  `followedOnly: false` to absence;
+- reuses the existing shared bounds/range/money checks;
+- preserves the public URL parser's non-throwing behavior for hostile input.
+
+Verification for this round under Node 26.8.1:
+
+- `npm test -- tests/server/candidates/search-params.test.ts tests/server/candidates/filter-contract.test.ts`
+  — 55 tests passed.
+- `npm test -- tests/server/candidates` — 3 files, 102 tests passed.
+- Query code did not change in this round, so the conditional duplicate
+  integration run was not required; it ran once as part of the focused suite.
+- `npm run typecheck` — zero errors.
+- `npm test` — 42 files, 445 tests passed.
+- `git diff --check` and staged diff check — clean.
+
+No `abrangencia=brasil` behavior and no Task 6 code was implemented.
