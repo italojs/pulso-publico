@@ -34,52 +34,86 @@ export function centsToReais(value: bigint): string | undefined {
     : `${whole}.${fraction.toString().padStart(2, "0").replace(/0$/, "")}`;
 }
 
-function assertInteger(field: string, value: number | undefined, minimum: number, maximum: number): void {
-  if (value === undefined) return;
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${field} must be an integer between ${minimum} and ${maximum}`);
-  }
+export type CandidateFilterBoundField =
+  | "ageMin" | "ageMax" | "assetCountMin" | "assetCountMax" | "page" | "pageSize"
+  | "assetMinCents" | "assetMaxCents" | "revenueMinCents" | "revenueMaxCents"
+  | "expenseMinCents" | "expenseMaxCents" | "balanceMinCents" | "balanceMaxCents";
+
+export interface CandidateFilterBoundIssue {
+  code: "out_of_bounds" | "reversed_range";
+  fields: CandidateFilterBoundField[];
+  message: string;
 }
 
-function assertMoney(field: string, value: bigint | undefined): void {
-  if (value === undefined) return;
-  if (typeof value !== "bigint" || value < 0n || value > MAX_BIGINT_CENTS) {
-    throw new RangeError(`${field} must fit a non-negative PostgreSQL bigint`);
-  }
+export interface CandidateFilterBoundsResult {
+  issues: CandidateFilterBoundIssue[];
+  valid: boolean;
 }
 
-function assertRange(
-  minimumField: string,
-  minimum: number | bigint | undefined,
-  maximumField: string,
-  maximum: number | bigint | undefined,
-): void {
-  if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
-    throw new RangeError(`${minimumField} must not exceed ${maximumField}`);
-  }
-}
+export function validateCandidateFilterBounds(filters: Partial<CandidateFilters>, page?: number): CandidateFilterBoundsResult {
+  const issues: CandidateFilterBoundIssue[] = [];
+  const integer = (field: CandidateFilterBoundField, value: number | undefined, minimum: number, maximum: number) => {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > maximum)) {
+      issues.push({ code: "out_of_bounds", fields: [field], message: `${field} must be an integer between ${minimum} and ${maximum}` });
+    }
+  };
+  const money = (field: CandidateFilterBoundField, value: bigint | undefined) => {
+    if (value !== undefined && (typeof value !== "bigint" || value < 0n || value > MAX_BIGINT_CENTS)) {
+      issues.push({ code: "out_of_bounds", fields: [field], message: `${field} must fit a non-negative PostgreSQL bigint` });
+    }
+  };
+  const range = (
+    minimumField: CandidateFilterBoundField,
+    minimum: number | bigint | undefined,
+    maximumField: CandidateFilterBoundField,
+    maximum: number | bigint | undefined,
+  ) => {
+    if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+      issues.push({ code: "reversed_range", fields: [minimumField, maximumField], message: `${minimumField} must not exceed ${maximumField}` });
+    }
+  };
 
-export function assertCandidateFilterBounds(filters: Partial<CandidateFilters>, page?: number): void {
-  assertInteger("ageMin", filters.ageMin, 0, MAX_CANDIDATE_AGE);
-  assertInteger("ageMax", filters.ageMax, 0, MAX_CANDIDATE_AGE);
-  assertInteger("assetCountMin", filters.assetCountMin, 0, MAX_CANDIDATE_ASSET_COUNT);
-  assertInteger("assetCountMax", filters.assetCountMax, 0, MAX_CANDIDATE_ASSET_COUNT);
-  assertInteger("page", page ?? filters.page, 1, MAX_CANDIDATE_PAGE);
-  assertInteger("pageSize", filters.pageSize, 1, MAX_CANDIDATE_PAGE_SIZE);
+  integer("ageMin", filters.ageMin, 0, MAX_CANDIDATE_AGE);
+  integer("ageMax", filters.ageMax, 0, MAX_CANDIDATE_AGE);
+  integer("assetCountMin", filters.assetCountMin, 0, MAX_CANDIDATE_ASSET_COUNT);
+  integer("assetCountMax", filters.assetCountMax, 0, MAX_CANDIDATE_ASSET_COUNT);
+  integer("page", page ?? filters.page, 1, MAX_CANDIDATE_PAGE);
+  integer("pageSize", filters.pageSize, 1, MAX_CANDIDATE_PAGE_SIZE);
 
   for (const [field, value] of [
     ["assetMinCents", filters.assetMinCents], ["assetMaxCents", filters.assetMaxCents],
     ["revenueMinCents", filters.revenueMinCents], ["revenueMaxCents", filters.revenueMaxCents],
     ["expenseMinCents", filters.expenseMinCents], ["expenseMaxCents", filters.expenseMaxCents],
     ["balanceMinCents", filters.balanceMinCents], ["balanceMaxCents", filters.balanceMaxCents],
-  ] as const) assertMoney(field, value);
+  ] as const) money(field, value);
 
-  assertRange("ageMin", filters.ageMin, "ageMax", filters.ageMax);
-  assertRange("assetCountMin", filters.assetCountMin, "assetCountMax", filters.assetCountMax);
-  assertRange("assetMinCents", filters.assetMinCents, "assetMaxCents", filters.assetMaxCents);
-  assertRange("revenueMinCents", filters.revenueMinCents, "revenueMaxCents", filters.revenueMaxCents);
-  assertRange("expenseMinCents", filters.expenseMinCents, "expenseMaxCents", filters.expenseMaxCents);
-  assertRange("balanceMinCents", filters.balanceMinCents, "balanceMaxCents", filters.balanceMaxCents);
+  range("ageMin", filters.ageMin, "ageMax", filters.ageMax);
+  range("assetCountMin", filters.assetCountMin, "assetCountMax", filters.assetCountMax);
+  range("assetMinCents", filters.assetMinCents, "assetMaxCents", filters.assetMaxCents);
+  range("revenueMinCents", filters.revenueMinCents, "revenueMaxCents", filters.revenueMaxCents);
+  range("expenseMinCents", filters.expenseMinCents, "expenseMaxCents", filters.expenseMaxCents);
+  range("balanceMinCents", filters.balanceMinCents, "balanceMaxCents", filters.balanceMaxCents);
+  return { issues, valid: issues.length === 0 };
+}
+
+export function assertCandidateFilterBounds(filters: Partial<CandidateFilters>, page?: number): void {
+  const issue = validateCandidateFilterBounds(filters, page).issues[0];
+  if (issue) throw new RangeError(issue.message);
+}
+
+export type CandidateFilterCanonicalizationResult =
+  | { filters: CandidateFilters; success: true }
+  | { error: Error; success: false };
+
+export function safelyCanonicalizeCandidateFilters(
+  filters: Partial<CandidateFilters>,
+  pageOverride?: number,
+): CandidateFilterCanonicalizationResult {
+  try {
+    return { filters: canonicalizeCandidateFilters(filters, pageOverride), success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error : new Error("Invalid candidate filters"), success: false };
+  }
 }
 
 const allowedFilterKeys = new Set<keyof CandidateFilters>([

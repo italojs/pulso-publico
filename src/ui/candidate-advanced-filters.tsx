@@ -12,6 +12,13 @@ import type {
   CandidateOrder,
 } from "#/server/candidates/read-models";
 import { toCandidateFilterInput } from "#/server/candidates/filter-contract";
+import {
+  MAX_CANDIDATE_AGE,
+  MAX_CANDIDATE_ASSET_COUNT,
+  safelyCanonicalizeCandidateFilters,
+  validateCandidateFilterBounds,
+  type CandidateFilterBoundField,
+} from "#/server/candidates/filter-validation";
 import { centsToReais, reaisToCents } from "#/server/candidates/search-params";
 import { buildCandidateHref, countCandidateFilters } from "#/server/candidates/search-params";
 
@@ -25,6 +32,16 @@ const moneyKeys: MoneyKey[] = [
   "assetMinCents", "assetMaxCents", "revenueMinCents", "revenueMaxCents",
   "expenseMinCents", "expenseMaxCents", "balanceMinCents", "balanceMaxCents",
 ];
+const moneyParameterNames: Record<MoneyKey, string> = {
+  assetMinCents: "patrimonioMin",
+  assetMaxCents: "patrimonioMax",
+  revenueMinCents: "receitaMin",
+  revenueMaxCents: "receitaMax",
+  expenseMinCents: "despesaMin",
+  expenseMaxCents: "despesaMax",
+  balanceMinCents: "saldoMin",
+  balanceMaxCents: "saldoMax",
+};
 
 function capped(values: readonly string[] | undefined) {
   return [...new Set(values?.map((value) => value.trim()).filter(Boolean))].slice(0, MAX_SELECTED_VALUES);
@@ -268,17 +285,26 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
   };
 
   const invalidMoney = (key: MoneyKey) => moneyInputs[key].trim() !== "" && parseMoneyInput(moneyInputs[key]) === undefined;
-  const ageInvalid = draft.ageMin !== undefined && draft.ageMax !== undefined && draft.ageMin > draft.ageMax;
+  const bounds = validateCandidateFilterBounds(draft);
+  const hasBoundsIssue = (fields: CandidateFilterBoundField[], code?: "out_of_bounds" | "reversed_range") => bounds.issues.some((issue) => (
+    (!code || issue.code === code) && issue.fields.some((field) => fields.includes(field))
+  ));
+  const ageBoundsInvalid = hasBoundsIssue(["ageMin", "ageMax"], "out_of_bounds");
+  const ageInvalid = hasBoundsIssue(["ageMin", "ageMax"]);
   const assetValueSyntaxInvalid = invalidMoney("assetMinCents") || invalidMoney("assetMaxCents");
   const revenueSyntaxInvalid = invalidMoney("revenueMinCents") || invalidMoney("revenueMaxCents");
   const expenseSyntaxInvalid = invalidMoney("expenseMinCents") || invalidMoney("expenseMaxCents");
   const balanceSyntaxInvalid = invalidMoney("balanceMinCents") || invalidMoney("balanceMaxCents");
-  const assetValueInvalid = assetValueSyntaxInvalid || (draft.assetMinCents !== undefined && draft.assetMaxCents !== undefined && draft.assetMinCents > draft.assetMaxCents);
-  const assetCountInvalid = draft.assetCountMin !== undefined && draft.assetCountMax !== undefined && draft.assetCountMin > draft.assetCountMax;
-  const revenueInvalid = revenueSyntaxInvalid || (draft.revenueMinCents !== undefined && draft.revenueMaxCents !== undefined && draft.revenueMinCents > draft.revenueMaxCents);
-  const expenseInvalid = expenseSyntaxInvalid || (draft.expenseMinCents !== undefined && draft.expenseMaxCents !== undefined && draft.expenseMinCents > draft.expenseMaxCents);
-  const balanceInvalid = balanceSyntaxInvalid || (draft.balanceMinCents !== undefined && draft.balanceMaxCents !== undefined && draft.balanceMinCents > draft.balanceMaxCents);
-  const rangeInvalid = ageInvalid || assetValueInvalid || assetCountInvalid || revenueInvalid || expenseInvalid || balanceInvalid;
+  const assetValueInvalid = assetValueSyntaxInvalid || hasBoundsIssue(["assetMinCents", "assetMaxCents"]);
+  const assetCountBoundsInvalid = hasBoundsIssue(["assetCountMin", "assetCountMax"], "out_of_bounds");
+  const assetCountInvalid = hasBoundsIssue(["assetCountMin", "assetCountMax"]);
+  const revenueInvalid = revenueSyntaxInvalid || hasBoundsIssue(["revenueMinCents", "revenueMaxCents"]);
+  const expenseInvalid = expenseSyntaxInvalid || hasBoundsIssue(["expenseMinCents", "expenseMaxCents"]);
+  const balanceInvalid = balanceSyntaxInvalid || hasBoundsIssue(["balanceMinCents", "balanceMaxCents"]);
+  const moneySyntaxInvalid = assetValueSyntaxInvalid || revenueSyntaxInvalid || expenseSyntaxInvalid || balanceSyntaxInvalid;
+  const canonicalDraft = safelyCanonicalizeCandidateFilters(draft, 1);
+  const canonicalFilters = canonicalDraft.success ? canonicalDraft.filters : undefined;
+  const filtersInvalid = moneySyntaxInvalid || !canonicalDraft.success;
 
   const openDialog = () => {
     const dialog = dialogRef.current;
@@ -307,8 +333,8 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || rangeInvalid) {
-      if (rangeInvalid) setPreviewState("idle");
+    if (!isOpen || filtersInvalid || !canonicalFilters) {
+      if (filtersInvalid) setPreviewState("idle");
       return;
     }
     setPreviewState("loading");
@@ -316,7 +342,7 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
     const timeout = window.setTimeout(async () => {
       try {
         const response = await fetch("/api/candidates/filter-count", {
-          body: JSON.stringify({ filters: candidatePreviewInput(draft) }),
+          body: JSON.stringify({ filters: candidatePreviewInput(canonicalFilters) }),
           headers: { "content-type": "application/json" },
           method: "POST",
           signal: controller.signal,
@@ -336,7 +362,7 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [draft, isOpen, rangeInvalid]);
+  }, [draft, filtersInvalid, isOpen]);
 
   const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDialogElement>) => {
     if (event.key === "Escape") {
@@ -362,15 +388,15 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
 
   const applyFilters = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (rangeInvalid) return;
-    router.push(buildCandidateHref(draft, 1));
+    if (!canonicalDraft.success || moneySyntaxInvalid) return;
+    router.push(buildCandidateHref(canonicalDraft.filters, 1));
     closeDialog();
   };
   const activeCount = countCandidateFilters(filters);
   const triggerLabel = activeCount
     ? `Filtros avançados · ${activeCount} ${activeCount === 1 ? "ativo" : "ativos"}`
     : "Filtros avançados";
-  const countMessage = rangeInvalid
+  const countMessage = filtersInvalid
     ? "Corrija os intervalos para atualizar a contagem."
     : previewState === "error"
       ? lastValidCount === undefined
@@ -382,6 +408,14 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
   const nativeInvoker = { command: "show-modal", commandfor: dialogId };
   const nativeCloser = { command: "close", commandfor: dialogId };
   const bool = (key: keyof CandidateFilters) => (value: boolean | undefined) => update(key, value as never);
+  const currentCanonical = safelyCanonicalizeCandidateFilters(filters, 1);
+  const loginBase = canonicalDraft.success && !moneySyntaxInvalid
+    ? canonicalDraft.filters
+    : currentCanonical.success
+      ? currentCanonical.filters
+      : {};
+  const loginIntent = safelyCanonicalizeCandidateFilters({ ...loginBase, followedOnly: true }, 1);
+  const loginTarget = loginIntent.success ? buildCandidateHref(loginIntent.filters, 1) : "/candidatos?acompanhando=1";
 
   return (
     <>
@@ -411,6 +445,10 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
         <form action="/candidatos" className="advancedFilters__form" method="get" onSubmit={applyFilters}>
           {draft.query ? <input name="q" type="hidden" value={draft.query} /> : null}
           {draft.allBrazil ? <input name="abrangencia" type="hidden" value="brasil" /> : null}
+          {moneyKeys.map((key) => {
+            const value = draft[key] === undefined ? undefined : centsToReais(draft[key]);
+            return value === undefined ? null : <input key={key} name={moneyParameterNames[key]} type="hidden" value={value} />;
+          })}
           <header className="advancedFilters__header">
             <div><span className="eyebrow">Refine os fatos oficiais</span><h2 id={titleId}>Filtros avançados de candidatos</h2></div>
             <button {...nativeCloser} aria-label="Fechar filtros avançados" onClick={closeDialog} ref={closeRef} type="button">×</button>
@@ -434,10 +472,10 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
 
             <FilterSection id={`${titleId}-perfil`} title="Perfil informado ao TSE">
               <div className="advancedFilters__fields advancedFilters__fields--two">
-                <label>Idade mínima<input aria-describedby={ageInvalid ? ageErrorId : undefined} aria-errormessage={ageInvalid ? ageErrorId : undefined} aria-invalid={ageInvalid} max="150" min="0" name={draft.ageMin === undefined ? undefined : "idadeMin"} onChange={(event) => update("ageMin", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.ageMin ?? ""} /></label>
-                <label>Idade máxima<input aria-describedby={ageInvalid ? ageErrorId : undefined} aria-errormessage={ageInvalid ? ageErrorId : undefined} aria-invalid={ageInvalid} max="150" min="0" name={draft.ageMax === undefined ? undefined : "idadeMax"} onChange={(event) => update("ageMax", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.ageMax ?? ""} /></label>
+                <label>Idade mínima<input aria-describedby={ageInvalid ? ageErrorId : undefined} aria-errormessage={ageInvalid ? ageErrorId : undefined} aria-invalid={ageInvalid} max={MAX_CANDIDATE_AGE} min="0" name={draft.ageMin === undefined ? undefined : "idadeMin"} onChange={(event) => update("ageMin", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.ageMin ?? ""} /></label>
+                <label>Idade máxima<input aria-describedby={ageInvalid ? ageErrorId : undefined} aria-errormessage={ageInvalid ? ageErrorId : undefined} aria-invalid={ageInvalid} max={MAX_CANDIDATE_AGE} min="0" name={draft.ageMax === undefined ? undefined : "idadeMax"} onChange={(event) => update("ageMax", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.ageMax ?? ""} /></label>
               </div>
-              {ageInvalid ? <p className="advancedFilters__error" id={ageErrorId} role="alert">A idade mínima deve ser menor ou igual à idade máxima.</p> : null}
+              {ageInvalid ? <p className="advancedFilters__error" id={ageErrorId} role="alert">{ageBoundsInvalid ? `Informe idades entre 0 e ${MAX_CANDIDATE_AGE} anos.` : "A idade mínima deve ser menor ou igual à idade máxima."}</p> : null}
               <ChoiceList label="Gênero" name="genero" onChange={(values) => update("genders", values)} options={options.genders} selected={draft.genders} />
               <ChoiceList label="Raça ou cor" name="raca" onChange={(values) => update("races", values)} options={options.races} selected={draft.races} />
               <ChoiceList label="Escolaridade" name="escolaridade" onChange={(values) => update("educations", values)} options={options.educations} searchLabel="Pesquisar escolaridade" searchable selected={draft.educations} />
@@ -447,24 +485,24 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
             <FilterSection id={`${titleId}-patrimonio`} title="Patrimônio">
               <RadioList label="Declarou bens" name="declarouBens" onChange={(value) => update("declaredAssets", value as CandidateFilters["declaredAssets"])} options={[{ value: "", label: "Qualquer situação" }, { value: "yes", label: "Com bens declarados" }, { value: "no", label: "Sem bens declarados" }]} selected={draft.declaredAssets} />
               <div className="advancedFilters__fields advancedFilters__fields--two">
-                <label>Patrimônio mínimo<input aria-describedby={assetValueInvalid ? assetValueErrorId : undefined} aria-errormessage={assetValueInvalid ? assetValueErrorId : undefined} aria-invalid={assetValueInvalid} inputMode="decimal" name={moneyInputs.assetMinCents ? "patrimonioMin" : undefined} onChange={(event) => updateMoney("assetMinCents", event.currentTarget.value)} placeholder="0,00" type="text" value={moneyInputs.assetMinCents} /></label>
-                <label>Patrimônio máximo<input aria-describedby={assetValueInvalid ? assetValueErrorId : undefined} aria-errormessage={assetValueInvalid ? assetValueErrorId : undefined} aria-invalid={assetValueInvalid} inputMode="decimal" name={moneyInputs.assetMaxCents ? "patrimonioMax" : undefined} onChange={(event) => updateMoney("assetMaxCents", event.currentTarget.value)} placeholder="0,00" type="text" value={moneyInputs.assetMaxCents} /></label>
-                <label>Quantidade mínima de bens<input aria-describedby={assetCountInvalid ? assetCountErrorId : undefined} aria-errormessage={assetCountInvalid ? assetCountErrorId : undefined} aria-invalid={assetCountInvalid} min="0" name={draft.assetCountMin === undefined ? undefined : "quantidadeBensMin"} onChange={(event) => update("assetCountMin", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.assetCountMin ?? ""} /></label>
-                <label>Quantidade máxima de bens<input aria-describedby={assetCountInvalid ? assetCountErrorId : undefined} aria-errormessage={assetCountInvalid ? assetCountErrorId : undefined} aria-invalid={assetCountInvalid} min="0" name={draft.assetCountMax === undefined ? undefined : "quantidadeBensMax"} onChange={(event) => update("assetCountMax", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.assetCountMax ?? ""} /></label>
+                <label>Patrimônio mínimo<input aria-describedby={assetValueInvalid ? assetValueErrorId : undefined} aria-errormessage={assetValueInvalid ? assetValueErrorId : undefined} aria-invalid={assetValueInvalid} inputMode="decimal" onChange={(event) => updateMoney("assetMinCents", event.currentTarget.value)} placeholder="0,00" type="text" value={moneyInputs.assetMinCents} /></label>
+                <label>Patrimônio máximo<input aria-describedby={assetValueInvalid ? assetValueErrorId : undefined} aria-errormessage={assetValueInvalid ? assetValueErrorId : undefined} aria-invalid={assetValueInvalid} inputMode="decimal" onChange={(event) => updateMoney("assetMaxCents", event.currentTarget.value)} placeholder="0,00" type="text" value={moneyInputs.assetMaxCents} /></label>
+                <label>Quantidade mínima de bens<input aria-describedby={assetCountInvalid ? assetCountErrorId : undefined} aria-errormessage={assetCountInvalid ? assetCountErrorId : undefined} aria-invalid={assetCountInvalid} max={MAX_CANDIDATE_ASSET_COUNT} min="0" name={draft.assetCountMin === undefined ? undefined : "quantidadeBensMin"} onChange={(event) => update("assetCountMin", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.assetCountMin ?? ""} /></label>
+                <label>Quantidade máxima de bens<input aria-describedby={assetCountInvalid ? assetCountErrorId : undefined} aria-errormessage={assetCountInvalid ? assetCountErrorId : undefined} aria-invalid={assetCountInvalid} max={MAX_CANDIDATE_ASSET_COUNT} min="0" name={draft.assetCountMax === undefined ? undefined : "quantidadeBensMax"} onChange={(event) => update("assetCountMax", event.currentTarget.value ? Number(event.currentTarget.value) : undefined)} type="number" value={draft.assetCountMax ?? ""} /></label>
               </div>
               {assetValueInvalid ? <p className="advancedFilters__error" id={assetValueErrorId} role="alert">{assetValueSyntaxInvalid ? "Informe valores de patrimônio em reais, usando apenas números e centavos." : "O patrimônio mínimo deve ser menor ou igual ao patrimônio máximo."}</p> : null}
-              {assetCountInvalid ? <p className="advancedFilters__error" id={assetCountErrorId} role="alert">A quantidade mínima deve ser menor ou igual à quantidade máxima.</p> : null}
+              {assetCountInvalid ? <p className="advancedFilters__error" id={assetCountErrorId} role="alert">{assetCountBoundsInvalid ? `Informe quantidades de bens entre 0 e ${MAX_CANDIDATE_ASSET_COUNT.toLocaleString("pt-BR")}.` : "A quantidade mínima deve ser menor ou igual à quantidade máxima."}</p> : null}
               <ChoiceList label="Categorias de bens" name="categoriaBem" onChange={(values) => update("assetCategories", values)} options={options.assetCategories} searchLabel="Pesquisar categorias de bens" searchable selected={draft.assetCategories} />
             </FilterSection>
 
             <FilterSection id={`${titleId}-campanha`} title="Campanha">
               <div className="advancedFilters__fields advancedFilters__fields--two">
-                <label>Receita mínima<input aria-describedby={revenueInvalid ? revenueErrorId : undefined} aria-errormessage={revenueInvalid ? revenueErrorId : undefined} aria-invalid={revenueInvalid} inputMode="decimal" name={moneyInputs.revenueMinCents ? "receitaMin" : undefined} onChange={(event) => updateMoney("revenueMinCents", event.currentTarget.value)} type="text" value={moneyInputs.revenueMinCents} /></label>
-                <label>Receita máxima<input aria-describedby={revenueInvalid ? revenueErrorId : undefined} aria-errormessage={revenueInvalid ? revenueErrorId : undefined} aria-invalid={revenueInvalid} inputMode="decimal" name={moneyInputs.revenueMaxCents ? "receitaMax" : undefined} onChange={(event) => updateMoney("revenueMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.revenueMaxCents} /></label>
-                <label>Despesa mínima<input aria-describedby={expenseInvalid ? expenseErrorId : undefined} aria-errormessage={expenseInvalid ? expenseErrorId : undefined} aria-invalid={expenseInvalid} inputMode="decimal" name={moneyInputs.expenseMinCents ? "despesaMin" : undefined} onChange={(event) => updateMoney("expenseMinCents", event.currentTarget.value)} type="text" value={moneyInputs.expenseMinCents} /></label>
-                <label>Despesa máxima<input aria-describedby={expenseInvalid ? expenseErrorId : undefined} aria-errormessage={expenseInvalid ? expenseErrorId : undefined} aria-invalid={expenseInvalid} inputMode="decimal" name={moneyInputs.expenseMaxCents ? "despesaMax" : undefined} onChange={(event) => updateMoney("expenseMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.expenseMaxCents} /></label>
-                <label>Saldo mínimo<input aria-describedby={balanceInvalid ? balanceErrorId : undefined} aria-errormessage={balanceInvalid ? balanceErrorId : undefined} aria-invalid={balanceInvalid} inputMode="decimal" name={moneyInputs.balanceMinCents ? "saldoMin" : undefined} onChange={(event) => updateMoney("balanceMinCents", event.currentTarget.value)} type="text" value={moneyInputs.balanceMinCents} /></label>
-                <label>Saldo máximo<input aria-describedby={balanceInvalid ? balanceErrorId : undefined} aria-errormessage={balanceInvalid ? balanceErrorId : undefined} aria-invalid={balanceInvalid} inputMode="decimal" name={moneyInputs.balanceMaxCents ? "saldoMax" : undefined} onChange={(event) => updateMoney("balanceMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.balanceMaxCents} /></label>
+                <label>Receita mínima<input aria-describedby={revenueInvalid ? revenueErrorId : undefined} aria-errormessage={revenueInvalid ? revenueErrorId : undefined} aria-invalid={revenueInvalid} inputMode="decimal" onChange={(event) => updateMoney("revenueMinCents", event.currentTarget.value)} type="text" value={moneyInputs.revenueMinCents} /></label>
+                <label>Receita máxima<input aria-describedby={revenueInvalid ? revenueErrorId : undefined} aria-errormessage={revenueInvalid ? revenueErrorId : undefined} aria-invalid={revenueInvalid} inputMode="decimal" onChange={(event) => updateMoney("revenueMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.revenueMaxCents} /></label>
+                <label>Despesa mínima<input aria-describedby={expenseInvalid ? expenseErrorId : undefined} aria-errormessage={expenseInvalid ? expenseErrorId : undefined} aria-invalid={expenseInvalid} inputMode="decimal" onChange={(event) => updateMoney("expenseMinCents", event.currentTarget.value)} type="text" value={moneyInputs.expenseMinCents} /></label>
+                <label>Despesa máxima<input aria-describedby={expenseInvalid ? expenseErrorId : undefined} aria-errormessage={expenseInvalid ? expenseErrorId : undefined} aria-invalid={expenseInvalid} inputMode="decimal" onChange={(event) => updateMoney("expenseMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.expenseMaxCents} /></label>
+                <label>Saldo mínimo<input aria-describedby={balanceInvalid ? balanceErrorId : undefined} aria-errormessage={balanceInvalid ? balanceErrorId : undefined} aria-invalid={balanceInvalid} inputMode="decimal" onChange={(event) => updateMoney("balanceMinCents", event.currentTarget.value)} type="text" value={moneyInputs.balanceMinCents} /></label>
+                <label>Saldo máximo<input aria-describedby={balanceInvalid ? balanceErrorId : undefined} aria-errormessage={balanceInvalid ? balanceErrorId : undefined} aria-invalid={balanceInvalid} inputMode="decimal" onChange={(event) => updateMoney("balanceMaxCents", event.currentTarget.value)} type="text" value={moneyInputs.balanceMaxCents} /></label>
               </div>
               {revenueInvalid ? <p className="advancedFilters__error" id={revenueErrorId} role="alert">{revenueSyntaxInvalid ? "Informe valores de receita em reais, usando apenas números e centavos." : "A receita mínima deve ser menor ou igual à receita máxima."}</p> : null}
               {expenseInvalid ? <p className="advancedFilters__error" id={expenseErrorId} role="alert">{expenseSyntaxInvalid ? "Informe valores de despesa em reais, usando apenas números e centavos." : "A despesa mínima deve ser menor ou igual à despesa máxima."}</p> : null}
@@ -503,7 +541,7 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
                   <input checked={draft.followedOnly ?? false} disabled={!authenticated} name="acompanhando" onChange={(event) => update("followedOnly", event.currentTarget.checked || undefined)} type="checkbox" value="1" />
                   <span>Somente candidatos seguidos</span>
                 </label>
-                {!authenticated ? <a href={`/entrar?next=${encodeURIComponent(buildCandidateHref({ ...draft, followedOnly: true }, 1))}`}>Entrar para usar este filtro</a> : null}
+                {!authenticated ? <a href={`/entrar?next=${encodeURIComponent(loginTarget)}`}>Entrar para usar este filtro</a> : null}
               </fieldset>
             </FilterSection>
 
@@ -519,7 +557,7 @@ export function CandidateAdvancedFilters({ authenticated, filters, options }: Re
             <p aria-live="polite" role="status">{countMessage}</p>
             <div>
               <a className="advancedFilters__clear" href={draft.allBrazil ? "/candidatos?abrangencia=brasil" : "/candidatos"}>Limpar tudo</a>
-              <button className="advancedFilters__apply" disabled={rangeInvalid} type="submit">
+              <button className="advancedFilters__apply" disabled={filtersInvalid} type="submit">
                 {lastValidCount === undefined ? "Aplicar filtros" : `Ver ${lastValidCount.toLocaleString("pt-BR")} ${lastValidCount === 1 ? "candidatura" : "candidaturas"}`}
               </button>
             </div>

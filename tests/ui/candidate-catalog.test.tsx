@@ -162,6 +162,34 @@ describe("candidate catalog", () => {
     expect(params.has("pagina")).toBe(false);
   });
 
+  it("keeps every deduplicated official UF and party available in sorted standard selects", () => {
+    const regions = [
+      "TO", "SE", "SP", "SC", "RR", "RO", "RS", "RN", "RJ", "PI", "PE", "PR", "PB", "PA",
+      "MG", "MS", "MT", "MA", "GO", "ES", "DF", "CE", "BA", "AM", "AP", "AL", "AC", "BR", "SP",
+    ];
+    const parties = [...Array.from({ length: 25 }, (_, index) => `P${String(25 - index).padStart(2, "0")}`), "P25"];
+    renderFilters({}, true, undefined, { ...options, regions, parties });
+    const form = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
+    const region = within(form).getByRole("combobox", { name: "UF" }) as HTMLSelectElement;
+    const party = within(form).getByRole("combobox", { name: "Partido" }) as HTMLSelectElement;
+
+    expect([...region.options].map((option) => option.value)).toEqual([
+      "", "AC", "AL", "AM", "AP", "BA", "BR", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
+      "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+    ]);
+    expect([...party.options].map((option) => option.value)).toEqual([
+      "", "P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12",
+      "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P22", "P23", "P24", "P25",
+    ]);
+
+    fireEvent.change(region, { target: { value: "TO" } });
+    fireEvent.change(party, { target: { value: "P25" } });
+    fireEvent.submit(form);
+    const params = new URL(String(routerPush.mock.calls[0]?.[0]), "https://local.invalid").searchParams;
+    expect(params.get("uf")).toBe("TO");
+    expect(params.get("partido")).toBe("P25");
+  });
+
   it("keeps the Brazil opt-out across unrelated changes and clears it for an explicit UF", () => {
     renderFilters({ allBrazil: true, parties: ["ABC"] });
     const form = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
@@ -262,6 +290,69 @@ describe("candidate catalog", () => {
     expect(intended.get("acompanhando")).toBe("1");
   });
 
+  it("keeps an anonymous login return safe while the edited draft is invalid", () => {
+    renderFilters({ allBrazil: true, parties: ["ABC"] }, false);
+    const dialog = openAdvanced();
+    const countMaximum = within(dialog).getByLabelText("Quantidade máxima de bens");
+
+    fireEvent.change(countMaximum, { target: { value: "1000001" } });
+
+    expect(countMaximum).toHaveAttribute("aria-invalid", "true");
+    const errorId = countMaximum.getAttribute("aria-errormessage");
+    expect(errorId).toBeTruthy();
+    expect(document.getElementById(errorId!)).toHaveRole("alert");
+    expect(document.getElementById(errorId!)).toHaveTextContent("Informe quantidades de bens entre 0 e 1.000.000.");
+    expect(within(dialog).getByRole("button", { name: "Aplicar filtros" })).toBeDisabled();
+
+    const next = new URL(
+      within(dialog).getByRole("link", { name: "Entrar para usar este filtro" }).getAttribute("href")!,
+      "https://local.invalid",
+    ).searchParams.get("next")!;
+    const intended = new URL(next, "https://local.invalid").searchParams;
+    expect(intended.get("abrangencia")).toBe("brasil");
+    expect(intended.get("partido")).toBe("ABC");
+    expect(intended.get("acompanhando")).toBe("1");
+    expect(intended.has("quantidadeBensMax")).toBe(false);
+  });
+
+  it("exposes and enforces every numeric and monetary filter bound before preview or submit", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderFilters();
+    const dialog = openAdvanced();
+    const ageMinimum = within(dialog).getByLabelText("Idade mínima");
+    const ageMaximum = within(dialog).getByLabelText("Idade máxima");
+    const countMinimum = within(dialog).getByLabelText("Quantidade mínima de bens");
+    const countMaximum = within(dialog).getByLabelText("Quantidade máxima de bens");
+
+    expect(ageMinimum).toHaveAttribute("min", "0");
+    expect(ageMinimum).toHaveAttribute("max", "150");
+    expect(ageMaximum).toHaveAttribute("min", "0");
+    expect(ageMaximum).toHaveAttribute("max", "150");
+    expect(countMinimum).toHaveAttribute("min", "0");
+    expect(countMinimum).toHaveAttribute("max", "1000000");
+    expect(countMaximum).toHaveAttribute("min", "0");
+    expect(countMaximum).toHaveAttribute("max", "1000000");
+
+    ageMinimum.focus();
+    fireEvent.change(ageMinimum, { target: { value: "151" } });
+    fireEvent.change(countMaximum, { target: { value: "1000001" } });
+    fireEvent.change(within(dialog).getByLabelText("Patrimônio máximo"), { target: { value: "92233720368547758,08" } });
+
+    expect(ageMinimum).toHaveFocus();
+    expect(ageMinimum).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByText("Informe idades entre 0 e 150 anos.")).toHaveRole("alert");
+    expect(within(dialog).getByText("Informe quantidades de bens entre 0 e 1.000.000.")).toHaveRole("alert");
+    expect(within(dialog).getByText("Informe valores de patrimônio em reais, usando apenas números e centavos.")).toHaveRole("alert");
+    const apply = within(dialog).getByRole("button", { name: "Aplicar filtros" });
+    expect(apply).toBeDisabled();
+    expect(() => fireEvent.submit(apply.closest("form")!)).not.toThrow();
+    expect(routerPush).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("server-renders canonical names for advanced GET fallback controls", () => {
     renderFilters({
       allBrazil: true,
@@ -291,6 +382,24 @@ describe("candidate catalog", () => {
     expect(data.get("mandatoAtivo")).toBe("1");
     expect(data.get("ordem")).toBe("votes_desc");
     expect(data.has("pagina")).toBe(false);
+  });
+
+  it("normalizes localized money to exact dot-decimal values in native GET and router URLs", () => {
+    renderFilters({ assetMinCents: 9_223_372_036_854_775_807n, topics: ["Educação"] });
+    const quickForm = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
+    expect(new FormData(quickForm).get("patrimonioMin")).toBe("92233720368547758.07");
+
+    const dialog = openAdvanced();
+    const money = within(dialog).getByLabelText("Patrimônio mínimo");
+    expect(money).toHaveValue("92233720368547758,07");
+    fireEvent.change(money, { target: { value: "1234,56" } });
+
+    const form = money.closest("form")!;
+    expect(new FormData(form).getAll("patrimonioMin")).toEqual(["1234.56"]);
+    fireEvent.submit(form);
+    const href = new URL(String(routerPush.mock.calls.at(-1)?.[0]), "https://local.invalid");
+    expect(href.searchParams.get("patrimonioMin")).toBe("1234.56");
+    expect(href.searchParams.get("tema")).toBe("Educação");
   });
 
   it("debounces an exact wire-safe preview and strips pagination", async () => {
@@ -615,6 +724,9 @@ describe("candidate catalog", () => {
     view.rerender(<CandidateResults candidates={{ ...page, items: [], total: 0, totalPages: 1 }} filters={{ regions: ["ES"] }} snapshotExtractedAt={null} />);
     expect(screen.getByRole("heading", { name: "Nenhuma candidatura apareceu com esses filtros." })).toBeVisible();
     expect(screen.getByRole("link", { name: "Ver todas as candidaturas" })).toHaveAttribute("href", "/candidatos");
+
+    view.rerender(<CandidateResults candidates={{ ...page, items: [], total: 0, totalPages: 1 }} filters={{ allBrazil: true, parties: ["ABC"] }} snapshotExtractedAt={null} />);
+    expect(screen.getByRole("link", { name: "Ver todas as candidaturas" })).toHaveAttribute("href", "/candidatos?abrangencia=brasil");
   });
 
   it("keeps the ballot tab, one-column mobile catalog and reduced-motion safeguards in CSS", () => {

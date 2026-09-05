@@ -1,4 +1,5 @@
 import type { CandidateFilters, PublicCandidatePage } from "#/server/candidates/read-models";
+import { buildCandidateHref } from "#/server/candidates/search-params";
 import { CandidateCard } from "#/ui/candidate-card";
 import { CandidatePagination } from "#/ui/candidate-pagination";
 import { formatDateTime } from "#/ui/format";
@@ -8,6 +9,7 @@ export function CandidateResults({ candidates, filters, snapshotExtractedAt }: R
   filters: CandidateFilters;
   snapshotExtractedAt: string | null;
 }>) {
+  const resetHref = buildCandidateHref(filters.allBrazil ? { allBrazil: true } : {}, 1);
   return (
     <section aria-labelledby="candidate-results-title" className="feedResults candidateResults">
       <header className="resultsHeader">
@@ -32,7 +34,7 @@ export function CandidateResults({ candidates, filters, snapshotExtractedAt }: R
           <span aria-hidden="true">○</span>
           <h3>Nenhuma candidatura apareceu com esses filtros.</h3>
           <p>Remova um critério ou amplie a região para consultar outros registros oficiais.</p>
-          <a href="/candidatos">Ver todas as candidaturas</a>
+          <a href={resetHref}>Ver todas as candidaturas</a>
         </div>
       )}
       <CandidatePagination filters={filters} page={candidates.page} totalPages={candidates.totalPages} />

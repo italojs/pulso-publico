@@ -18,14 +18,16 @@ interface CandidateFiltersProps {
   regionOrigin?: CandidateRegionOrigin;
 }
 
-const MAX_QUICK_OPTIONS = 20;
+const optionCollator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
 
 function textOptions(catalog: readonly string[], selected: readonly string[]) {
   const available = new Set(catalog);
-  return [...new Set([...selected, ...catalog])].slice(0, selected.length + MAX_QUICK_OPTIONS).map((value) => ({
-    label: available.has(value) ? value : `${value} — indisponível`,
-    value,
-  }));
+  return [...new Set([...selected, ...catalog])]
+    .toSorted((left, right) => optionCollator.compare(left, right))
+    .map((value) => ({
+      label: available.has(value) ? value : `${value} — indisponível`,
+      value,
+    }));
 }
 
 function officeOptions(catalog: CandidateFilterOptions["offices"], selected: readonly CandidateOffice[]) {
