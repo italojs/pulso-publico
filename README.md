@@ -2,14 +2,14 @@
 
 MVP de acompanhamento da atividade legislativa federal brasileira, com dados oficiais da Câmara dos Deputados e do Senado Federal apresentados em linguagem acessível.
 
-O aplicativo oferece feed com busca e filtros, página completa de projeto com linha do tempo e votações, perfil neutro de parlamentar, acompanhamento sem cadastro e alertas opcionais com conta. Somente o título amigável e a descrição curta podem ser gerados por IA; todos os demais fatos permanecem vinculados à fonte oficial.
+O aplicativo oferece feed com busca e filtros, página completa de projeto com linha do tempo e votações, perfis neutros de parlamentares e candidaturas, comparação de candidaturas e acompanhamento vinculado a uma conta. Somente o título amigável e a descrição curta podem ser gerados por IA; todos os demais fatos permanecem vinculados à fonte oficial.
 
 ## Requisitos
 
 - Node.js 26.8.1 (`.node-version` e `.nvmrc`);
 - npm 11;
 - PostgreSQL 18, local ou via Docker;
-- cerca de 2 GB livres para uma carga local móvel de 36 meses, com folga para índices e crescimento.
+- cerca de 2 GB livres para a carga legislativa móvel de 36 meses e ao menos 10 GB adicionais para sincronizar e manter a mídia eleitoral de 2026 com folga para a geração atômica seguinte.
 
 ## Início rápido
 
@@ -19,6 +19,7 @@ docker compose up -d
 npm install
 npm run db:migrate
 npm run sync
+npm run sync:election
 npm run dev
 ```
 
@@ -48,9 +49,11 @@ npm run alerts:dispatch
 - `summaries`: geração opcional em lote, ignorada com segurança sem chave;
 - `alerts:dispatch`: reenvio dos pushes pendentes, também inofensivo sem VAPID.
 
-Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a cada 30 minutos e `npm run reconcile -- --source=all` uma vez ao dia. Ambos usam advisory lock no PostgreSQL para impedir execuções concorrentes.
+Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a cada 30 minutos e `npm run reconcile -- --source=all` uma vez ao dia. A página oficial de estatísticas eleitorais informa quatro atualizações diárias para os conjuntos de 2026; programe `npm run sync:election` depois dessas janelas conforme a capacidade de rede e armazenamento. Os sincronizadores usam advisory lock no PostgreSQL para impedir execuções concorrentes.
 
-O sincronizador eleitoral também usa advisory lock no PostgreSQL, baixa os seis recursos tabulares e os arquivos regionais de fotos, propostas de governo e certidões, e só troca o retrato público depois que toda a carga foi validada. `ELECTORAL_MEDIA_DIRECTORY` é resolvido como caminho absoluto na inicialização e precisa apontar para um volume persistente em produção. Uma falha preserva o último retrato e sua geração de mídia. O TSE não exige chave de API.
+O sincronizador eleitoral baixa os seis recursos tabulares de candidaturas, complementos, bens, coligações, redes sociais e prestação de contas, além dos 84 arquivos regionais de fotos, propostas de governo e certidões (Brasil e 27 unidades federativas para cada tipo de mídia). A carga real validada em setembro de 2026 transferiu aproximadamente 3,5 GB de arquivos compactados. `ELECTORAL_MEDIA_DIRECTORY` é resolvido como caminho absoluto na inicialização e precisa apontar para um volume persistente em produção. A aplicação só troca o retrato público depois que toda a carga foi validada; uma falha preserva o último retrato e sua geração de mídia. O TSE não exige chave de API.
+
+As consultas públicas usam exclusivamente a geração do último sincronismo eleitoral bem-sucedido. Verifique os horários de extração e conferência exibidos nas telas e monitore falhas do job: enquanto a fonte estiver indisponível ou uma carga for rejeitada, o retrato anterior continua íntegro, mas fica naturalmente mais antigo. Antes da primeira carga, aplique `npm run db:migrate` e confirme espaço suficiente tanto para a geração publicada quanto para a próxima geração em staging.
 
 Vínculos sugeridos entre candidatura e mandato permanecem pendentes e não aparecem publicamente até revisão explícita. O operador confirma ou rejeita uma correspondência usando somente identificadores públicos e uma evidência oficial:
 
@@ -61,11 +64,20 @@ npm run candidates:link -- reject --year=2026 --candidate=260001234567 --source=
 
 Os comandos imprimem apenas um resultado JSON sanitizado; nenhuma linha bruta do TSE é exibida. Nesta entrega, apenas `ELECTION_YEAR=2026` é aceito em execução. Use `GEO_PROVIDER=none` em desenvolvimento local.
 
+## Catálogo de candidaturas
+
+- `/candidatos` lista o retrato nacional de 2026 com busca, filtros rápidos e avançados, chips removíveis e paginação. `GEO_PROVIDER=cloudflare` ou `vercel` pode sugerir uma UF em produção; `none` mantém Brasil inteiro e é obrigatório para o comportamento previsível em desenvolvimento local.
+- `/candidatos/2026/<id público do TSE>` abre o dossiê neutro com foto ou fallback, situação, bens, finanças, redes, proposta, certidões e proveniência oficial. Valor zero é preservado como zero; campo ausente continua “não informado”.
+- `/candidatos/comparar?candidato=2026:<id>&candidato=2026:<id>` compara até três candidaturas compatíveis. A seleção pode atravessar páginas do catálogo; a tela apresenta fatos lado a lado, sem nota, ranking ou recomendação de voto.
+- O botão **Seguir candidatura** exige sessão e redireciona visitantes para entrar ou criar conta com o retorno preservado. Acompanhamentos são exclusivos da conta autenticada, aparecem em `/seguindo` e nunca são compartilhados com outra conta.
+
+O histórico legislativo no perfil só aparece para vínculos revisados e confirmados pelo operador. Sugestões pendentes e rejeições permanecem privadas e não alteram o catálogo público.
+
 ## Dados e privacidade
 
 - A carga local inicial usa uma janela móvel de 36 meses (`INITIAL_HISTORY_MONTHS=36`).
 - Documentos e anexos permanecem nas fontes oficiais; o banco guarda dados estruturados e links.
-- Seguir projetos ou parlamentares exige uma conta. Acompanhamentos antigos que ainda estejam salvos no navegador são migrados de forma idempotente no primeiro acesso autenticado e, depois, removidos do armazenamento local.
+- Seguir projetos, parlamentares ou candidaturas exige uma conta. Acompanhamentos antigos de projetos ou parlamentares que ainda estejam salvos no navegador são migrados de forma idempotente no primeiro acesso autenticado e, depois, removidos do armazenamento local.
 - Senhas usam `scrypt`; tokens de sessão ficam em cookie `HttpOnly` e somente seus hashes são armazenados.
 
 ## Filtros avançados do feed
