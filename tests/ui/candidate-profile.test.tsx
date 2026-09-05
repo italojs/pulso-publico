@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PublicCandidateDetail } from "#/server/candidates/read-models";
@@ -284,6 +284,18 @@ describe("candidate analytical profile", () => {
     expect(within(provenance).getByText("Redes sociais")).toBeVisible();
     expect(provenance).toHaveTextContent("Planos e certidões");
     expect(view.container).not.toHaveTextContent(/gerado por IA|ranking|melhor candidato/i);
+  });
+
+  it("replaces a failed official portrait with the neutral accessible fallback", () => {
+    render(<CandidateProfile candidate={detail} />);
+
+    fireEvent.error(screen.getByRole("img", { name: "Foto oficial de ANA CIDADÃ" }));
+
+    expect(screen.queryByRole("img", { name: "Foto oficial de ANA CIDADÃ" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", {
+      name: "Foto oficial não disponibilizada para ANA CIDADÃ",
+    })).toBeVisible();
+    expect(screen.getByText("Foto oficial ainda não disponibilizada pelo TSE")).toBeVisible();
   });
 
   it("explains every unavailable official block without converting absence to zero", () => {

@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { UserRepository } from "#/auth/user-repository";
@@ -19,6 +22,7 @@ import {
   users,
   voteEvents,
 } from "#/server/db/schema";
+import * as databaseSchema from "#/server/db/schema";
 import {
   countCandidates,
   getCandidateDetail,
@@ -338,6 +342,71 @@ async function ids(filters: Parameters<typeof listCandidates>[1], userId?: strin
   return page.items.map((item) => item.externalId);
 }
 
+type CandidateDatabase = Parameters<typeof getCandidateDetail>[0];
+
+function pauseFirstSelectAfterResolution(
+  database: CandidateDatabase,
+  onFirstSelect: () => void,
+  resume: Promise<void>,
+): CandidateDatabase {
+  let firstSelect = true;
+
+  function wrapQueryChain<T extends object>(chain: T): T {
+    return new Proxy(chain, {
+      get(target, property) {
+        const member = Reflect.get(target, property, target) as unknown;
+        if (property === "then" && typeof member === "function") {
+          return (
+            onFulfilled?: (value: unknown) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => Reflect.apply(member, target, [
+            (value: unknown) => {
+              onFirstSelect();
+              return resume.then(() => onFulfilled ? onFulfilled(value) : value);
+            },
+            onRejected,
+          ]);
+        }
+        if (typeof member !== "function") return member;
+        return (...args: unknown[]) => {
+          const result = Reflect.apply(member, target, args) as unknown;
+          return result !== null && typeof result === "object"
+            ? wrapQueryChain(result)
+            : result;
+        };
+      },
+    });
+  }
+
+  function wrapExecutor<T extends object>(executor: T): T {
+    return new Proxy(executor, {
+      get(target, property) {
+        const member = Reflect.get(target, property, target) as unknown;
+        if (property === "select" && typeof member === "function") {
+          return (...args: unknown[]) => {
+            const selection = Reflect.apply(member, target, args) as object;
+            if (!firstSelect) return selection;
+            firstSelect = false;
+            return wrapQueryChain(selection);
+          };
+        }
+        if (property === "transaction" && typeof member === "function") {
+          return (
+            callback: (transaction: object) => Promise<unknown>,
+            config?: unknown,
+          ) => Reflect.apply(member, target, [
+            (transaction: object) => callback(wrapExecutor(transaction)),
+            config,
+          ]);
+        }
+        return typeof member === "function" ? member.bind(target) : member;
+      },
+    });
+  }
+
+  return wrapExecutor(database) as CandidateDatabase;
+}
+
 describe("candidate catalog queries", () => {
   it("exposes only candidates from the latest successful snapshot", async () => {
     const page = await listCandidates(testDb, { order: "name" });
@@ -552,6 +621,63 @@ describe("candidate catalog queries", () => {
     expect(pending?.history).toBeNull();
     expect(pending?.projectCount).toBe(0);
     expect(pending?.voteCount).toBe(0);
+  });
+
+  it("reads one coherent snapshot while a newer successful snapshot is published", async () => {
+    const publisherSql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    const publisherDb = drizzle(publisherSql, { schema: databaseSchema });
+    let markFirstSelect!: () => void;
+    const firstSelectFinished = new Promise<void>((resolve) => { markFirstSelect = resolve; });
+    let resumeDetail!: () => void;
+    const resume = new Promise<void>((resolve) => { resumeDetail = resolve; });
+    const database = pauseFirstSelectAfterResolution(testDb, markFirstSelect, resume);
+    const detailPromise = getCandidateDetail(database, 2026, "1010");
+
+    try {
+      await firstSelectFinished;
+      await publisherDb.transaction(async (transaction) => {
+        await transaction.insert(electoralSyncRuns).values({
+          syncRunId: "newer-2026",
+          electionYear: 2026,
+          status: "successful",
+          startedAt: new Date("2026-09-05T13:00:00.000Z"),
+          completedAt: new Date("2026-09-05T13:01:00.000Z"),
+          extractedAt: new Date("2026-09-05T12:30:00.000Z"),
+        });
+        await transaction.update(electoralCandidates).set({
+          snapshotRunId: "newer-2026",
+          ballotName: "Ana do retrato novo",
+          sourceExtractedAt: new Date("2026-09-05T12:30:00.000Z"),
+          checkedAt: new Date("2026-09-05T13:01:00.000Z"),
+        }).where(eq(electoralCandidates.id, seeded.ana.id));
+        await transaction.delete(candidateAssets).where(eq(candidateAssets.candidateId, seeded.ana.id));
+        await transaction.insert(candidateAssets).values({
+          candidateId: seeded.ana.id,
+          category: "Retrato novo",
+          description: "Bem publicado no retrato mais recente",
+          valueCents: 777n,
+          sourceExtractedAt: new Date("2026-09-05T12:30:00.000Z"),
+          checkedAt: new Date("2026-09-05T13:01:00.000Z"),
+        });
+      });
+      resumeDetail();
+
+      const detail = await detailPromise;
+
+      expect(detail).toMatchObject({
+        ballotName: "Ana Cidadã",
+        assetTotalCents: "10000",
+      });
+      expect(detail?.assets.map((asset) => [asset.category, asset.valueCents])).toEqual([
+        ["Imóvel", "10000"],
+        ["Veículo", "0"],
+      ]);
+      expect(detail?.assets.some((asset) => asset.category === "Retrato novo")).toBe(false);
+    } finally {
+      resumeDetail();
+      await detailPromise.catch(() => undefined);
+      await publisherSql.end({ timeout: 5 });
+    }
   });
 
   it("paginates distinct confirmed projects and individual votes independently", async () => {

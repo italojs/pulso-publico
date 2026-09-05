@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -171,12 +171,15 @@ describe("candidate official media route", () => {
     await testDb.insert(electoralSyncRuns).values({
       syncRunId: "current-media", electionYear: 2026, status: "successful", startedAt: checkedAt, completedAt: checkedAt, extractedAt,
     });
-    const [unsafe, missing, wrongMime] = await testDb.insert(electoralCandidates).values([
+    const directoryStorageKey = "current-media/photos/260001234572/directory.jpg";
+    await mkdir(join(root, directoryStorageKey), { recursive: true });
+    const [unsafe, missing, wrongMime, directory] = await testDb.insert(electoralCandidates).values([
       candidate("260001234569", "current-media", { photoStorageKey: "../../private.txt", photoMimeType: "image/jpeg", photoOriginalFilename: "foto.jpg" }),
       candidate("260001234570", "current-media", { photoStorageKey: "current-media/photos/260001234570/missing.jpg", photoMimeType: "image/jpeg", photoOriginalFilename: "missing.jpg" }),
       candidate("260001234571", "current-media", { photoStorageKey: "current-media/photos/260001234571/foto.jpg", photoMimeType: "text/html", photoOriginalFilename: "foto.jpg" }),
+      candidate("260001234572", "current-media", { photoStorageKey: directoryStorageKey, photoMimeType: "image/jpeg", photoOriginalFilename: "directory.jpg" }),
     ]).returning();
-    if (!unsafe || !missing || !wrongMime) throw new Error("negative media fixture failed");
+    if (!unsafe || !missing || !wrongMime || !directory) throw new Error("negative media fixture failed");
     const handler = createCandidateMediaHandler({
       resolveAsset: (segments) => resolveCandidateMediaAsset(testDb, segments),
       openAsset: (storageKey) => store.open(storageKey),
@@ -190,6 +193,7 @@ describe("candidate official media route", () => {
       ["candidate", "2026", "260001234569", "photo"],
       ["candidate", "2026", "260001234570", "photo"],
       ["candidate", "2026", "260001234571", "photo"],
+      ["candidate", "2026", "260001234572", "photo"],
     ]) {
       const response = await call(handler, segments);
       expect(response.status).toBe(404);

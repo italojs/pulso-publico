@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -106,6 +106,22 @@ describe("ElectoralMediaStore", () => {
 
     expect(() => store.open("unsafe-run/photos/260001234567/FC_260001234567_div.jpg"))
       .toThrowError(expect.objectContaining({ code: "UNSAFE_STORAGE_PATH" }));
+  });
+
+  it("rejects a non-regular inode at a valid key without leaking descriptors", async () => {
+    const { root, store } = await createStore();
+    const storageKey = "safe-run/photos/260001234567/directory.jpg";
+    await mkdir(join(root, storageKey), { recursive: true });
+    const descriptorsBefore = (await readdir("/dev/fd")).length;
+
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      expect(() => store.open(storageKey)).toThrowError(expect.objectContaining({
+        code: "UNSAFE_STORAGE_PATH",
+      }));
+    }
+
+    const descriptorsAfter = (await readdir("/dev/fd")).length;
+    expect(descriptorsAfter).toBeLessThanOrEqual(descriptorsBefore + 1);
   });
 
   it("rejects media whose extension and MIME do not match its kind", async () => {

@@ -1,4 +1,12 @@
-import { constants, createReadStream, lstatSync, openSync, type ReadStream } from "node:fs";
+import {
+  closeSync,
+  constants,
+  createReadStream,
+  fstatSync,
+  lstatSync,
+  openSync,
+  type ReadStream,
+} from "node:fs";
 import { lstat, mkdir, open, rename, rm, unlink } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -219,15 +227,27 @@ export class ElectoralMediaStore {
       throw storageError("UNSAFE_STORAGE_PATH");
     }
     assertNoSymlinkComponentsSync(this.#root, [runId, kind, candidateId, filename]);
-    let descriptor: number;
+    let descriptor: number | undefined;
     try {
       descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      if (!fstatSync(descriptor).isFile()) {
+        throw storageError("UNSAFE_STORAGE_PATH");
+      }
+      const stream = createReadStream(path, { fd: descriptor, autoClose: true });
+      descriptor = undefined;
+      return stream;
     } catch (error) {
+      if (descriptor !== undefined) {
+        try {
+          closeSync(descriptor);
+        } catch {
+          // The original open/fstat/stream error remains the stable public contract.
+        }
+      }
       if ((error as NodeJS.ErrnoException).code === "ELOOP") {
         throw storageError("UNSAFE_STORAGE_PATH");
       }
       throw error;
     }
-    return createReadStream(path, { fd: descriptor, autoClose: true });
   }
 }

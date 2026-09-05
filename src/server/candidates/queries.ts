@@ -48,6 +48,7 @@ import {
 import type * as schema from "#/server/db/schema";
 
 type Database = PostgresJsDatabase<typeof schema>;
+type CandidateDetailTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export class CandidateAuthRequiredError extends Error {
   readonly code = "AUTH_REQUIRED" as const;
@@ -566,8 +567,8 @@ export async function listCandidateFilterOptions(database: Database): Promise<Ca
   };
 }
 
-export async function getCandidateDetail(
-  database: Database,
+async function getCandidateDetailFromSnapshot(
+  database: CandidateDetailTransaction,
   electionYear: number,
   externalId: string,
   pagination: CandidateDetailPagination = {},
@@ -847,6 +848,23 @@ export async function getCandidateDetail(
     ],
     history,
   };
+}
+
+export async function getCandidateDetail(
+  database: Database,
+  electionYear: number,
+  externalId: string,
+  pagination: CandidateDetailPagination = {},
+): Promise<PublicCandidateDetail | null> {
+  return database.transaction(
+    (transaction) => getCandidateDetailFromSnapshot(
+      transaction,
+      electionYear,
+      externalId,
+      pagination,
+    ),
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }
 
 export interface CandidateMediaAsset {

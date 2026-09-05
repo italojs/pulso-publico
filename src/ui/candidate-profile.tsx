@@ -4,6 +4,7 @@ import { candidateOfficeLabels } from "#/ui/candidate-office";
 import { CandidateFinance } from "#/ui/candidate-finance";
 import { CandidateHistory } from "#/ui/candidate-history";
 import { formatDateTime } from "#/ui/format";
+import { CandidatePortrait } from "#/ui/candidate-portrait";
 
 function value(value: string | number | null, fallback = "Não informado pelo TSE") {
   if (value === null || value === "") return fallback;
@@ -29,11 +30,7 @@ export function CandidateProfile({ candidate }: Readonly<{ candidate: PublicCand
       </nav>
       <header className="candidateProfileHero">
         <div className="candidateProfileHero__portrait">
-          {candidate.photoUrl ? <img alt={`Foto oficial de ${candidate.ballotName}`} src={candidate.photoUrl} /> : (
-            <div aria-label={`Foto oficial não disponibilizada para ${candidate.ballotName}`} role="img">
-              <span aria-hidden="true">◇</span><small>Foto oficial ainda não disponibilizada pelo TSE</small>
-            </div>
-          )}
+          <CandidatePortrait ballotName={candidate.ballotName} photoUrl={candidate.photoUrl} />
           <strong aria-label={`Número de urna ${candidate.number}`}>{candidate.number}</strong>
         </div>
         <div className="candidateProfileHero__body">
