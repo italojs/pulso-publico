@@ -326,6 +326,52 @@ describe("TseOpenDataClient", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("requires the value column that corresponds to each expense subtype", async () => {
+    const cases = [
+      {
+        filename: "despesas_contratadas_candidatos_2026_ES.csv",
+        valueColumn: "VR_DESPESA_CONTRATADA",
+        accepted: true,
+      },
+      {
+        filename: "despesas_contratadas_candidatos_2026_ES.csv",
+        valueColumn: "VR_PAGTO",
+        accepted: false,
+      },
+      {
+        filename: "despesas_pagas_candidatos_2026_ES.csv",
+        valueColumn: "VR_PAGTO",
+        accepted: true,
+      },
+      {
+        filename: "despesas_pagas_candidatos_2026_ES.csv",
+        valueColumn: "VR_DESPESA_CONTRATADA",
+        accepted: false,
+      },
+    ] as const;
+
+    for (const fixture of cases) {
+      const client = new TseOpenDataClient({
+        fetch: fakeZipFetch([{
+          name: fixture.filename,
+          contents: `ANO_ELEICAO;SQ_CANDIDATO;${fixture.valueColumn}\r\n2026;260001234567;10,00\r\n`,
+        }]),
+        baseUrl: "https://cdn.tse.jus.br/",
+      });
+      const consumeRows = async () => {
+        const rows = [];
+        for await (const row of client.streamRows("campaignAccounts")) rows.push(row);
+        return rows;
+      };
+
+      if (fixture.accepted) {
+        await expect(consumeRows()).resolves.toHaveLength(1);
+      } else {
+        await expect(consumeRows()).rejects.toMatchObject({ code: "INVALID_TABULAR_SCHEMA" });
+      }
+    }
+  });
+
   it("rejects traversal before exposing a regional media entry", async () => {
     const client = new TseOpenDataClient({
       fetch: fakeZipFetch([{
@@ -431,6 +477,24 @@ describe("TseOpenDataClient", () => {
       }) as BodyInit, {
         status: 302,
         headers: { location: "https://example.org/archive.zip" },
+      }),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+
+    await expect(collectRows(client)).rejects.toMatchObject({
+      code: "UNSAFE_ARCHIVE_REDIRECT",
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it("cancels a redirect body when Location is syntactically invalid", async () => {
+    let cancelled = false;
+    const client = new TseOpenDataClient({
+      fetch: async () => new Response(new ReadableStream({
+        cancel() { cancelled = true; },
+      }) as BodyInit, {
+        status: 302,
+        headers: { location: "http://[" },
       }),
       baseUrl: "https://cdn.tse.jus.br/",
     });

@@ -141,9 +141,12 @@ function validateTabularHeaders(
   }
 
   if (resource === "campaignAccounts") {
-    const valueColumns = filename.toLocaleLowerCase("pt-BR").startsWith("receitas_")
+    const normalizedFilename = filename.toLocaleLowerCase("pt-BR");
+    const valueColumns = normalizedFilename.startsWith("receitas_")
       ? ["VR_RECEITA", "VR_RECEITA_BRUTA"]
-      : ["VR_DESPESA_CONTRATADA", "VR_DESPESA"];
+      : normalizedFilename.startsWith("despesas_contratadas_")
+        ? ["VR_DESPESA_CONTRATADA"]
+        : ["VR_PAGTO"];
     if (!valueColumns.some((column) => headerSet.has(column))) {
       throw new TseContractError("INVALID_TABULAR_SCHEMA");
     }
@@ -459,11 +462,15 @@ export class TseOpenDataClient {
           await cancelResponseBody(response);
           throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
         }
-        const redirectedUrl = new URL(location, url);
+        let redirectedUrl: URL;
         try {
+          redirectedUrl = new URL(location, url);
           assertOfficialUrl(redirectedUrl);
         } catch (error) {
           await cancelResponseBody(response);
+          if (error instanceof TypeError) {
+            throw new TseContractError("UNSAFE_ARCHIVE_REDIRECT");
+          }
           throw error;
         }
         await cancelResponseBody(response);
