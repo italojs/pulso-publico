@@ -83,7 +83,7 @@ export function assertCandidateFilterBounds(filters: Partial<CandidateFilters>, 
 }
 
 const allowedFilterKeys = new Set<keyof CandidateFilters>([
-  "query", "electionYears", "offices", "regions", "parties", "rounds", "statuses", "federations", "coalitions",
+  "allBrazil", "query", "electionYears", "offices", "regions", "parties", "rounds", "statuses", "federations", "coalitions",
   "ageMin", "ageMax", "genders", "races", "educations", "occupations", "declaredAssets",
   "assetMinCents", "assetMaxCents", "assetCountMin", "assetCountMax", "assetCategories",
   "revenueMinCents", "revenueMaxCents", "expenseMinCents", "expenseMaxCents", "balanceMinCents", "balanceMaxCents",
@@ -177,6 +177,10 @@ export function canonicalizeCandidateFilters(
   assign(result, "electionYears", canonicalArray(raw.electionYears, "electionYears", (value) => integerValue(value, "electionYears", 2026, 9999)));
   assign(result, "offices", canonicalArray(raw.offices, "offices", (value) => enumValue(value, "offices", CandidateOffice.options)));
   assign(result, "regions", canonicalArray(raw.regions, "regions", (value) => enumValue(value, "regions", CANDIDATE_REGION_VALUES)));
+  if (raw.allBrazil !== undefined && raw.allBrazil !== true) {
+    throw new TypeError("allBrazil must be true when present");
+  }
+  if (!result.regions?.length && raw.allBrazil === true) result.allBrazil = true;
   for (const key of [
     "parties", "statuses", "federations", "coalitions", "genders", "races", "educations", "occupations",
     "assetCategories", "topics",

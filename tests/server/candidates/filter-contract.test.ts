@@ -69,6 +69,7 @@ describe("candidate filter wire contract", () => {
       activeMandate: true,
       topics: ["Trabalho"],
       followedOnly: true,
+      allBrazil: true,
       order: "projects_desc",
       page: 1,
       pageSize: 20,
@@ -88,6 +89,12 @@ describe("candidate filter wire contract", () => {
     expect(candidateFilterRequestSchema.safeParse({ filters: { followedOnly: false } }).success).toBe(false);
     expect(toCandidateFilterInput({ followedOnly: false })).toEqual({});
     expect(toCandidateFilterInput({ followedOnly: true })).toEqual({ followedOnly: true });
+  });
+
+  it("preserves all-Brazil as non-filter request state and lets an explicit UF clear it", () => {
+    expect(parseCandidateFilterInput({ allBrazil: true })).toEqual({ allBrazil: true });
+    expect(toCandidateFilterInput({ allBrazil: true })).toEqual({ allBrazil: true });
+    expect(parseCandidateFilterInput({ allBrazil: true, regions: ["ES"] })).toEqual({ regions: ["ES"] });
   });
 
   it.each([

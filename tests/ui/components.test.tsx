@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation.js", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -46,6 +46,18 @@ describe("civic interface components", () => {
     expect(screen.getByRole("navigation", { name: "Navegação principal" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Pulso Público" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Seguindo" })).toHaveAttribute("href", "/seguindo");
+  });
+
+  it("places candidate discovery immediately beside projects in the primary navigation", () => {
+    const view = render(<SiteHeader />);
+
+    const links = within(within(view.container).getByRole("navigation", { name: "Navegação principal" }))
+      .getAllByRole("link");
+    expect(links.slice(0, 2).map((link) => ({ name: link.textContent, href: link.getAttribute("href") })))
+      .toEqual([
+        { name: "Projetos", href: "/" },
+        { name: "Candidatos", href: "/candidatos" },
+      ]);
   });
 
   it("describes the official source with text", () => {

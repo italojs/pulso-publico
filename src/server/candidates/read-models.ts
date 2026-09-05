@@ -12,8 +12,10 @@ export type CandidateOrder =
 
 export type CandidateFundingKind = "public" | "private" | "own";
 export type CandidateLawmakerHouse = "camara" | "senado";
+export type CandidateRegionOrigin = "ip" | "url" | undefined;
 
 export interface CandidateFilters {
+  allBrazil?: true;
   query?: string;
   electionYears?: number[];
   offices?: CandidateOffice[];

@@ -150,6 +150,31 @@ describe("candidate search params", () => {
     expect(buildCandidateHref({ followedOnly: false, hasPhoto: false }, 1)).toBe("/candidatos?comFoto=0");
   });
 
+  it("round-trips the explicit all-Brazil state without counting it as a filter", () => {
+    const parsed = parseCandidateSearchParams({ abrangencia: "brasil", pagina: "2" });
+
+    expect(parsed).toEqual({ allBrazil: true, page: 2, pageSize: 20 });
+    expect(buildCandidateHref(parsed, 2)).toBe("/candidatos?abrangencia=brasil&pagina=2");
+    expect(countCandidateFilters(parsed)).toBe(0);
+    expect(parseCandidateFilterInput(toCandidateFilterInput(parsed))).toEqual(parsed);
+  });
+
+  it("gives an explicit UF precedence over the all-Brazil state", () => {
+    expect(parseCandidateSearchParams({ uf: "ES", abrangencia: "brasil" })).toEqual({
+      regions: ["ES"],
+      page: 1,
+      pageSize: 20,
+    });
+    expect(buildCandidateHref({ regions: ["SP"], allBrazil: true }, 1)).toBe("/candidatos?uf=SP");
+  });
+
+  it("ignores unsupported coverage values", () => {
+    expect(parseCandidateSearchParams({ abrangencia: ["mundo", "brasil"] })).toEqual({
+      page: 1,
+      pageSize: 20,
+    });
+  });
+
   it.each([
     [{ ageMin: -1 }],
     [{ ageMax: 151 }],
@@ -210,6 +235,7 @@ describe("candidate search params", () => {
     [{ parties: [""] }],
     [{ topics: Array.from({ length: 21 }, (_, index) => `Tema ${index}`) }],
     [{ hasPhoto: "yes" }],
+    [{ allBrazil: "yes" }],
   ] as Array<[Record<string, unknown>]>)("rejects invalid programmatic field contracts %#", (filters) => {
     expect(() => buildCandidateHref(filters as CandidateFilters, 1)).toThrow();
     expect(() => toCandidateFilterInput(filters as CandidateFilters)).toThrow();

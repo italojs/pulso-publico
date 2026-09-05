@@ -31,6 +31,7 @@ const positiveInteger = z.number().int().safe().positive();
 const money = z.string().refine((value) => reaisToCents(value) !== undefined, "Invalid non-negative reais value");
 
 export const candidateFilterInputSchema = z.object({
+  allBrazil: z.literal(true).optional(),
   query: text.optional(),
   electionYears: values(z.number().int().min(2026).max(9999)).optional(),
   offices: values(CandidateOffice).optional(),

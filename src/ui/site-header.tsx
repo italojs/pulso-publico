@@ -16,6 +16,7 @@ export function SiteHeader() {
         </a>
         <nav aria-label="Navegação principal" className="siteNav">
           <a href="/">Projetos</a>
+          <a href="/candidatos">Candidatos</a>
           <a href="/seguindo">
             <BookmarkIcon />
             <span>Seguindo</span>

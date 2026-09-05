@@ -118,6 +118,10 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   setArray(filters, "electionYears", integers(params.ano, 2026, 9999));
   setArray(filters, "offices", enums(params.cargo, CandidateOffice.options) as CandidateOfficeName[]);
   setArray(filters, "regions", enums(params.uf, CANDIDATE_REGION_VALUES));
+  const coverage = values(params.abrangencia);
+  if (!filters.regions?.length && coverage.length === 1 && coverage[0] === "brasil") {
+    filters.allBrazil = true;
+  }
   setArray(filters, "parties", texts(params.partido));
   setArray(filters, "rounds", integers(params.turno, 1, 9));
   setArray(filters, "statuses", texts(params.situacao));
@@ -177,6 +181,7 @@ function appendBoolean(params: URLSearchParams, key: string, selected: boolean |
 export function buildCandidateHref(filters: Partial<CandidateFilters>, page = filters.page ?? 1): string {
   filters = canonicalizeCandidateFilters(filters, page);
   const params = new URLSearchParams();
+  if (filters.allBrazil) params.set("abrangencia", "brasil");
   if (filters.query?.trim()) params.set("q", filters.query.trim().slice(0, MAX_TEXT_LENGTH));
   appendValues(params, "ano", filters.electionYears);
   appendValues(params, "cargo", filters.offices);
