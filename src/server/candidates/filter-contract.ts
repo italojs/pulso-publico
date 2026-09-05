@@ -4,26 +4,25 @@ import { currentUserFromCookie } from "#/auth/current-user";
 import type { UserRepository } from "#/auth/user-repository";
 import { CandidateOffice } from "#/domain/electoral";
 import {
-  assertCandidateFilterBounds,
+  canonicalizeCandidateFilters,
+  CANDIDATE_FUNDING_KIND_VALUES,
+  CANDIDATE_LAWMAKER_HOUSE_VALUES,
+  CANDIDATE_ORDER_VALUES,
+  CANDIDATE_REGION_VALUES,
   centsToReais,
   MAX_CANDIDATE_AGE,
   MAX_CANDIDATE_ASSET_COUNT,
+  MAX_CANDIDATE_FILTER_VALUES,
   MAX_CANDIDATE_PAGE,
   MAX_CANDIDATE_PAGE_SIZE,
+  MAX_CANDIDATE_TEXT_LENGTH,
   reaisToCents,
 } from "#/server/candidates/filter-validation";
 import type { CandidateFilters } from "#/server/candidates/read-models";
 
-const MAX_FILTER_VALUES = 20;
-const MAX_TEXT_LENGTH = 200;
+const MAX_FILTER_VALUES = MAX_CANDIDATE_FILTER_VALUES;
+const MAX_TEXT_LENGTH = MAX_CANDIDATE_TEXT_LENGTH;
 const MAX_REQUEST_BYTES = 65_536;
-const regionValues = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "BR",
-] as const;
-const orderValues = [
-  "name", "number", "updated", "assets_desc", "revenue_desc", "expenses_desc", "projects_desc", "votes_desc",
-] as const;
 
 const text = z.string().trim().min(1).max(MAX_TEXT_LENGTH);
 const values = <T extends z.ZodType>(schema: T) => z.array(schema).min(1).max(MAX_FILTER_VALUES);
@@ -35,7 +34,7 @@ export const candidateFilterInputSchema = z.object({
   query: text.optional(),
   electionYears: values(z.number().int().min(2026).max(9999)).optional(),
   offices: values(CandidateOffice).optional(),
-  regions: values(z.enum(regionValues)).optional(),
+  regions: values(z.enum(CANDIDATE_REGION_VALUES)).optional(),
   parties: values(text).optional(),
   rounds: values(z.number().int().min(1).max(9)).optional(),
   statuses: values(text).optional(),
@@ -59,18 +58,18 @@ export const candidateFilterInputSchema = z.object({
   expenseMax: money.optional(),
   balanceMin: money.optional(),
   balanceMax: money.optional(),
-  fundingKinds: values(z.enum(["public", "private", "own"])).optional(),
+  fundingKinds: values(z.enum(CANDIDATE_FUNDING_KIND_VALUES)).optional(),
   hasPhoto: z.boolean().optional(),
   hasSocial: z.boolean().optional(),
   hasGovernmentPlan: z.boolean().optional(),
   hasCertificates: z.boolean().optional(),
   hasFinance: z.boolean().optional(),
   hasConfirmedLawmaker: z.boolean().optional(),
-  lawmakerHouses: values(z.enum(["camara", "senado"])).optional(),
+  lawmakerHouses: values(z.enum(CANDIDATE_LAWMAKER_HOUSE_VALUES)).optional(),
   activeMandate: z.boolean().optional(),
   topics: values(text).optional(),
   followedOnly: z.literal(true).optional(),
-  order: z.enum(orderValues).optional(),
+  order: z.enum(CANDIDATE_ORDER_VALUES).optional(),
   page: positiveInteger.max(MAX_CANDIDATE_PAGE).optional(),
   pageSize: positiveInteger.max(MAX_CANDIDATE_PAGE_SIZE).optional(),
 }).strict().superRefine((input, context) => {
@@ -116,13 +115,12 @@ export function parseCandidateFilterInput(input: unknown): CandidateFilters {
     delete filters[wireKey];
     if (value !== undefined) filters[domainKey] = reaisToCents(value)!;
   }
-  return filters as CandidateFilters;
+  return canonicalizeCandidateFilters(filters as CandidateFilters);
 }
 
 export function toCandidateFilterInput(filters: CandidateFilters): CandidateFilterInput {
-  assertCandidateFilterBounds(filters);
-  const wire = { ...filters } as Record<string, unknown>;
-  if (!filters.followedOnly) delete wire.followedOnly;
+  const canonical = canonicalizeCandidateFilters(filters);
+  const wire = { ...canonical } as Record<string, unknown>;
   for (const [wireKey, domainKey] of moneyPairs) {
     const value = filters[domainKey];
     delete wire[domainKey];

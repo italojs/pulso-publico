@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CandidateFilters } from "#/server/candidates/read-models";
+import { parseCandidateFilterInput, toCandidateFilterInput } from "#/server/candidates/filter-contract";
 import {
   buildCandidateHref,
   countCandidateFilters,
@@ -191,5 +192,52 @@ describe("candidate search params", () => {
     };
 
     expect(parseCandidateSearchParams(rawFromHref(buildCandidateHref(filters, filters.page)))).toEqual(filters);
+  });
+
+  it.each([
+    [{ electionYears: [2025] }],
+    [{ electionYears: [2026.5] }],
+    [{ rounds: [0] }],
+    [{ rounds: [1.5] }],
+    [{ regions: ["ZZ"] }],
+    [{ offices: ["prefeito"] }],
+    [{ fundingKinds: ["unknown"] }],
+    [{ lawmakerHouses: ["congresso"] }],
+    [{ declaredAssets: "maybe" }],
+    [{ order: "best" }],
+    [{ query: "x".repeat(201) }],
+    [{ statuses: ["x".repeat(201)] }],
+    [{ parties: [""] }],
+    [{ topics: Array.from({ length: 21 }, (_, index) => `Tema ${index}`) }],
+    [{ hasPhoto: "yes" }],
+  ] as Array<[Record<string, unknown>]>)("rejects invalid programmatic field contracts %#", (filters) => {
+    expect(() => buildCandidateHref(filters as CandidateFilters, 1)).toThrow();
+    expect(() => toCandidateFilterInput(filters as CandidateFilters)).toThrow();
+  });
+
+  it("canonicalizes duplicate repeated values before enforcing the twenty-value cap", () => {
+    const parties = [...Array.from({ length: 20 }, (_, index) => ` Partido ${index} `), "Partido 0"];
+    const filters: CandidateFilters = {
+      electionYears: [2026, 2026],
+      offices: ["senador", "senador"],
+      regions: ["ES", "ES", "SP"],
+      parties,
+      rounds: [1, 1, 2],
+      statuses: [" APTO ", "APTO"],
+      fundingKinds: ["public", "public", "own"],
+      lawmakerHouses: ["camara", "camara", "senado"],
+    };
+
+    const fromUrl = parseCandidateSearchParams(rawFromHref(buildCandidateHref(filters, 1)));
+    const fromWire = parseCandidateFilterInput(toCandidateFilterInput(filters));
+
+    const expected = {
+      electionYears: [2026], offices: ["senador"], regions: ["ES", "SP"],
+      parties: Array.from({ length: 20 }, (_, index) => `Partido ${index}`),
+      rounds: [1, 2], statuses: ["APTO"], fundingKinds: ["public", "own"],
+      lawmakerHouses: ["camara", "senado"],
+    };
+    expect(fromUrl).toMatchObject(expected);
+    expect(fromWire).toMatchObject(expected);
   });
 });

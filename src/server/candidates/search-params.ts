@@ -1,12 +1,18 @@
 import { CandidateOffice, type CandidateOffice as CandidateOfficeName } from "#/domain/electoral";
 import type { CandidateFilters, CandidateOrder } from "#/server/candidates/read-models";
 import {
-  assertCandidateFilterBounds,
+  canonicalizeCandidateFilters,
+  CANDIDATE_FUNDING_KIND_VALUES,
+  CANDIDATE_LAWMAKER_HOUSE_VALUES,
+  CANDIDATE_ORDER_VALUES,
+  CANDIDATE_REGION_VALUES,
   centsToReais,
   MAX_CANDIDATE_AGE,
   MAX_CANDIDATE_ASSET_COUNT,
+  MAX_CANDIDATE_FILTER_VALUES,
   MAX_CANDIDATE_PAGE,
   MAX_CANDIDATE_PAGE_SIZE,
+  MAX_CANDIDATE_TEXT_LENGTH,
   reaisToCents,
 } from "#/server/candidates/filter-validation";
 
@@ -14,17 +20,8 @@ export { centsToReais, reaisToCents } from "#/server/candidates/filter-validatio
 
 export type CandidateRawSearchParams = Record<string, string | string[] | undefined>;
 
-const MAX_VALUES = 20;
-const MAX_TEXT_LENGTH = 200;
-const REGIONS = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "BR",
-] as const;
-const FUNDING_KINDS = ["public", "private", "own"] as const;
-const LAWMAKER_HOUSES = ["camara", "senado"] as const;
-const ORDERS = [
-  "name", "number", "updated", "assets_desc", "revenue_desc", "expenses_desc", "projects_desc", "votes_desc",
-] as const satisfies readonly CandidateOrder[];
+const MAX_VALUES = MAX_CANDIDATE_FILTER_VALUES;
+const MAX_TEXT_LENGTH = MAX_CANDIDATE_TEXT_LENGTH;
 
 function values(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
@@ -120,7 +117,7 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   if (query) filters.query = query;
   setArray(filters, "electionYears", integers(params.ano, 2026, 9999));
   setArray(filters, "offices", enums(params.cargo, CandidateOffice.options) as CandidateOfficeName[]);
-  setArray(filters, "regions", enums(params.uf, REGIONS));
+  setArray(filters, "regions", enums(params.uf, CANDIDATE_REGION_VALUES));
   setArray(filters, "parties", texts(params.partido));
   setArray(filters, "rounds", integers(params.turno, 1, 9));
   setArray(filters, "statuses", texts(params.situacao));
@@ -139,7 +136,7 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   setRange(filters, "revenueMinCents", "revenueMaxCents", money(params.receitaMin), money(params.receitaMax));
   setRange(filters, "expenseMinCents", "expenseMaxCents", money(params.despesaMin), money(params.despesaMax));
   setRange(filters, "balanceMinCents", "balanceMaxCents", money(params.saldoMin), money(params.saldoMax));
-  setArray(filters, "fundingKinds", enums(params.origemRecurso, FUNDING_KINDS));
+  setArray(filters, "fundingKinds", enums(params.origemRecurso, CANDIDATE_FUNDING_KIND_VALUES));
   for (const [key, parameter] of [
     ["hasPhoto", "comFoto"], ["hasSocial", "comRedes"], ["hasGovernmentPlan", "comProposta"],
     ["hasCertificates", "comCertidoes"], ["hasFinance", "comFinancas"],
@@ -148,10 +145,10 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
     const selected = boolean(params[parameter]);
     if (selected !== undefined) filters[key] = selected;
   }
-  setArray(filters, "lawmakerHouses", enums(params.casa, LAWMAKER_HOUSES));
+  setArray(filters, "lawmakerHouses", enums(params.casa, CANDIDATE_LAWMAKER_HOUSE_VALUES));
   setArray(filters, "topics", texts(params.tema));
   if (values(params.acompanhando)[0] === "1") filters.followedOnly = true;
-  const order = enums(params.ordem, ORDERS)[0];
+  const order = enums(params.ordem, CANDIDATE_ORDER_VALUES)[0] as CandidateOrder | undefined;
   if (order) filters.order = order;
   return filters;
 }
@@ -178,7 +175,7 @@ function appendBoolean(params: URLSearchParams, key: string, selected: boolean |
 }
 
 export function buildCandidateHref(filters: Partial<CandidateFilters>, page = filters.page ?? 1): string {
-  assertCandidateFilterBounds(filters, page);
+  filters = canonicalizeCandidateFilters(filters, page);
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set("q", filters.query.trim().slice(0, MAX_TEXT_LENGTH));
   appendValues(params, "ano", filters.electionYears);
