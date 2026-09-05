@@ -63,6 +63,25 @@ describe("auth HTTP handlers", () => {
     expect(response.headers.get("location")).toBe("https://app.example/seguindo");
   });
 
+  it("returns a valid login to the candidate profile that requested authentication", async () => {
+    const repository = {
+      findByEmail: vi.fn().mockResolvedValue({
+        id: "user-1",
+        email: "pessoa@example.com",
+        passwordHash: await hashPassword("uma senha bastante segura"),
+      }),
+      createSession: vi.fn().mockResolvedValue({ token: "opaque-token", expiresAt: new Date() }),
+    };
+    const response = await createLoginHandler(repository)(formRequest("/api/auth/login", {
+      email: "pessoa@example.com",
+      password: "uma senha bastante segura",
+      next: "/candidatos/2026/260001234567",
+    }));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://app.example/candidatos/2026/260001234567");
+  });
+
   it("rejects a cross-origin form submission", async () => {
     const repository = { findByEmail: vi.fn(), createSession: vi.fn() };
     const response = await createLoginHandler(repository)(formRequest("/api/auth/login", {

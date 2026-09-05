@@ -2,17 +2,49 @@ import { and, desc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type { LegislativeSourceName } from "#/domain/legislative";
-import { bills, followedBills, followedLawmakers, lawmakers } from "#/server/db/schema";
+import {
+  bills,
+  electoralCandidates,
+  electoralSyncRuns,
+  followedBills,
+  followedCandidates,
+  followedLawmakers,
+  lawmakers,
+} from "#/server/db/schema";
 import type * as schema from "#/server/db/schema";
 
 type Database = PostgresJsDatabase<typeof schema>;
 
-export type FollowReference = {
+export type LegislativeFollowReference = {
   kind: "bill" | "lawmaker";
   source: LegislativeSourceName;
   externalId: string;
   alertsEnabled?: boolean;
 };
+
+export type CandidateFollowReference = {
+  kind: "candidate";
+  electionYear: number;
+  externalId: string;
+};
+
+export type FollowReference = LegislativeFollowReference | CandidateFollowReference;
+
+function candidateOfficeLabel(office: string): string {
+  const words = office.replaceAll("_", " ");
+  return `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
+}
+
+function followItemKey(item: {
+  kind: "bill" | "candidate" | "lawmaker";
+  externalId: string;
+  source?: LegislativeSourceName;
+  electionYear?: number;
+}): string {
+  return item.kind === "candidate"
+    ? `candidate:${item.electionYear}:${item.externalId}`
+    : `${item.kind}:${item.source}:${item.externalId}`;
+}
 
 export class FollowRepository {
   private readonly database: Database;
@@ -22,6 +54,29 @@ export class FollowRepository {
   }
 
   async follow(userId: string, reference: FollowReference) {
+    if (reference.kind === "candidate") {
+      const latestSuccessful = this.database.select({
+        syncRunId: electoralSyncRuns.syncRunId,
+      }).from(electoralSyncRuns).where(and(
+        eq(electoralSyncRuns.electionYear, reference.electionYear),
+        eq(electoralSyncRuns.status, "successful"),
+      )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1)
+        .as("latest_successful_follow_run");
+      const [candidate] = await this.database.select({ id: electoralCandidates.id })
+        .from(electoralCandidates)
+        .innerJoin(latestSuccessful, eq(electoralCandidates.snapshotRunId, latestSuccessful.syncRunId))
+        .where(and(
+          eq(electoralCandidates.electionYear, reference.electionYear),
+          eq(electoralCandidates.externalId, reference.externalId),
+        ))
+        .limit(1);
+      if (!candidate) return false;
+      await this.database.insert(followedCandidates).values({
+        userId,
+        candidateId: candidate.id,
+      }).onConflictDoNothing();
+      return true;
+    }
     if (reference.kind === "bill") {
       const [bill] = await this.database.select({ id: bills.id }).from(bills).where(and(eq(bills.source, reference.source), eq(bills.externalId, reference.externalId))).limit(1);
       if (!bill) return false;
@@ -39,7 +94,7 @@ export class FollowRepository {
     return true;
   }
 
-  async sync(userId: string, references: FollowReference[]) {
+  async sync(userId: string, references: LegislativeFollowReference[]) {
     let synced = 0;
     for (const reference of references.slice(0, 200)) {
       if (await this.follow(userId, { ...reference, alertsEnabled: false })) synced += 1;
@@ -48,6 +103,22 @@ export class FollowRepository {
   }
 
   async unfollow(userId: string, reference: FollowReference) {
+    if (reference.kind === "candidate") {
+      const [candidate] = await this.database.select({ id: electoralCandidates.id })
+        .from(electoralCandidates)
+        .where(and(
+          eq(electoralCandidates.electionYear, reference.electionYear),
+          eq(electoralCandidates.externalId, reference.externalId),
+        ))
+        .limit(1);
+      if (candidate) {
+        await this.database.delete(followedCandidates).where(and(
+          eq(followedCandidates.userId, userId),
+          eq(followedCandidates.candidateId, candidate.id),
+        ));
+      }
+      return;
+    }
     if (reference.kind === "bill") {
       const [bill] = await this.database.select({ id: bills.id }).from(bills).where(and(eq(bills.source, reference.source), eq(bills.externalId, reference.externalId))).limit(1);
       if (bill) await this.database.delete(followedBills).where(and(eq(followedBills.userId, userId), eq(followedBills.billId, bill.id)));
@@ -58,7 +129,7 @@ export class FollowRepository {
   }
 
   async list(userId: string) {
-    const [billRows, lawmakerRows] = await Promise.all([
+    const [billRows, lawmakerRows, candidateRows] = await Promise.all([
       this.database
         .select({
           source: bills.source,
@@ -85,8 +156,22 @@ export class FollowRepository {
         .innerJoin(lawmakers, eq(followedLawmakers.lawmakerId, lawmakers.id))
         .where(eq(followedLawmakers.userId, userId))
         .orderBy(desc(followedLawmakers.createdAt)),
+      this.database
+        .select({
+          electionYear: electoralCandidates.electionYear,
+          externalId: electoralCandidates.externalId,
+          label: electoralCandidates.ballotName,
+          office: electoralCandidates.office,
+          party: electoralCandidates.partyAcronym,
+          region: electoralCandidates.region,
+          followedAt: followedCandidates.createdAt,
+        })
+        .from(followedCandidates)
+        .innerJoin(electoralCandidates, eq(followedCandidates.candidateId, electoralCandidates.id))
+        .where(eq(followedCandidates.userId, userId))
+        .orderBy(desc(followedCandidates.createdAt)),
     ]);
-    return [
+    const items = [
       ...billRows.map((item) => ({
         kind: "bill" as const,
         source: item.source,
@@ -107,6 +192,20 @@ export class FollowRepository {
         alertsEnabled: false,
         followedAt: item.followedAt.toISOString(),
       })),
-    ].sort((left, right) => right.followedAt.localeCompare(left.followedAt));
+      ...candidateRows.map((item) => ({
+        kind: "candidate" as const,
+        provider: "tse" as const,
+        electionYear: item.electionYear,
+        externalId: item.externalId,
+        label: item.label,
+        subtitle: [candidateOfficeLabel(item.office), item.party, item.region].filter(Boolean).join(" · "),
+        href: `/candidatos/${item.electionYear}/${encodeURIComponent(item.externalId)}`,
+        followedAt: item.followedAt.toISOString(),
+      })),
+    ];
+    return items.sort((left, right) => {
+      const chronological = right.followedAt.localeCompare(left.followedAt);
+      return chronological || followItemKey(left).localeCompare(followItemKey(right));
+    });
   }
 }

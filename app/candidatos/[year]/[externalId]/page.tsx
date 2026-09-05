@@ -2,6 +2,7 @@ import { notFound } from "next/navigation.js";
 
 import { getCandidateDetail } from "#/server/candidates/queries";
 import { db } from "#/server/db/client";
+import { CandidateFollowButton } from "#/ui/candidate-follow-button";
 import { CandidateProfile } from "#/ui/candidate-profile";
 
 export const dynamic = "force-dynamic";
@@ -32,5 +33,12 @@ export default async function CandidateProfilePage({
     votePage: positivePage(rawPages.votosPagina),
   });
   if (!detail) notFound();
-  return <CandidateProfile candidate={detail} />;
+  const href = `/candidatos/${detail.electionYear}/${encodeURIComponent(detail.externalId)}`;
+  return <CandidateProfile candidate={detail} followAction={
+    <CandidateFollowButton
+      electionYear={detail.electionYear}
+      externalId={detail.externalId}
+      href={href}
+    />
+  } />;
 }

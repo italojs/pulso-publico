@@ -19,7 +19,10 @@ function provenanceText(extractedAt: string | null, checkedAt: string) {
   return `TSE · ${extractedAt ? `extração ${formatDateTime(extractedAt)}` : "data de extração não informada"} · conferência ${formatDateTime(checkedAt)}`;
 }
 
-export function CandidateProfile({ candidate }: Readonly<{ candidate: PublicCandidateDetail }>) {
+export function CandidateProfile({
+  candidate,
+  followAction,
+}: Readonly<{ candidate: PublicCandidateDetail; followAction?: React.ReactNode }>) {
   const basePath = `/candidatos/${candidate.electionYear}/${encodeURIComponent(candidate.externalId)}`;
   const plans = candidate.documents.filter((document) => document.kind === "government_plan");
   const certificates = candidate.documents.filter((document) => document.kind === "certificate");
@@ -41,7 +44,10 @@ export function CandidateProfile({ candidate }: Readonly<{ candidate: PublicCand
           <p className="candidateProfileHero__party">{candidate.partyAcronym} · {candidate.partyName}</p>
           {candidate.federation ? <p>{candidate.federation}</p> : null}
           <div className="candidateProfileHero__status"><span aria-hidden="true" />Situação oficial: {candidate.status}{candidate.statusDetail ? ` · ${candidate.statusDetail}` : ""}</div>
-          <ExternalLink href={candidate.officialUrl}>Abrir candidatura no TSE</ExternalLink>
+          <div className="projectHero__actions">
+            {followAction}
+            <ExternalLink href={candidate.officialUrl}>Abrir candidatura no TSE</ExternalLink>
+          </div>
         </div>
       </header>
 

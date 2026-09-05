@@ -14,9 +14,13 @@ import { CandidateProfile } from "#/ui/candidate-profile";
 const routeMocks = vi.hoisted(() => ({
   getCandidateDetail: vi.fn(),
   notFound: vi.fn((): never => { throw new Error("NEXT_NOT_FOUND"); }),
+  routerPush: vi.fn(),
 }));
 
-vi.mock("next/navigation.js", () => ({ notFound: routeMocks.notFound }));
+vi.mock("next/navigation.js", () => ({
+  notFound: routeMocks.notFound,
+  useRouter: () => ({ push: routeMocks.routerPush }),
+}));
 vi.mock("#/server/db/client", () => ({ db: { kind: "candidate-profile-page-test-db" } }));
 vi.mock("#/server/candidates/queries", () => ({ getCandidateDetail: routeMocks.getCandidateDetail }));
 
@@ -188,7 +192,10 @@ const detail = {
   },
 } satisfies PublicCandidateDetail;
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -346,5 +353,19 @@ describe("candidate profile page", () => {
       "260001234567",
       { projectPage: 2, votePage: 3 },
     );
+  });
+
+  it("places the account-only follow control on the public candidate profile", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: "AUTH_REQUIRED" }),
+      { headers: { "content-type": "application/json" }, status: 401 },
+    )));
+
+    render(await CandidateProfilePage({
+      params: Promise.resolve({ year: "2026", externalId: "260001234567" }),
+      searchParams: Promise.resolve({}),
+    }));
+
+    expect(await screen.findByRole("button", { name: "Seguir candidato" })).toHaveAttribute("aria-pressed", "false");
   });
 });
