@@ -44,7 +44,15 @@ describe("TSE electoral mapping", () => {
       region: "ES",
       seekingReelection: false,
       birthDate: "1980-01-02",
+      socialName: null,
+      federation: null,
+      coalition: null,
+      race: null,
+      birthRegion: null,
     });
+    expect(candidate.officialUrl).toBe(
+      "https://divulgacandcontas.tse.jus.br/divulga/#/candidato/SUDESTE/ES/20322002026/260001234567/2026/ES",
+    );
     expect(candidate).not.toHaveProperty("cpf");
     expect(candidate).not.toHaveProperty("email");
     expect(candidate).not.toHaveProperty("address");
@@ -87,23 +95,20 @@ describe("TSE electoral mapping", () => {
 
   it("keeps declared safe social links and drops unsafe protocols or credentials", () => {
     expect(mapSocialRow({
-      ANO_ELEICAO: "2026",
+      AA_ELEICAO: "2026",
       SQ_CANDIDATO: "260001234567",
-      DS_REDE_SOCIAL: "Site oficial",
-      DS_URL_REDE_SOCIAL: "https://example.org/ana",
-    })).toMatchObject({ label: "Site oficial", url: "https://example.org/ana" });
+      DS_URL: "https://example.org/ana",
+    })).toMatchObject({ url: "https://example.org/ana" });
 
     expect(mapSocialRow({
-      ANO_ELEICAO: "2026",
+      AA_ELEICAO: "2026",
       SQ_CANDIDATO: "260001234567",
-      DS_REDE_SOCIAL: "Arquivo",
-      DS_URL_REDE_SOCIAL: "javascript:alert(1)",
+      DS_URL: "javascript:alert(1)",
     })).toBeNull();
     expect(mapSocialRow({
-      ANO_ELEICAO: "2026",
+      AA_ELEICAO: "2026",
       SQ_CANDIDATO: "260001234567",
-      DS_REDE_SOCIAL: "Credenciais",
-      DS_URL_REDE_SOCIAL: "https://user:secret@example.org/ana",
+      DS_URL: "https://user:secret@example.org/ana",
     })).toBeNull();
   });
 

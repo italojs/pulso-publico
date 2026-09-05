@@ -43,6 +43,46 @@ const booleanByTseLabel: Record<string, boolean> = {
   FALSE: false,
 };
 
+const nullSentinels = new Set([
+  "#NULO",
+  "#NULO#",
+  "#NE",
+  "#NE#",
+  "#N/A",
+  "#N/D",
+  "-1",
+]);
+
+const geographicRegionByUf: Record<string, string> = {
+  AC: "NORTE",
+  AL: "NORDESTE",
+  AP: "NORTE",
+  AM: "NORTE",
+  BA: "NORDESTE",
+  CE: "NORDESTE",
+  DF: "CENTRO-OESTE",
+  ES: "SUDESTE",
+  GO: "CENTRO-OESTE",
+  MA: "NORDESTE",
+  MT: "CENTRO-OESTE",
+  MS: "CENTRO-OESTE",
+  MG: "SUDESTE",
+  PA: "NORTE",
+  PB: "NORDESTE",
+  PR: "SUL",
+  PE: "NORDESTE",
+  PI: "NORDESTE",
+  RJ: "SUDESTE",
+  RN: "NORDESTE",
+  RS: "SUL",
+  RO: "NORTE",
+  RR: "NORTE",
+  SC: "SUL",
+  SP: "SUDESTE",
+  SE: "NORDESTE",
+  TO: "NORTE",
+};
+
 export class TseContractError extends Error {
   readonly code: string;
 
@@ -55,7 +95,8 @@ export class TseContractError extends Error {
 
 function blankToNull(value: string | undefined): string | null {
   const normalized = value?.trim();
-  return normalized ? normalized : null;
+  if (!normalized || nullSentinels.has(normalized.toLocaleUpperCase("pt-BR"))) return null;
+  return normalized;
 }
 
 function required(row: TseRow, column: string, code = `MISSING_${column}`): string {
@@ -76,7 +117,9 @@ function normalizeTseLabel(value: string): string {
 }
 
 function parseElectionYear(row: TseRow): number {
-  const year = parseNonnegativeInteger(required(row, "ANO_ELEICAO"), "INVALID_ELECTION_YEAR");
+  const rawYear = selectFirst(row, ["ANO_ELEICAO", "AA_ELEICAO"]);
+  if (!rawYear) throw new TseContractError("MISSING_ELECTION_YEAR");
+  const year = parseNonnegativeInteger(rawYear, "INVALID_ELECTION_YEAR");
   if (year < 2026) throw new TseContractError("INVALID_ELECTION_YEAR");
   return year;
 }
@@ -113,8 +156,15 @@ function zIsoDateTime(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value);
 }
 
-function officialCandidateUrl(year: number, region: string, candidateExternalId: string): string {
-  return `https://divulgacandcontas.tse.jus.br/divulga/#/candidato/${year}/${encodeURIComponent(region)}/${encodeURIComponent(candidateExternalId)}`;
+function officialCandidateUrl(
+  geographicRegion: string,
+  region: string,
+  electionId: string,
+  candidateExternalId: string,
+  year: number,
+  electoralUnit: string,
+): string {
+  return `https://divulgacandcontas.tse.jus.br/divulga/#/candidato/${encodeURIComponent(geographicRegion)}/${encodeURIComponent(region)}/${encodeURIComponent(electionId)}/${encodeURIComponent(candidateExternalId)}/${year}/${encodeURIComponent(electoralUnit)}`;
 }
 
 function selectFirst(row: TseRow, columns: readonly string[]): string | undefined {
@@ -142,6 +192,10 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
   const office = officeByTseLabel[officeLabel];
   if (!office) throw new TseContractError("UNKNOWN_OFFICE");
   const status = required(row, "DS_SITUACAO_CANDIDATURA", "MISSING_STATUS");
+  const electoralUnit = blankToNull(row.SG_UE) ?? blankToNull(row.NM_UE) ?? region;
+  const geographicRegion = blankToNull(row.SG_REGIAO) ?? geographicRegionByUf[region];
+  if (!geographicRegion) throw new TseContractError("MISSING_GEOGRAPHIC_REGION");
+  const electionId = blankToNull(row.CD_ELEICAO) ?? `2032200${electionYear}`;
 
   return ElectoralCandidateRecord.parse({
     electionYear,
@@ -153,7 +207,7 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
     office,
     round,
     region,
-    electoralUnit: blankToNull(row.NM_UE) ?? region,
+    electoralUnit: blankToNull(row.NM_UE) ?? electoralUnit,
     status,
     statusDetail: blankToNull(row.DS_DETALHE_SITUACAO_CAND),
     partyAcronym: required(row, "SG_PARTIDO", "MISSING_PARTY_ACRONYM"),
@@ -174,7 +228,14 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
     nationality: blankToNull(row.DS_NACIONALIDADE),
     birthRegion: blankToNull(row.SG_UF_NASCIMENTO),
     birthCity: blankToNull(row.NM_MUNICIPIO_NASCIMENTO),
-    officialUrl: officialCandidateUrl(electionYear, region, externalId),
+    officialUrl: officialCandidateUrl(
+      geographicRegion,
+      region,
+      electionId,
+      externalId,
+      electionYear,
+      electoralUnit,
+    ),
     checkedAt: checkedAtIso(checkedAt),
   });
 }
@@ -216,7 +277,7 @@ export function mapCampaignExpenseRow(row: TseRow): CampaignEntry {
     row,
     "expense",
     ["VR_DESPESA_CONTRATADA", "VR_DESPESA"],
-    ["DS_TIPO_DESPESA", "DS_DESPESA"],
+    ["DS_ORIGEM_DESPESA", "DS_TIPO_DESPESA", "DS_DESPESA"],
   );
 }
 
@@ -237,7 +298,7 @@ export function mapSocialRow(row: TseRow): CandidateSocialLink | null {
   return CandidateSocialLinkRecord.parse({
     electionYear: parseElectionYear(row),
     candidateExternalId: parseCandidateExternalId(row),
-    label: required(row, "DS_REDE_SOCIAL", "MISSING_SOCIAL_LABEL"),
+    label: blankToNull(row.DS_REDE_SOCIAL) ?? "Rede social declarada ao TSE",
     url: url.toString(),
   });
 }
