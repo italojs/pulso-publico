@@ -1,5 +1,5 @@
-import { createReadStream, type ReadStream } from "node:fs";
-import { mkdir, open, rename, rm, unlink } from "node:fs/promises";
+import { constants, createReadStream, lstatSync, openSync, type ReadStream } from "node:fs";
+import { lstat, mkdir, open, rename, rm, unlink } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 
@@ -43,6 +43,58 @@ function resolveBelow(root: string, key: string): string {
   return resolved;
 }
 
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+async function ensureDirectoryChain(root: string, components: readonly string[]): Promise<void> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  let current = root;
+  for (const component of components) {
+    current = resolveBelow(current, component);
+    try {
+      await mkdir(current, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const status = await lstat(current);
+    if (status.isSymbolicLink() || !status.isDirectory()) {
+      throw storageError("UNSAFE_STORAGE_PATH");
+    }
+  }
+}
+
+async function assertNoSymlinkComponents(
+  root: string,
+  components: readonly string[],
+): Promise<boolean> {
+  let current = root;
+  for (const component of components) {
+    current = resolveBelow(current, component);
+    try {
+      const status = await lstat(current);
+      if (status.isSymbolicLink()) throw storageError("UNSAFE_STORAGE_PATH");
+    } catch (error) {
+      if (isMissing(error)) return false;
+      throw error;
+    }
+  }
+  return true;
+}
+
+function assertNoSymlinkComponentsSync(root: string, components: readonly string[]): void {
+  let current = root;
+  for (const component of components) {
+    current = resolveBelow(current, component);
+    try {
+      if (lstatSync(current).isSymbolicLink()) throw storageError("UNSAFE_STORAGE_PATH");
+    } catch (error) {
+      if (isMissing(error)) return;
+      throw error;
+    }
+  }
+}
+
 export class ElectoralMediaStore {
   readonly #root: string;
   readonly #stagingRoot: string;
@@ -69,10 +121,26 @@ export class ElectoralMediaStore {
 
     const relativeKey = `${runId}/${entry.kind}/${entry.candidateExternalId}/${entry.originalFilename}`;
     const target = resolveBelow(this.#stagingRoot, relativeKey);
-    await mkdir(resolve(target, ".."), { recursive: true });
+    await ensureDirectoryChain(this.#root, [
+      ".staging",
+      runId,
+      entry.kind,
+      entry.candidateExternalId,
+    ]);
+    try {
+      const existing = await lstat(target);
+      if (existing.isSymbolicLink()) throw storageError("UNSAFE_STORAGE_PATH");
+      throw storageError("DUPLICATE_MEDIA_ENTRY");
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
     let created = false;
     try {
-      const file = await open(target, "wx", 0o600);
+      const file = await open(
+        target,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
       created = true;
       await pipeline(entry.content, file.createWriteStream());
       return relativeKey;
@@ -83,7 +151,12 @@ export class ElectoralMediaStore {
         });
       }
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        const existing = await lstat(target).catch(() => undefined);
+        if (existing?.isSymbolicLink()) throw storageError("UNSAFE_STORAGE_PATH");
         throw storageError("DUPLICATE_MEDIA_ENTRY");
+      }
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+        throw storageError("UNSAFE_STORAGE_PATH");
       }
       throw error;
     }
@@ -93,7 +166,11 @@ export class ElectoralMediaStore {
     validateRunId(runId);
     const staging = resolveBelow(this.#stagingRoot, runId);
     const published = resolveBelow(this.#root, runId);
-    await mkdir(this.#root, { recursive: true });
+    await ensureDirectoryChain(this.#root, [".staging"]);
+    await assertNoSymlinkComponents(this.#root, [".staging", runId]);
+    if (await assertNoSymlinkComponents(this.#root, [runId])) {
+      throw storageError("DUPLICATE_MEDIA_GENERATION");
+    }
     await rename(staging, published);
   }
 
@@ -101,9 +178,11 @@ export class ElectoralMediaStore {
     validateRunId(runId);
     const staging = resolveBelow(this.#stagingRoot, runId);
     const published = resolveBelow(this.#root, runId);
+    const stagingExists = await assertNoSymlinkComponents(this.#root, [".staging", runId]);
+    const publishedExists = await assertNoSymlinkComponents(this.#root, [runId]);
     await Promise.all([
-      rm(staging, { recursive: true, force: true }),
-      rm(published, { recursive: true, force: true }),
+      stagingExists ? rm(staging, { recursive: true, force: true }) : Promise.resolve(),
+      publishedExists ? rm(published, { recursive: true, force: true }) : Promise.resolve(),
     ]);
   }
 
@@ -126,6 +205,16 @@ export class ElectoralMediaStore {
     if (!(kind === "photos" || kind === "governmentPlans" || kind === "certificates")) {
       throw storageError("UNSAFE_STORAGE_PATH");
     }
-    return createReadStream(path);
+    assertNoSymlinkComponentsSync(this.#root, [runId, kind, candidateId, filename]);
+    let descriptor: number;
+    try {
+      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+        throw storageError("UNSAFE_STORAGE_PATH");
+      }
+      throw error;
+    }
+    return createReadStream(path, { fd: descriptor, autoClose: true });
   }
 }

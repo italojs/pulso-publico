@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
-import { Readable, Transform, type TransformCallback } from "node:stream";
+import { Readable, Transform, Writable, type TransformCallback } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import type { Entry } from "unzipper";
 import { Parse } from "unzipper";
@@ -25,10 +26,6 @@ export function assertSafeArchivePath(entryPath: string): void {
   }
 }
 
-export async function drainArchiveEntry(entry: Entry): Promise<void> {
-  await entry.autodrain().promise();
-}
-
 export async function* streamZipEntries(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
@@ -46,6 +43,7 @@ export async function* streamZipEntries(
       yield value as Entry;
     }
   } catch (error) {
+    if (signal.aborted) throw new TseContractError("TSE_REQUEST_ABORTED");
     if (error instanceof TseContractError) throw error;
     throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
   } finally {
@@ -55,7 +53,6 @@ export async function* streamZipEntries(
 }
 
 export function limitedBytes(
-  entry: Entry,
   entryMaximum: number,
   total?: ArchiveByteCounter,
 ): Transform {
@@ -77,6 +74,47 @@ export function limitedBytes(
       callback(null, chunk);
     },
   });
+}
+
+export function assertDeclaredEntrySize(
+  entry: Entry,
+  entryMaximum: number,
+  total?: ArchiveByteCounter,
+): void {
+  const declaredSize = declaredUncompressedSize(entry);
+  if (
+    declaredSize !== undefined
+    && (
+      declaredSize > entryMaximum
+      || (total !== undefined && total.bytes + declaredSize > total.maximum)
+    )
+  ) {
+    entry.destroy();
+    throw new TseContractError(
+      declaredSize > entryMaximum ? "ARCHIVE_ENTRY_TOO_LARGE" : total!.errorCode,
+    );
+  }
+}
+
+export async function drainBoundedArchiveEntry(
+  entry: Entry,
+  entryMaximum: number,
+  signal: AbortSignal,
+  total?: ArchiveByteCounter,
+): Promise<void> {
+  assertDeclaredEntrySize(entry, entryMaximum, total);
+  try {
+    await pipeline(
+      entry,
+      limitedBytes(entryMaximum, total),
+      new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      { signal },
+    );
+  } catch (error) {
+    if (signal.aborted) throw new TseContractError("TSE_REQUEST_ABORTED");
+    if (error instanceof TseContractError) throw error;
+    throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
+  }
 }
 
 export function windows1252Decoder(): Transform {

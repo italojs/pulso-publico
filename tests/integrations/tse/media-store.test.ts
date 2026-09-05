@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,6 +64,35 @@ describe("ElectoralMediaStore", () => {
     expect(() => store.open("../outside.jpg")).toThrowError(expect.objectContaining({
       code: "UNSAFE_STORAGE_PATH",
     }));
+  });
+
+  it("rejects symlinks below staging before writing or publishing", async () => {
+    const { root, store } = await createStore();
+    const outside = await mkdtemp(join(tmpdir(), "electoral-media-outside-"));
+    temporaryDirectories.push(outside);
+    await mkdir(join(root, ".staging"), { recursive: true });
+    await symlink(outside, join(root, ".staging", "safe-run"), "dir");
+
+    await expect(store.stage("safe-run", mediaEntry("escaped"))).rejects.toMatchObject({
+      code: "UNSAFE_STORAGE_PATH",
+    });
+    await expect(readFile(join(outside, "photos", "260001234567", "FC_260001234567_div.jpg")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.publish("safe-run")).rejects.toMatchObject({
+      code: "UNSAFE_STORAGE_PATH",
+    });
+  });
+
+  it("rejects published symlinks instead of exposing files outside the root", async () => {
+    const { root, store } = await createStore();
+    const outside = await mkdtemp(join(tmpdir(), "electoral-media-outside-"));
+    temporaryDirectories.push(outside);
+    await mkdir(join(outside, "photos", "260001234567"), { recursive: true });
+    await writeFile(join(outside, "photos", "260001234567", "FC_260001234567_div.jpg"), "secret");
+    await symlink(outside, join(root, "unsafe-run"), "dir");
+
+    expect(() => store.open("unsafe-run/photos/260001234567/FC_260001234567_div.jpg"))
+      .toThrowError(expect.objectContaining({ code: "UNSAFE_STORAGE_PATH" }));
   });
 
   it("rejects media whose extension and MIME do not match its kind", async () => {
