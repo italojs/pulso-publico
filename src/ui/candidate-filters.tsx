@@ -7,7 +7,7 @@ import type { CandidateOffice } from "#/domain/electoral";
 import type { CandidateFilterOptions, CandidateFilters, CandidateRegionOrigin } from "#/server/candidates/read-models";
 import { buildCandidateHref } from "#/server/candidates/search-params";
 import { CandidateAdvancedFilters } from "#/ui/candidate-advanced-filters";
-import { candidateOfficeLabels } from "#/ui/candidate-card";
+import { candidateOfficeLabels } from "#/ui/candidate-office";
 import { CandidateFilterChips } from "#/ui/candidate-filter-chips";
 import { SearchIcon } from "#/ui/icons";
 

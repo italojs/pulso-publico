@@ -3,7 +3,8 @@
 import type { CandidateOffice } from "#/domain/electoral";
 import type { CandidateFilters } from "#/server/candidates/read-models";
 import { buildCandidateHref } from "#/server/candidates/search-params";
-import { candidateOfficeLabels, formatCandidateCents } from "#/ui/candidate-card";
+import { formatCandidateCents } from "#/ui/candidate-card";
+import { candidateOfficeLabels } from "#/ui/candidate-office";
 
 interface CandidateFilterChip {
   ariaLabel: string;

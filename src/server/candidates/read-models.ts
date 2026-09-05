@@ -152,13 +152,69 @@ export interface PublicCandidateLink {
   url: string;
 }
 
-export interface PublicCandidateDocument extends PublicCandidateLink {
+export interface PublicCandidateSocialLink extends PublicCandidateLink {
+  sourceArchiveUrl: string | null;
+  sourceExtractedAt: string;
+  checkedAt: string;
+}
+
+export interface PublicCandidateDocument {
   kind: "government_plan" | "certificate";
+  label: string;
+  officialUrl: string;
+  downloadUrl: string | null;
   availableLocally: boolean;
   originalFilename: string | null;
   sourceArchiveUrl: string | null;
   sourceExtractedAt: string | null;
   checkedAt: string;
+}
+
+export interface PublicCandidateProject {
+  source: CandidateLawmakerHouse;
+  externalId: string;
+  officialCode: string;
+  officialTitle: string;
+  officialSummary: string;
+  statusLabel: string;
+  presentedAt: string | null;
+  officialUrl: string;
+  primary: boolean;
+  coauthored: boolean;
+}
+
+export interface PublicCandidateVote {
+  source: CandidateLawmakerHouse;
+  externalId: string;
+  occurredAt: string;
+  house: "camara" | "senado" | "congresso";
+  description: string;
+  result: string | null;
+  choice: "sim" | "nao" | "abstencao" | "obstrucao" | "outro" | "indisponivel";
+  rawChoice: string;
+  officialUrl: string;
+  bill: {
+    source: CandidateLawmakerHouse;
+    externalId: string;
+    officialCode: string;
+    officialTitle: string;
+    officialUrl: string;
+  };
+}
+
+export interface PublicCandidateHistoryPage<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface PublicCandidateHistoryCoverage {
+  projectFrom: string | null;
+  projectTo: string | null;
+  voteFrom: string | null;
+  voteTo: string | null;
 }
 
 export interface PublicConfirmedCandidateHistory {
@@ -172,8 +228,19 @@ export interface PublicConfirmedCandidateHistory {
     officialUrl: string;
   }>;
   projectCount: number;
+  primaryProjectCount: number;
+  coauthoredProjectCount: number;
   voteCount: number;
   topics: string[];
+  projects: PublicCandidateHistoryPage<PublicCandidateProject>;
+  votes: PublicCandidateHistoryPage<PublicCandidateVote>;
+  voteDistribution: Partial<Record<PublicCandidateVote["choice"], number>>;
+  coverage: PublicCandidateHistoryCoverage;
+}
+
+export interface CandidateDetailPagination {
+  projectPage?: number;
+  votePage?: number;
 }
 
 export interface PublicCandidateDetail extends PublicCandidateCard {
@@ -189,9 +256,14 @@ export interface PublicCandidateDetail extends PublicCandidateCard {
   birthRegion: string | null;
   birthCity: string | null;
   officialUrl: string;
+  photoSource: {
+    sourceArchiveUrl: string | null;
+    sourceExtractedAt: string | null;
+    checkedAt: string;
+  } | null;
   assets: PublicCandidateAsset[];
   assetCategories: Array<{ category: string; valueCents: string; count: number }>;
-  socialLinks: PublicCandidateLink[];
+  socialLinks: PublicCandidateSocialLink[];
   documents: PublicCandidateDocument[];
   history: PublicConfirmedCandidateHistory | null;
 }

@@ -20,6 +20,7 @@ import type { CandidateQueryScope } from "#/server/candidates/filter-contract";
 import type {
   CandidateFilterOptions,
   CandidateFilters,
+  CandidateDetailPagination,
   CandidateFundingKind,
   CandidateOrder,
   PublicCandidateCard,
@@ -29,6 +30,7 @@ import type {
 } from "#/server/candidates/read-models";
 import {
   billAuthors,
+  bills,
   billTopics,
   candidateAssets,
   candidateCampaignTotals,
@@ -41,6 +43,7 @@ import {
   followedCandidates,
   individualVotes,
   lawmakers,
+  voteEvents,
 } from "#/server/db/schema";
 import type * as schema from "#/server/db/schema";
 
@@ -567,6 +570,7 @@ export async function getCandidateDetail(
   database: Database,
   electionYear: number,
   externalId: string,
+  pagination: CandidateDetailPagination = {},
 ): Promise<PublicCandidateDetail | null> {
   const [candidateRow] = await database.select({
     id: electoralCandidates.id,
@@ -583,6 +587,9 @@ export async function getCandidateDetail(
     birthRegion: electoralCandidates.birthRegion,
     birthCity: electoralCandidates.birthCity,
     officialUrl: electoralCandidates.officialUrl,
+    photoSourceArchiveUrl: electoralCandidates.photoSourceArchiveUrl,
+    photoSourceExtractedAt: electoralCandidates.photoSourceExtractedAt,
+    photoCheckedAt: electoralCandidates.photoCheckedAt,
   }).from(electoralCandidates)
     .leftJoin(candidateCampaignTotals, eq(candidateCampaignTotals.candidateId, electoralCandidates.id))
     .where(and(
@@ -602,7 +609,13 @@ export async function getCandidateDetail(
       checkedAt: candidateAssets.checkedAt,
     }).from(candidateAssets).where(eq(candidateAssets.candidateId, candidateRow.id))
       .orderBy(desc(candidateAssets.valueCents), asc(candidateAssets.id)),
-    database.select({ label: candidateSocialLinks.label, url: candidateSocialLinks.url })
+    database.select({
+      label: candidateSocialLinks.label,
+      url: candidateSocialLinks.url,
+      sourceArchiveUrl: candidateSocialLinks.sourceArchiveUrl,
+      sourceExtractedAt: candidateSocialLinks.sourceExtractedAt,
+      checkedAt: candidateSocialLinks.checkedAt,
+    })
       .from(candidateSocialLinks).where(eq(candidateSocialLinks.candidateId, candidateRow.id))
       .orderBy(asc(candidateSocialLinks.label), asc(candidateSocialLinks.url)),
     database.select().from(candidateGovernmentPlans)
@@ -610,6 +623,7 @@ export async function getCandidateDetail(
     database.select().from(candidateDocuments)
       .where(eq(candidateDocuments.candidateId, candidateRow.id)).orderBy(asc(candidateDocuments.label), asc(candidateDocuments.id)),
     database.select({
+      id: lawmakers.id,
       source: lawmakers.source,
       externalId: lawmakers.externalId,
       name: lawmakers.name,
@@ -627,6 +641,137 @@ export async function getCandidateDetail(
       .where(and(eq(candidateLawmakerLinks.candidateId, candidateRow.id), eq(candidateLawmakerLinks.status, "confirmed")))
       .orderBy(asc(billTopics.label)),
   ]);
+
+  const publicLawmakerRows = lawmakerRows.map(({ id: _id, ...row }) => row);
+  const lawmakerIds = lawmakerRows.map((row) => row.id);
+  const historyPageSize = 10;
+  let history: PublicCandidateDetail["history"] = null;
+  if (lawmakerIds.length > 0) {
+    const [projectAggregateRows, voteAggregateRows, voteDistributionRows] = await Promise.all([
+      database.select({
+        total: sql<number>`count(distinct ${billAuthors.billId})::integer`,
+        primaryTotal: sql<number>`count(distinct ${billAuthors.billId}) filter (where ${billAuthors.isPrimary})::integer`,
+        coauthoredTotal: sql<number>`count(distinct ${billAuthors.billId}) filter (where not ${billAuthors.isPrimary})::integer`,
+        from: sql<Date | null>`min(${bills.presentedAt})`,
+        to: sql<Date | null>`max(${bills.presentedAt})`,
+      }).from(billAuthors)
+        .innerJoin(bills, eq(bills.id, billAuthors.billId))
+        .where(inArray(billAuthors.lawmakerId, lawmakerIds)),
+      database.select({
+        total: sql<number>`count(distinct ${individualVotes.id})::integer`,
+        from: sql<Date | null>`min(${voteEvents.occurredAt})`,
+        to: sql<Date | null>`max(${voteEvents.occurredAt})`,
+      }).from(individualVotes)
+        .innerJoin(voteEvents, eq(voteEvents.id, individualVotes.voteEventId))
+        .where(inArray(individualVotes.lawmakerId, lawmakerIds)),
+      database.select({
+        choice: individualVotes.choice,
+        total: sql<number>`count(distinct ${individualVotes.id})::integer`,
+      }).from(individualVotes)
+        .where(inArray(individualVotes.lawmakerId, lawmakerIds))
+        .groupBy(individualVotes.choice)
+        .orderBy(asc(individualVotes.choice)),
+    ]);
+    const projectAggregate = projectAggregateRows[0] ?? {
+      total: 0, primaryTotal: 0, coauthoredTotal: 0, from: null, to: null,
+    };
+    const voteAggregate = voteAggregateRows[0] ?? { total: 0, from: null, to: null };
+    const projectTotalPages = Math.max(1, Math.ceil(projectAggregate.total / historyPageSize));
+    const voteTotalPages = Math.max(1, Math.ceil(voteAggregate.total / historyPageSize));
+    const projectPage = clampInteger(pagination.projectPage, 1, 1, projectTotalPages);
+    const votePage = clampInteger(pagination.votePage, 1, 1, voteTotalPages);
+    const [projectRows, voteRows] = await Promise.all([
+      database.select({
+        source: bills.source,
+        externalId: bills.externalId,
+        officialCode: bills.officialCode,
+        officialTitle: bills.officialTitle,
+        officialSummary: bills.officialSummary,
+        statusLabel: bills.statusLabel,
+        presentedAt: bills.presentedAt,
+        officialUrl: bills.officialUrl,
+        primary: sql<boolean>`bool_or(${billAuthors.isPrimary})`,
+        coauthored: sql<boolean>`bool_or(not ${billAuthors.isPrimary})`,
+      }).from(billAuthors)
+        .innerJoin(bills, eq(bills.id, billAuthors.billId))
+        .where(inArray(billAuthors.lawmakerId, lawmakerIds))
+        .groupBy(bills.id)
+        .orderBy(sql`${bills.presentedAt} desc nulls last`, desc(bills.checkedAt), asc(bills.source), asc(bills.externalId))
+        .limit(historyPageSize)
+        .offset((projectPage - 1) * historyPageSize),
+      database.select({
+        source: individualVotes.source,
+        externalId: individualVotes.externalId,
+        occurredAt: voteEvents.occurredAt,
+        house: voteEvents.house,
+        description: voteEvents.description,
+        result: voteEvents.result,
+        choice: individualVotes.choice,
+        rawChoice: individualVotes.rawChoice,
+        officialUrl: individualVotes.officialUrl,
+        billSource: bills.source,
+        billExternalId: bills.externalId,
+        billOfficialCode: bills.officialCode,
+        billOfficialTitle: bills.officialTitle,
+        billOfficialUrl: bills.officialUrl,
+      }).from(individualVotes)
+        .innerJoin(voteEvents, eq(voteEvents.id, individualVotes.voteEventId))
+        .innerJoin(bills, eq(bills.id, voteEvents.billId))
+        .where(inArray(individualVotes.lawmakerId, lawmakerIds))
+        .orderBy(desc(voteEvents.occurredAt), asc(individualVotes.source), asc(individualVotes.externalId))
+        .limit(historyPageSize)
+        .offset((votePage - 1) * historyPageSize),
+    ]);
+    history = {
+      lawmakers: publicLawmakerRows,
+      projectCount: projectAggregate.total,
+      primaryProjectCount: projectAggregate.primaryTotal,
+      coauthoredProjectCount: projectAggregate.coauthoredTotal,
+      voteCount: voteAggregate.total,
+      topics: topicRows.map((row) => row.value),
+      projects: {
+        items: projectRows.map((row) => ({
+          ...row,
+          presentedAt: row.presentedAt ? iso(row.presentedAt) : null,
+        })),
+        page: projectPage,
+        pageSize: historyPageSize,
+        total: projectAggregate.total,
+        totalPages: projectTotalPages,
+      },
+      votes: {
+        items: voteRows.map((row) => ({
+          source: row.source,
+          externalId: row.externalId,
+          occurredAt: iso(row.occurredAt),
+          house: row.house,
+          description: row.description,
+          result: row.result,
+          choice: row.choice,
+          rawChoice: row.rawChoice,
+          officialUrl: row.officialUrl,
+          bill: {
+            source: row.billSource,
+            externalId: row.billExternalId,
+            officialCode: row.billOfficialCode,
+            officialTitle: row.billOfficialTitle,
+            officialUrl: row.billOfficialUrl,
+          },
+        })),
+        page: votePage,
+        pageSize: historyPageSize,
+        total: voteAggregate.total,
+        totalPages: voteTotalPages,
+      },
+      voteDistribution: Object.fromEntries(voteDistributionRows.map((row) => [row.choice, row.total])),
+      coverage: {
+        projectFrom: projectAggregate.from ? iso(projectAggregate.from) : null,
+        projectTo: projectAggregate.to ? iso(projectAggregate.to) : null,
+        voteFrom: voteAggregate.from ? iso(voteAggregate.from) : null,
+        voteTo: voteAggregate.to ? iso(voteAggregate.to) : null,
+      },
+    };
+  }
 
   const categoryMap = new Map<string, { valueCents: bigint; count: number }>();
   for (const asset of assetRows) {
@@ -650,6 +795,11 @@ export async function getCandidateDetail(
     birthRegion: candidateRow.birthRegion,
     birthCity: candidateRow.birthCity,
     officialUrl: candidateRow.officialUrl,
+    photoSource: candidateRow.photoCheckedAt ? {
+      sourceArchiveUrl: candidateRow.photoSourceArchiveUrl,
+      sourceExtractedAt: candidateRow.photoSourceExtractedAt ? iso(candidateRow.photoSourceExtractedAt) : null,
+      checkedAt: iso(candidateRow.photoCheckedAt),
+    } : null,
     assets: assetRows.map((asset) => ({
       category: asset.category,
       description: asset.description,
@@ -660,12 +810,21 @@ export async function getCandidateDetail(
     })),
     assetCategories: [...categoryMap.entries()].sort(([left], [right]) => left.localeCompare(right, "pt-BR"))
       .map(([category, aggregate]) => ({ category, valueCents: aggregate.valueCents.toString(), count: aggregate.count })),
-    socialLinks: socialRows,
+    socialLinks: socialRows.map((link) => ({
+      label: link.label,
+      url: link.url,
+      sourceArchiveUrl: link.sourceArchiveUrl,
+      sourceExtractedAt: iso(link.sourceExtractedAt),
+      checkedAt: iso(link.checkedAt),
+    })),
     documents: [
       ...planRows.map((plan) => ({
         kind: "government_plan" as const,
         label: "Proposta de governo",
-        url: plan.officialUrl,
+        officialUrl: plan.officialUrl,
+        downloadUrl: plan.storageKey
+          ? `/api/candidates/media/government-plan/${plan.id}`
+          : null,
         availableLocally: plan.storageKey !== null,
         originalFilename: plan.originalFilename,
         sourceArchiveUrl: plan.sourceArchiveUrl,
@@ -675,7 +834,10 @@ export async function getCandidateDetail(
       ...documentRows.map((document) => ({
         kind: "certificate" as const,
         label: document.label,
-        url: document.officialUrl,
+        officialUrl: document.officialUrl,
+        downloadUrl: document.storageKey
+          ? `/api/candidates/media/certificate/${document.id}`
+          : null,
         availableLocally: document.storageKey !== null,
         originalFilename: document.originalFilename,
         sourceArchiveUrl: document.sourceArchiveUrl,
@@ -683,11 +845,88 @@ export async function getCandidateDetail(
         checkedAt: iso(document.checkedAt),
       })),
     ],
-    history: lawmakerRows.length === 0 ? null : {
-      lawmakers: lawmakerRows,
-      projectCount: card.projectCount,
-      voteCount: card.voteCount,
-      topics: topicRows.map((row) => row.value),
-    },
+    history,
   };
+}
+
+export interface CandidateMediaAsset {
+  storageKey: string;
+  mimeType: "image/jpeg" | "application/pdf";
+  originalFilename: string;
+}
+
+const candidateExternalIdPattern = /^\d{1,30}$/;
+const mediaDocumentIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function resolveCandidateMediaAsset(
+  database: Database,
+  segments: readonly string[],
+): Promise<CandidateMediaAsset | null> {
+  if (
+    segments.length === 4
+    && segments[0] === "candidate"
+    && segments[3] === "photo"
+    && /^\d{4}$/.test(segments[1] ?? "")
+    && candidateExternalIdPattern.test(segments[2] ?? "")
+  ) {
+    const year = Number(segments[1]);
+    if (!Number.isSafeInteger(year) || year < 2026) return null;
+    const [row] = await database.select({
+      storageKey: electoralCandidates.photoStorageKey,
+      mimeType: electoralCandidates.photoMimeType,
+      originalFilename: electoralCandidates.photoOriginalFilename,
+    }).from(electoralCandidates).where(and(
+      currentSnapshot,
+      eq(electoralCandidates.electionYear, year),
+      eq(electoralCandidates.externalId, segments[2]!),
+      isNotNull(electoralCandidates.photoStorageKey),
+    )).limit(1);
+    if (!row?.storageKey || row.mimeType !== "image/jpeg") return null;
+    return {
+      storageKey: row.storageKey,
+      mimeType: "image/jpeg",
+      originalFilename: row.originalFilename ?? `foto-${segments[2]}.jpg`,
+    };
+  }
+
+  if (segments.length !== 2 || !mediaDocumentIdPattern.test(segments[1] ?? "")) return null;
+  if (segments[0] === "government-plan") {
+    const [row] = await database.select({
+      storageKey: candidateGovernmentPlans.storageKey,
+      mimeType: candidateGovernmentPlans.mimeType,
+      originalFilename: candidateGovernmentPlans.originalFilename,
+    }).from(candidateGovernmentPlans)
+      .innerJoin(electoralCandidates, eq(electoralCandidates.id, candidateGovernmentPlans.candidateId))
+      .where(and(
+        currentSnapshot,
+        eq(candidateGovernmentPlans.id, segments[1]!),
+        isNotNull(candidateGovernmentPlans.storageKey),
+      )).limit(1);
+    if (!row?.storageKey || row.mimeType !== "application/pdf") return null;
+    return {
+      storageKey: row.storageKey,
+      mimeType: "application/pdf",
+      originalFilename: row.originalFilename ?? "proposta-de-governo.pdf",
+    };
+  }
+  if (segments[0] === "certificate") {
+    const [row] = await database.select({
+      storageKey: candidateDocuments.storageKey,
+      mimeType: candidateDocuments.mimeType,
+      originalFilename: candidateDocuments.originalFilename,
+    }).from(candidateDocuments)
+      .innerJoin(electoralCandidates, eq(electoralCandidates.id, candidateDocuments.candidateId))
+      .where(and(
+        currentSnapshot,
+        eq(candidateDocuments.id, segments[1]!),
+        isNotNull(candidateDocuments.storageKey),
+      )).limit(1);
+    if (!row?.storageKey || row.mimeType !== "application/pdf") return null;
+    return {
+      storageKey: row.storageKey,
+      mimeType: "application/pdf",
+      originalFilename: row.originalFilename ?? "documento-eleitoral.pdf",
+    };
+  }
+  return null;
 }

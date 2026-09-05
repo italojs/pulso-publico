@@ -111,6 +111,11 @@ async function seedCandidates() {
       fullName: "Ana 100%_Cidadã\\Literal",
       number: 1010,
       photoStorageKey: "current-2026/photos/1010/foto.jpg",
+      photoSourceArchiveUrl: "https://cdn.tse.jus.br/fotos.zip",
+      photoOriginalFilename: "foto.jpg",
+      photoMimeType: "image/jpeg",
+      photoSourceExtractedAt: extractedAt,
+      photoCheckedAt: checkedAt,
     }),
     candidate("2020", {
       ballotName: "Bia do Povo",
@@ -183,6 +188,7 @@ async function seedCandidates() {
     candidateId: ana.id,
     label: "Instagram",
     url: "https://example.test/ana",
+    sourceArchiveUrl: "https://cdn.tse.jus.br/redes.zip",
     sourceExtractedAt: extractedAt,
     checkedAt,
   });
@@ -190,8 +196,10 @@ async function seedCandidates() {
     candidateId: ana.id,
     officialUrl: "https://cdn.tse.jus.br/plano-ana.pdf",
     storageKey: "current-2026/plans/1010/plano.pdf",
+    sourceArchiveUrl: "https://cdn.tse.jus.br/planos.zip",
     originalFilename: "plano.pdf",
     mimeType: "application/pdf",
+    sourceExtractedAt: extractedAt,
     checkedAt,
   });
   await testDb.insert(candidateDocuments).values({
@@ -199,8 +207,10 @@ async function seedCandidates() {
     label: "Certidão criminal publicada pelo TSE",
     officialUrl: "https://cdn.tse.jus.br/certidao-ana.pdf",
     storageKey: "current-2026/certificates/1010/certidao.pdf",
+    sourceArchiveUrl: "https://cdn.tse.jus.br/certidoes.zip",
     originalFilename: "certidao.pdf",
     mimeType: "application/pdf",
+    sourceExtractedAt: extractedAt,
     checkedAt,
   });
 
@@ -254,11 +264,13 @@ async function seedCandidates() {
   const [anaBill1, anaBill2, caioBill, pendingBill] = await testDb.insert(bills).values([
     {
       source: "camara", externalId: "ana-1", officialCode: "PL 1/2026", officialTitle: "Trabalho digno",
-      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-1", checkedAt,
+      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-1",
+      presentedAt: new Date("2024-01-02T12:00:00.000Z"), checkedAt,
     },
     {
       source: "camara", externalId: "ana-2", officialCode: "PL 2/2026", officialTitle: "Saúde pública",
-      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-2", checkedAt,
+      officialSummary: "", originHouse: "camara", statusLabel: "Em análise", officialUrl: "https://camara.test/ana-2",
+      presentedAt: new Date("2025-02-03T12:00:00.000Z"), checkedAt,
     },
     {
       source: "senado", externalId: "caio-1", officialCode: "PL 3/2026", officialTitle: "Educação",
@@ -286,8 +298,8 @@ async function seedCandidates() {
   ]);
 
   const [anaEvent1, anaEvent2, caioEvent, pendingEvent] = await testDb.insert(voteEvents).values([
-    { source: "camara", externalId: "vote-a1", billId: anaBill1.id, occurredAt: checkedAt, house: "camara", description: "Votação A1", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a1", checkedAt },
-    { source: "camara", externalId: "vote-a2", billId: anaBill2.id, occurredAt: checkedAt, house: "camara", description: "Votação A2", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a2", checkedAt },
+    { source: "camara", externalId: "vote-a1", billId: anaBill1.id, occurredAt: new Date("2024-03-04T12:00:00.000Z"), house: "camara", description: "Votação A1", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a1", checkedAt },
+    { source: "camara", externalId: "vote-a2", billId: anaBill2.id, occurredAt: new Date("2025-04-05T12:00:00.000Z"), house: "camara", description: "Votação A2", isNominal: true, isSecret: false, officialUrl: "https://camara.test/v-a2", checkedAt },
     { source: "senado", externalId: "vote-c1", billId: caioBill.id, occurredAt: checkedAt, house: "senado", description: "Votação C1", isNominal: true, isSecret: false, officialUrl: "https://senado.test/v-c1", checkedAt },
     { source: "senado", externalId: "vote-p1", billId: pendingBill.id, occurredAt: checkedAt, house: "senado", description: "Votação P1", isNominal: true, isSecret: false, officialUrl: "https://senado.test/v-p1", checkedAt },
   ]).returning();
@@ -303,7 +315,7 @@ async function seedCandidates() {
   if (!user) throw new Error("user fixture failed");
   await testDb.insert(followedCandidates).values({ userId: user.id, candidateId: ana.id });
   const session = await new UserRepository(testDb).createSession(user.id);
-  return { stale, ana, bia, caio, user, session };
+  return { stale, ana, bia, caio, camara, anaBill1, anaBill2, user, session };
 }
 
 let seeded: Awaited<ReturnType<typeof seedCandidates>>;
@@ -504,17 +516,169 @@ describe("candidate catalog queries", () => {
 
     expect(detail).toMatchObject({
       externalId: "1010",
+      photoSource: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/fotos.zip",
+        sourceExtractedAt: extractedAt.toISOString(),
+        checkedAt: checkedAt.toISOString(),
+      },
       assetTotalCents: "10000",
       assetCount: 2,
       finance: { revenueCents: "50000", expenseCents: "20000", balanceCents: "30000" },
       history: { projectCount: 2, voteCount: 2, topics: ["Direitos humanos", "Saúde", "Trabalho"] },
     });
     expect(detail?.assets).toHaveLength(2);
-    expect(detail?.socialLinks).toEqual([{ label: "Instagram", url: "https://example.test/ana" }]);
+    expect(detail?.socialLinks).toEqual([{
+      label: "Instagram",
+      url: "https://example.test/ana",
+      sourceArchiveUrl: "https://cdn.tse.jus.br/redes.zip",
+      sourceExtractedAt: extractedAt.toISOString(),
+      checkedAt: checkedAt.toISOString(),
+    }]);
     expect(detail?.documents.map((document) => document.kind).toSorted()).toEqual(["certificate", "government_plan"]);
+    expect(detail?.documents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "government_plan",
+        officialUrl: "https://cdn.tse.jus.br/plano-ana.pdf",
+        downloadUrl: expect.stringMatching(/^\/api\/candidates\/media\/government-plan\/[0-9a-f-]+$/),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/planos.zip",
+      }),
+      expect.objectContaining({
+        kind: "certificate",
+        officialUrl: "https://cdn.tse.jus.br/certidao-ana.pdf",
+        downloadUrl: expect.stringMatching(/^\/api\/candidates\/media\/certificate\/[0-9a-f-]+$/),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/certidoes.zip",
+      }),
+    ]));
     expect(pending?.history).toBeNull();
     expect(pending?.projectCount).toBe(0);
     expect(pending?.voteCount).toBe(0);
+  });
+
+  it("paginates distinct confirmed projects and individual votes independently", async () => {
+    const [historicalIdentity] = await testDb.insert(lawmakers).values({
+      source: "camara",
+      externalId: "law-ana-historic",
+      name: "Ana Maria Cidadã",
+      electoralName: "Ana Cidadã",
+      role: "deputado_federal",
+      party: "ABC",
+      region: "ES",
+      active: false,
+      officialUrl: "https://www.camara.leg.br/deputados/law-ana-historic",
+      checkedAt,
+    }).returning();
+    if (!historicalIdentity) throw new Error("historical lawmaker fixture failed");
+    await testDb.insert(candidateLawmakerLinks).values({
+      candidateId: seeded.ana.id,
+      lawmakerId: historicalIdentity.id,
+      status: "confirmed",
+      matchMethod: "operator_review",
+    });
+    await testDb.insert(billAuthors).values({
+      source: "camara",
+      externalId: "author-a1-coauthor",
+      billId: seeded.anaBill1.id,
+      lawmakerId: historicalIdentity.id,
+      officialName: "Ana Cidadã",
+      authorKind: "coautora",
+      isPrimary: false,
+      officialUrl: "https://camara.test/a1-coauthor",
+      checkedAt,
+    });
+
+    const extraBills = await testDb.insert(bills).values(Array.from({ length: 9 }, (_, index) => ({
+      source: "camara" as const,
+      externalId: `ana-extra-${index + 1}`,
+      officialCode: `PL ${index + 10}/2026`,
+      officialTitle: `Projeto adicional ${index + 1}`,
+      officialSummary: "",
+      originHouse: "camara" as const,
+      statusLabel: "Em análise",
+      officialUrl: `https://camara.test/ana-extra-${index + 1}`,
+      presentedAt: new Date(`2026-06-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`),
+      checkedAt,
+    }))).returning();
+    await testDb.insert(billAuthors).values(extraBills.map((bill, index) => ({
+      source: "camara" as const,
+      externalId: `author-extra-${index + 1}`,
+      billId: bill.id,
+      lawmakerId: seeded.camara.id,
+      officialName: "Ana Cidadã",
+      authorKind: "deputada",
+      isPrimary: true,
+      officialUrl: `https://camara.test/author-extra-${index + 1}`,
+      checkedAt,
+    })));
+    const extraEvents = await testDb.insert(voteEvents).values(extraBills.map((bill, index) => ({
+      source: "camara" as const,
+      externalId: `vote-extra-${index + 1}`,
+      billId: bill.id,
+      occurredAt: new Date(`2026-07-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`),
+      house: "camara" as const,
+      description: `Votação adicional ${index + 1}`,
+      result: "Aprovado",
+      isNominal: true,
+      isSecret: false,
+      officialUrl: `https://camara.test/vote-extra-${index + 1}`,
+      checkedAt,
+    }))).returning();
+    await testDb.insert(individualVotes).values(extraEvents.map((event, index) => ({
+      source: "camara" as const,
+      externalId: `individual-extra-${index + 1}`,
+      voteEventId: event.id,
+      lawmakerId: seeded.camara.id,
+      choice: "abstencao" as const,
+      rawChoice: "Abstenção",
+      officialUrl: `https://camara.test/individual-extra-${index + 1}`,
+      checkedAt,
+    })));
+
+    const projectsSecondPage = await getCandidateDetail(testDb, 2026, "1010", {
+      projectPage: 2,
+      votePage: 1,
+    });
+    const votesSecondPage = await getCandidateDetail(testDb, 2026, "1010", {
+      projectPage: 1,
+      votePage: 2,
+    });
+
+    expect(projectsSecondPage?.history).toMatchObject({
+      projectCount: 11,
+      primaryProjectCount: 11,
+      coauthoredProjectCount: 1,
+      voteCount: 11,
+      voteDistribution: { sim: 1, nao: 1, abstencao: 9 },
+      coverage: {
+        projectFrom: "2024-01-02T12:00:00.000Z",
+        projectTo: "2026-06-09T12:00:00.000Z",
+        voteFrom: "2024-03-04T12:00:00.000Z",
+        voteTo: "2026-07-09T12:00:00.000Z",
+      },
+      projects: { page: 2, pageSize: 10, total: 11, totalPages: 2 },
+      votes: { page: 1, pageSize: 10, total: 11, totalPages: 2 },
+    });
+    expect(projectsSecondPage?.history?.projects.items).toHaveLength(1);
+    expect(projectsSecondPage?.history?.votes.items).toHaveLength(10);
+    expect(votesSecondPage?.history?.projects.items).toHaveLength(10);
+    expect(votesSecondPage?.history?.votes.items).toHaveLength(1);
+    expect(projectsSecondPage?.history?.projects.items.filter((item) => item.externalId === "ana-1")).toHaveLength(1);
+    expect(projectsSecondPage?.history?.projects.items.find((item) => item.externalId === "ana-1"))
+      .toMatchObject({ primary: true, coauthored: true });
+  });
+
+  it("derives coverage only from stored official dates", async () => {
+    await testDb.update(bills).set({ presentedAt: null });
+    await testDb.delete(individualVotes);
+
+    const detail = await getCandidateDetail(testDb, 2026, "1010", { projectPage: 999, votePage: 999 });
+
+    expect(detail?.history).toMatchObject({
+      projectCount: 2,
+      voteCount: 0,
+      coverage: { projectFrom: null, projectTo: null, voteFrom: null, voteTo: null },
+      projects: { page: 1, totalPages: 1 },
+      votes: { page: 1, totalPages: 1 },
+    });
   });
 });
 
