@@ -99,9 +99,25 @@ function values(value: string | string[] | undefined): string[] {
   return result;
 }
 
+function safeTextValues(value: string | string[] | undefined): string[] {
+  if (value === undefined) return [];
+  const source = Array.isArray(value) ? value : [value];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of source) {
+    if (!isSafeCandidateFilterText(item)) continue;
+    const normalized = item.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length === MAX_VALUES) break;
+  }
+  return result;
+}
+
 function text(value: string | string[] | undefined): string | undefined {
-  const selected = values(value)[0];
-  if (selected === undefined || !isSafeCandidateFilterText(selected)) return undefined;
+  const selected = safeTextValues(value)[0];
+  if (selected === undefined) return undefined;
   const bounded = selected?.slice(0, MAX_TEXT_LENGTH);
   return bounded !== undefined && isValidCandidateFilterText(bounded) ? bounded : undefined;
 }
@@ -109,8 +125,7 @@ function text(value: string | string[] | undefined): string | undefined {
 function texts(value: string | string[] | undefined): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
-  for (const selected of values(value)) {
-    if (!isSafeCandidateFilterText(selected)) continue;
+  for (const selected of safeTextValues(value)) {
     const bounded = selected.slice(0, MAX_TEXT_LENGTH);
     if (!isValidCandidateFilterText(bounded) || seen.has(bounded)) continue;
     seen.add(bounded);

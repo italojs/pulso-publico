@@ -10,7 +10,7 @@ import {
   CANDIDATE_ORDER_VALUES,
   CANDIDATE_REGION_VALUES,
   centsToReais,
-  isValidCandidateFilterText,
+  isSafeCandidateFilterText,
   MAX_CANDIDATE_AGE,
   MAX_CANDIDATE_ASSET_COUNT,
   MAX_CANDIDATE_FILTER_VALUES,
@@ -27,8 +27,10 @@ const MAX_FILTER_VALUES = MAX_CANDIDATE_FILTER_VALUES;
 const MAX_TEXT_LENGTH = MAX_CANDIDATE_TEXT_LENGTH;
 const MAX_REQUEST_BYTES = 65_536;
 
-const text = z.string().trim().min(1).max(MAX_TEXT_LENGTH)
-  .refine(isValidCandidateFilterText, "Text must not contain controls or malformed Unicode");
+const text = z.string()
+  .refine(isSafeCandidateFilterText, "Text must not contain controls or malformed Unicode")
+  .transform((value) => value.trim())
+  .pipe(z.string().min(1).max(MAX_TEXT_LENGTH));
 const values = <T extends z.ZodType>(schema: T) => z.array(schema).min(1).max(MAX_FILTER_VALUES);
 const nonNegativeInteger = z.number().int().safe().nonnegative();
 const positiveInteger = z.number().int().safe().positive();

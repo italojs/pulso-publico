@@ -113,12 +113,12 @@ A revisão partiu do HEAD `d639e62` e produziu o commit funcional `0662858` (`fi
 ### Contratos endurecidos
 
 - Cada um dos cinco recursos tabulares regionais agora só é aceito quando o ZIP contém exatamente a partição canônica Brasil mais as 27 UFs. Ausência, duplicidade, região inesperada e arquivo regional isolado rejeitam a carga antes de qualquer manifest; somente os arquivos disjuntos pretendidos são processados e as demais entradas são drenadas sob limites.
-- Receitas, despesas contratadas e despesas pagas preservam suas próprias marcas temporais tanto nos registros quanto no manifest. A marca agregada continua sendo o máximo somente para exibição. Se um manifest legado tiver apenas a marca agregada, ela ainda funciona como piso para os três subtipos na primeira carga nova; essa primeira carga estabelece os três baselines independentes e qualquer regressão posterior de um único subtipo rejeita a publicação inteira.
+- Receitas, despesas contratadas e despesas pagas preservam suas próprias marcas temporais tanto nos registros quanto no manifest. A marca agregada continua sendo o máximo somente para exibição. Se um manifest legado tiver apenas a marca agregada, a primeira carga nova protege esse máximo agregado e estabelece os três baselines independentes; depois disso, qualquer regressão de um único subtipo rejeita a publicação inteira.
 - A identidade oficial de bem passou a ser candidatura mais `source_order` quando a ordem existe. Duplicata exata tem rejeição determinística conforme o contrato, conflito na mesma ordem é recusado e linhas legadas com ordem nula continuam compatíveis. A migração `0010_naive_mac_gargan.sql` adiciona o índice único parcial correspondente.
 - O comando de vínculo usa a mesma validação canônica do domínio: IDs públicos de candidatura com 11 ou 12 dígitos são aceitos; comprimentos diferentes são rejeitados.
 - Somente `saldoMin` e `saldoMax` aceitam sinal, dentro de todo o intervalo `bigint` do PostgreSQL e com mínimo menor ou igual ao máximo. Receita, despesa e bens continuam não negativos. O comportamento é simétrico entre GET nativo, JSON, URL canônica, formatter e consulta SQL.
 - Depois de uma exceção ambígua na persistência, o job consulta status, ano e contagem da geração: sucesso confirmado é normalizado como sucesso verdadeiro sem remover mídia; falha definitiva descarta staging; resultado pendente, divergente ou impossível de consultar retém a geração para reconciliação segura e devolve somente erro sanitizado.
-- O próprio record de rede social exige HTTP(S) sem credencial; nomes de mídia são limitados por bytes UTF-8; texto livre rejeita NUL, controles C0/C1 e Unicode malformado em todas as fronteiras; a URL de comparação do README usa `ano=2026` e parâmetros `id` repetidos.
+- O próprio record de rede social exige HTTP(S) sem credencial; nomes de mídia são limitados por bytes UTF-8; texto livre rejeita NUL, controles C0/C1 internos e Unicode malformado; a rodada 2 abaixo fecha a normalização dos mesmos controles nas bordas. A URL de comparação do README usa `ano=2026` e parâmetros `id` repetidos.
 
 Durante o resync em Node 26.8.1, dois problemas adicionais de robustez foram reproduzidos antes da correção. O staging mantinha um `FileHandle` sujeito à finalização fatal do runtime; ele passou a usar criação exclusiva por stream, mantendo as garantias contra colisão e symlink. Uma entrada de mídia que parasse depois de ser entregue pelo ZIP não observava o cancelamento; a iteração agora disputa cada avanço com o `AbortSignal`, destrói a entrada e termina com `TSE_REQUEST_ABORTED`. O teste RED exato excedia 5 segundos; o GREEN encerrou em cerca de 16 ms.
 
@@ -167,6 +167,24 @@ git diff --check                                       # exit 0
 ```
 
 As suítes focadas cobriram cliente regional, mapper, mídia/ownership, job/ack, repositório real, CLI, contratos de filtro, URL, consulta e UI. A validação desktop/mobile/autenticada da execução original permanece aplicável às superfícies não alteradas; nesta rodada, os filtros assinados, o CLI e a mídia foram exercitados novamente nas fronteiras modificadas.
+
+## Rodada de revisão final 2/5 — texto livre cru
+
+A revisão menor partiu de `557efdf`. O teste RED demonstrou duas falhas em 69 casos: o parser URL aplicava `trim` em `values()` e o schema JSON/wire aplicava `.trim()` antes do `refine`, de modo que TAB, LF ou CR no início ou no fim desapareciam antes da validação. O builder programático já validava o texto cru, portanto havia assimetria entre as fronteiras.
+
+A correção limita-se à ordem das operações. No parser URL, cada texto livre cru passa por `isSafeCandidateFilterText` antes de qualquer normalização. No wire, o pipeline é `refine` do valor cru, `trim` e então validação de comprimento/não vazio do valor normalizado. Espaços comuns ao redor continuam sendo removidos como parte da UX existente. TAB, LF e CR nas duas bordas são rejeitados; controles e Unicode malformado depois do caractere 200 também são rejeitados antes do corte. Builder, URL e JSON voltaram a compartilhar o mesmo resultado.
+
+```text
+RED URL + wire                  # 2 arquivos: 2 falhas, 67 testes verdes
+GREEN URL + wire                # 2 arquivos: 69/69
+foco search/filter/UI/query     # 4 arquivos: 151/151
+npm test                        # 51 arquivos: 646/646
+npm run typecheck               # exit 0
+npm run build                   # exit 0, Next.js 16.3.4
+git diff --check                # exit 0
+```
+
+Não houve resync: a mudança não alcança ingestão, persistência, schema nem o retrato TSE publicado.
 
 ## Estado final
 

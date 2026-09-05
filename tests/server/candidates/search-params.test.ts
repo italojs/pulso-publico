@@ -139,12 +139,25 @@ describe("candidate search params", () => {
   it("rejects unsafe free text consistently at URL, JSON, and builder boundaries", () => {
     for (const value of [
       "Ana\0Maria", "Ana\u001fMaria", "Ana\u007fMaria", "Ana\ud800Maria",
-      `${"A".repeat(200)}\0ignored`,
+      `\tAna`, `Ana\t`, `\nAna`, `Ana\n`, `\rAna`, `Ana\r`,
+      `${"A".repeat(200)}\0ignored`, `${"A".repeat(200)}\t`,
+      `${"A".repeat(200)}\n`, `${"A".repeat(200)}\r`, `${"A".repeat(200)}\ud800`,
     ]) {
       expect(parseCandidateSearchParams({ q: value, partido: value })).toEqual({ page: 1, pageSize: 20 });
       expect(() => parseCandidateFilterInput({ query: value })).toThrow();
       expect(() => buildCandidateHref({ query: value }, 1)).toThrow();
     }
+  });
+
+  it("continues trimming ordinary surrounding spaces in URL and builder input", () => {
+    expect(parseCandidateSearchParams({ q: "  Ana Cidadã  ", partido: "  ABC  " })).toEqual({
+      page: 1,
+      pageSize: 20,
+      query: "Ana Cidadã",
+      parties: ["ABC"],
+    });
+    expect(buildCandidateHref({ query: "  Ana Cidadã  ", parties: ["  ABC  "] }, 1))
+      .toBe("/candidatos?q=Ana+Cidad%C3%A3&partido=ABC");
   });
 
   it("deduplicates and bounds repeated and free-text values", () => {

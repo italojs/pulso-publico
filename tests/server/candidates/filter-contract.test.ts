@@ -51,10 +51,22 @@ describe("candidate filter wire contract", () => {
   });
 
   it("rejects controls and malformed Unicode in every free-text wire field", () => {
-    for (const value of ["Ana\0Maria", "Ana\u001fMaria", "Ana\u007fMaria", "Ana\ud800Maria"]) {
+    for (const value of [
+      "Ana\0Maria", "Ana\u001fMaria", "Ana\u007fMaria", "Ana\ud800Maria",
+      `\tAna`, `Ana\t`, `\nAna`, `Ana\n`, `\rAna`, `Ana\r`,
+      `${"A".repeat(200)}\0`, `${"A".repeat(200)}\t`, `${"A".repeat(200)}\n`,
+      `${"A".repeat(200)}\r`, `${"A".repeat(200)}\ud800`,
+    ]) {
       expect(() => parseCandidateFilterInput({ query: value })).toThrow();
       expect(() => parseCandidateFilterInput({ parties: [value] })).toThrow();
     }
+  });
+
+  it("continues trimming ordinary surrounding spaces in wire text", () => {
+    expect(parseCandidateFilterInput({ query: "  Ana Cidadã  ", parties: ["  ABC  "] })).toEqual({
+      query: "Ana Cidadã",
+      parties: ["ABC"],
+    });
   });
 
   it("accepts the complete strict input and rejects unknown fields", () => {
