@@ -99,6 +99,27 @@ export function normalizeTseOptionalValue(value: string | undefined): string | n
   return normalized;
 }
 
+export function parseTseGenerationInstant(row: TseRow): Date {
+  const date = normalizeTseOptionalValue(row.DT_GERACAO);
+  const time = normalizeTseOptionalValue(row.HH_GERACAO);
+  if (!date || !time) throw new TseContractError("MISSING_SOURCE_METADATA");
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date);
+  if (!match || !/^\d{2}:\d{2}:\d{2}$/.test(time)) {
+    throw new TseContractError("INVALID_SOURCE_EXTRACTED_AT");
+  }
+  try {
+    const plainDate = Temporal.PlainDate.from(`${match[3]}-${match[2]}-${match[1]}`);
+    const plainTime = Temporal.PlainTime.from(time);
+    const instant = plainDate.toZonedDateTime({
+      timeZone: "America/Sao_Paulo",
+      plainTime,
+    }).toInstant();
+    return new Date(instant.epochMilliseconds);
+  } catch {
+    throw new TseContractError("INVALID_SOURCE_EXTRACTED_AT");
+  }
+}
+
 const blankToNull = normalizeTseOptionalValue;
 
 function required(row: TseRow, column: string, code = `MISSING_${column}`): string {

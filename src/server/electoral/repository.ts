@@ -27,6 +27,24 @@ import * as schema from "#/server/db/schema";
 type Database = PostgresJsDatabase<typeof schema>;
 type DateInput = Date | string;
 
+const electoralTabularResources = [
+  "candidates",
+  "complements",
+  "assets",
+  "coalitions",
+  "social",
+  "campaignAccounts",
+] as const;
+
+export type ElectoralTabularResourceName = typeof electoralTabularResources[number];
+export type ElectoralTabularResourceProvenance = Record<
+  ElectoralTabularResourceName,
+  {
+    sourceArchiveUrl: string;
+    sourceExtractedAt: DateInput | null;
+  }
+>;
+
 interface ResourceProvenance {
   sourceArchiveUrl?: string | null;
   sourceExtractedAt?: DateInput | null;
@@ -35,6 +53,7 @@ interface ResourceProvenance {
 
 export type ElectoralSnapshotCandidate = ElectoralCandidate & {
   sourceArchiveUrl?: string | null;
+  sourceExtractedAt: DateInput;
   photoStorageKey?: string | null;
   photoSourceArchiveUrl?: string | null;
   photoOriginalFilename?: string | null;
@@ -57,6 +76,7 @@ export interface ElectoralSnapshot {
   syncRunId: string;
   electionYear: number;
   extractedAt: Date;
+  resourceProvenance: ElectoralTabularResourceProvenance;
   sourceUrl?: string | null;
   candidates: ElectoralSnapshotCandidate[];
   assets: ElectoralSnapshotAsset[];
@@ -108,6 +128,59 @@ function optionalDate(value: DateInput | null | undefined, field: string): Date 
   return value == null ? null : asDate(value, field);
 }
 
+function normalizeResourceProvenance(
+  provenance: ElectoralTabularResourceProvenance,
+): Record<ElectoralTabularResourceName, {
+  sourceArchiveUrl: string;
+  sourceExtractedAt: Date | null;
+}> {
+  if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) {
+    throw new Error("Invalid electoral resource provenance");
+  }
+  const keys = Object.keys(provenance);
+  if (
+    keys.length !== electoralTabularResources.length
+    || keys.some((key) => !electoralTabularResources.includes(key as ElectoralTabularResourceName))
+  ) throw new Error("Invalid electoral resource provenance");
+
+  return Object.fromEntries(electoralTabularResources.map((resource) => {
+    const entry = provenance[resource];
+    if (!entry || typeof entry.sourceArchiveUrl !== "string" || !entry.sourceArchiveUrl.trim()) {
+      throw new Error(`Invalid electoral resource provenance: ${resource}`);
+    }
+    return [resource, {
+      sourceArchiveUrl: entry.sourceArchiveUrl,
+      sourceExtractedAt: optionalDate(
+        entry.sourceExtractedAt,
+        `${resource} sourceExtractedAt`,
+      ),
+    }];
+  })) as Record<ElectoralTabularResourceName, {
+    sourceArchiveUrl: string;
+    sourceExtractedAt: Date | null;
+  }>;
+}
+
+function resourceProvenanceJson(
+  provenance: ReturnType<typeof normalizeResourceProvenance>,
+): schema.ElectoralResourceProvenanceJson {
+  return Object.fromEntries(electoralTabularResources.map((resource) => [resource, {
+    sourceArchiveUrl: provenance[resource].sourceArchiveUrl,
+    sourceExtractedAt: provenance[resource].sourceExtractedAt?.toISOString() ?? null,
+  }]));
+}
+
+function assertResourceTimestamp(
+  value: DateInput | null | undefined,
+  expected: Date | null,
+  label: string,
+): void {
+  const actual = optionalDate(value, `${label} sourceExtractedAt`);
+  if (expected === null || actual === null || actual.getTime() !== expected.getTime()) {
+    throw new Error(`${label} sourceExtractedAt must match its resource provenance`);
+  }
+}
+
 function assertOpaqueStorageKey(value: string | null | undefined): void {
   if (value == null) return;
   const parts = value.split("/");
@@ -154,18 +227,30 @@ function checkedAtFor(
   return asDate(candidate.checkedAt, "candidate checkedAt");
 }
 
-function assertSnapshot(snapshot: ElectoralSnapshot): Map<string, ElectoralSnapshotCandidate> {
+function assertSnapshot(
+  snapshot: ElectoralSnapshot,
+  provenance: ReturnType<typeof normalizeResourceProvenance>,
+): Map<string, ElectoralSnapshotCandidate> {
   if (!validSyncRunId.test(snapshot.syncRunId)) throw new Error("Invalid sync run id");
   if (!Number.isSafeInteger(snapshot.electionYear) || snapshot.electionYear < 2026) {
     throw new Error("Invalid election year");
   }
-  asDate(snapshot.extractedAt, "snapshot extractedAt");
+  const extractedAt = asDate(snapshot.extractedAt, "snapshot extractedAt");
+  const candidateExtractedAt = provenance.candidates.sourceExtractedAt;
+  if (!candidateExtractedAt || candidateExtractedAt.getTime() !== extractedAt.getTime()) {
+    throw new Error("Snapshot extractedAt must match candidates resource provenance");
+  }
 
   const candidates = new Map<string, ElectoralSnapshotCandidate>();
   for (const candidate of snapshot.candidates) {
     if (candidate.electionYear !== snapshot.electionYear) {
       throw new Error("Candidate belongs to a different election");
     }
+    assertResourceTimestamp(
+      candidate.sourceExtractedAt,
+      candidateExtractedAt,
+      "candidate",
+    );
     if (candidates.has(candidate.externalId)) {
       throw new Error(`Duplicate candidate ${candidate.externalId}`);
     }
@@ -181,6 +266,7 @@ function assertSnapshot(snapshot: ElectoralSnapshot): Map<string, ElectoralSnaps
     if (typeof asset.valueCents !== "bigint" || asset.valueCents < 0n) {
       throw new Error("Asset money must be a non-negative bigint");
     }
+    assertResourceTimestamp(asset.sourceExtractedAt, provenance.assets.sourceExtractedAt, "asset");
     const key = JSON.stringify([
       asset.candidateExternalId,
       asset.category,
@@ -204,8 +290,16 @@ function assertSnapshot(snapshot: ElectoralSnapshot): Map<string, ElectoralSnaps
     if (typeof entry.valueCents !== "bigint" || entry.valueCents < 0n) {
       throw new Error("Campaign money must be a non-negative bigint");
     }
+    assertResourceTimestamp(
+      entry.sourceExtractedAt,
+      provenance.campaignAccounts.sourceExtractedAt,
+      "campaign",
+    );
   }
-  for (const link of snapshot.socialLinks) validateResource(link);
+  for (const link of snapshot.socialLinks) {
+    validateResource(link);
+    assertResourceTimestamp(link.sourceExtractedAt, provenance.social.sourceExtractedAt, "social");
+  }
   for (const plan of snapshot.governmentPlans) {
     validateResource(plan);
     assertOpaqueStorageKey(plan.storageKey);
@@ -348,9 +442,14 @@ export class ElectoralRepository {
   }
 
   async persistSnapshot(snapshot: ElectoralSnapshot): Promise<void> {
-    const candidateByExternalId = assertSnapshot(snapshot);
+    const resourceProvenance = normalizeResourceProvenance(snapshot.resourceProvenance);
+    const resourceProvenancePayload = resourceProvenanceJson(resourceProvenance);
+    const candidateByExternalId = assertSnapshot(snapshot, resourceProvenance);
     const extractedAt = asDate(snapshot.extractedAt, "snapshot extractedAt");
-    const payloadFingerprint = fingerprintSnapshot(snapshot);
+    const payloadFingerprint = fingerprintSnapshot({
+      ...snapshot,
+      resourceProvenance,
+    });
 
     await this.#database.transaction(async (transaction) => {
       const tx = transaction as unknown as Database;
@@ -386,17 +485,22 @@ export class ElectoralRepository {
 
       const [latestSuccessful] = await tx.select({
         syncRunId: electoralSyncRuns.syncRunId,
-        extractedAt: electoralSyncRuns.extractedAt,
+        resourceProvenance: electoralSyncRuns.resourceProvenance,
       }).from(electoralSyncRuns).where(and(
         eq(electoralSyncRuns.electionYear, snapshot.electionYear),
         eq(electoralSyncRuns.status, "successful"),
       )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1);
-      if (
-        latestSuccessful?.extractedAt
-        && latestSuccessful.syncRunId !== snapshot.syncRunId
-        && latestSuccessful.extractedAt.getTime() > extractedAt.getTime()
-      ) {
-        throw new Error("Cannot publish a stale electoral snapshot");
+      if (latestSuccessful && latestSuccessful.syncRunId !== snapshot.syncRunId) {
+        for (const resource of electoralTabularResources) {
+          const previousValue = latestSuccessful.resourceProvenance?.[resource]
+            ?.sourceExtractedAt;
+          if (!previousValue) continue;
+          const previous = asDate(previousValue, `${resource} previous sourceExtractedAt`);
+          const current = resourceProvenance[resource].sourceExtractedAt;
+          if (!current || previous.getTime() > current.getTime()) {
+            throw new Error(`Cannot publish a stale electoral resource: ${resource}`);
+          }
+        }
       }
 
       const startedAt = new Date();
@@ -409,6 +513,7 @@ export class ElectoralRepository {
         startedAt,
         completedAt: null,
         extractedAt: null,
+        resourceProvenance: resourceProvenancePayload,
         candidateCount: snapshot.candidates.length,
         assetCount: snapshot.assets.length,
         campaignEntryCount: snapshot.campaignEntries.length,
@@ -452,7 +557,7 @@ export class ElectoralRepository {
           birthCity: candidate.birthCity,
           officialUrl: candidate.officialUrl,
           sourceArchiveUrl: candidate.sourceArchiveUrl ?? null,
-          sourceExtractedAt: extractedAt,
+          sourceExtractedAt: asDate(candidate.sourceExtractedAt, "candidate sourceExtractedAt"),
           checkedAt: asDate(candidate.checkedAt, "candidate checkedAt"),
           photoStorageKey: candidate.photoStorageKey ?? null,
           photoSourceArchiveUrl: candidate.photoSourceArchiveUrl ?? null,

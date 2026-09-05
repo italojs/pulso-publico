@@ -22,6 +22,7 @@ import {
   candidateDocuments,
   candidateGovernmentPlans,
   candidateLawmakerLinks,
+  candidateSocialLinks,
   electoralCandidates,
   electoralSyncRuns,
   followedCandidates,
@@ -39,6 +40,28 @@ import {
 const checkedAt = "2026-09-05T12:00:00.000Z";
 const sourceExtractedAt = "2026-09-05T11:30:00.000Z";
 const databaseUrl = process.env.DATABASE_URL!;
+const tabularResources = [
+  "candidates",
+  "complements",
+  "assets",
+  "coalitions",
+  "social",
+  "campaignAccounts",
+] as const;
+
+function resourceProvenance(
+  overrides: Partial<Record<typeof tabularResources[number], Date | null>> = {},
+) {
+  return Object.fromEntries(tabularResources.map((resource) => [resource, {
+    sourceArchiveUrl: `https://cdn.tse.jus.br/${resource}.zip`,
+    sourceExtractedAt: overrides[resource] === undefined
+      ? new Date(sourceExtractedAt)
+      : overrides[resource],
+  }])) as Record<typeof tabularResources[number], {
+    sourceArchiveUrl: string;
+    sourceExtractedAt: Date | null;
+  }>;
+}
 
 function candidate(
   externalId: string,
@@ -83,6 +106,8 @@ function candidate(
     photoMimeType: "image/jpeg",
     photoSourceExtractedAt: sourceExtractedAt,
     photoCheckedAt: checkedAt,
+    sourceArchiveUrl: "https://cdn.tse.jus.br/candidates.zip",
+    sourceExtractedAt,
     ...overrides,
   };
 }
@@ -97,39 +122,60 @@ function snapshot(
     syncRunId,
     electionYear: 2026,
     extractedAt: new Date(sourceExtractedAt),
+    resourceProvenance: resourceProvenance(),
     candidates,
     assets: [
-      CandidateAssetRecord.parse({
+      {
+        ...CandidateAssetRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
         category: "Apartamento",
         description: "Imóvel residencial",
         valueCents: 25_000_000n,
-      }),
-      CandidateAssetRecord.parse({
+        }),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/assets.zip",
+        sourceExtractedAt,
+        checkedAt,
+      },
+      {
+        ...CandidateAssetRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
         category: "Veículo",
         description: null,
         valueCents: 0n,
-      }),
+        }),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/assets.zip",
+        sourceExtractedAt,
+        checkedAt,
+      },
     ],
     campaignEntries: [
-      CampaignEntryRecord.parse({
+      {
+        ...CampaignEntryRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
         kind: "receipt",
         category: "Recursos próprios",
         valueCents: 0n,
-      }),
+        }),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+        sourceExtractedAt,
+        checkedAt,
+      },
     ],
     socialLinks: [
-      CandidateSocialLinkRecord.parse({
+      {
+        ...CandidateSocialLinkRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
         label: "Site",
         url: "https://candidata.example.test/",
-      }),
+        }),
+        sourceArchiveUrl: "https://cdn.tse.jus.br/social.zip",
+        sourceExtractedAt,
+        checkedAt,
+      },
     ],
     governmentPlans: [{
       ...CandidateGovernmentPlanRecord.parse({
@@ -271,6 +317,155 @@ describe("ElectoralRepository", () => {
     }).from(candidateDocuments)).toHaveLength(2);
   });
 
+  it("persists all six resource versions and their corresponding block provenance", async () => {
+    const candidateSnapshot = snapshot("resource-provenance-run");
+    candidateSnapshot.resourceProvenance = resourceProvenance({
+      candidates: new Date("2026-09-05T08:00:00.000Z"),
+      complements: new Date("2026-09-05T08:05:00.000Z"),
+      assets: new Date("2026-09-05T08:10:00.000Z"),
+      coalitions: new Date("2026-09-05T08:15:00.000Z"),
+      social: new Date("2026-09-05T08:20:00.000Z"),
+      campaignAccounts: new Date("2026-09-05T08:25:00.000Z"),
+    });
+    candidateSnapshot.extractedAt = new Date("2026-09-05T08:00:00.000Z");
+    candidateSnapshot.candidates = candidateSnapshot.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T08:00:00.000Z",
+      photoSourceExtractedAt: null,
+    }));
+    candidateSnapshot.assets = candidateSnapshot.assets.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T08:10:00.000Z",
+    }));
+    candidateSnapshot.socialLinks = candidateSnapshot.socialLinks.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T08:20:00.000Z",
+    }));
+    candidateSnapshot.campaignEntries = candidateSnapshot.campaignEntries.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T08:25:00.000Z",
+    }));
+    candidateSnapshot.governmentPlans = candidateSnapshot.governmentPlans.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: null,
+    }));
+    candidateSnapshot.documents = candidateSnapshot.documents.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: null,
+    }));
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({
+      resourceProvenance: electoralSyncRuns.resourceProvenance,
+    }).from(electoralSyncRuns)).toEqual([{
+      resourceProvenance: Object.fromEntries(Object.entries(candidateSnapshot.resourceProvenance)
+        .map(([resource, provenance]) => [resource, {
+          sourceArchiveUrl: provenance.sourceArchiveUrl,
+          sourceExtractedAt: provenance.sourceExtractedAt == null
+            ? null
+            : new Date(provenance.sourceExtractedAt).toISOString(),
+        }])),
+    }]);
+    expect(await testDb.select({ sourceExtractedAt: electoralCandidates.sourceExtractedAt })
+      .from(electoralCandidates)).toEqual([{
+      sourceExtractedAt: new Date("2026-09-05T08:00:00.000Z"),
+    }]);
+    expect(await testDb.select({ sourceExtractedAt: candidateAssets.sourceExtractedAt })
+      .from(candidateAssets)).toEqual([
+      { sourceExtractedAt: new Date("2026-09-05T08:10:00.000Z") },
+      { sourceExtractedAt: new Date("2026-09-05T08:10:00.000Z") },
+    ]);
+    expect(await testDb.select({ sourceExtractedAt: candidateCampaignTotals.sourceExtractedAt })
+      .from(candidateCampaignTotals)).toEqual([{
+      sourceExtractedAt: new Date("2026-09-05T08:25:00.000Z"),
+    }]);
+    expect(await testDb.select({ sourceExtractedAt: candidateSocialLinks.sourceExtractedAt })
+      .from(candidateSocialLinks)).toEqual([{
+      sourceExtractedAt: new Date("2026-09-05T08:20:00.000Z"),
+    }]);
+    expect(await testDb.select({ sourceExtractedAt: candidateGovernmentPlans.sourceExtractedAt })
+      .from(candidateGovernmentPlans)).toEqual([{ sourceExtractedAt: null }]);
+    expect(await testDb.select({ sourceExtractedAt: candidateDocuments.sourceExtractedAt })
+      .from(candidateDocuments)).toEqual([{ sourceExtractedAt: null }]);
+  });
+
+  it("rejects a mixed snapshot when any independently-versioned resource regresses", async () => {
+    const first = snapshot("resource-version-first");
+    first.resourceProvenance = resourceProvenance({
+      candidates: new Date("2026-09-05T12:00:00.000Z"),
+      assets: new Date("2026-09-05T11:00:00.000Z"),
+    });
+    first.extractedAt = new Date("2026-09-05T12:00:00.000Z");
+    first.candidates = first.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: first.extractedAt,
+    }));
+    first.assets = first.assets.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T11:00:00.000Z",
+    }));
+    await repository.persistSnapshot(first);
+
+    const mixed = snapshot("resource-version-mixed");
+    mixed.resourceProvenance = resourceProvenance({
+      candidates: new Date("2026-09-06T12:00:00.000Z"),
+      assets: new Date("2026-09-04T11:00:00.000Z"),
+    });
+    mixed.extractedAt = new Date("2026-09-06T12:00:00.000Z");
+    mixed.candidates = mixed.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: mixed.extractedAt,
+    }));
+    mixed.assets = mixed.assets.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-04T11:00:00.000Z",
+    }));
+
+    await expect(repository.persistSnapshot(mixed))
+      .rejects.toThrow("Cannot publish a stale electoral resource: assets");
+    expect(await testDb.select({ syncRunId: electoralSyncRuns.syncRunId })
+      .from(electoralSyncRuns)).toEqual([{ syncRunId: "resource-version-first" }]);
+  });
+
+  it("does not replace a previously known resource timestamp with an empty null version", async () => {
+    const first = snapshot("known-campaign-version");
+    await repository.persistSnapshot(first);
+
+    const empty = snapshot("empty-campaign-version");
+    empty.extractedAt = new Date("2026-09-06T11:30:00.000Z");
+    empty.resourceProvenance = resourceProvenance({
+      candidates: empty.extractedAt,
+      campaignAccounts: null,
+    });
+    empty.candidates = empty.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: empty.extractedAt,
+    }));
+    empty.campaignEntries = [];
+
+    await expect(repository.persistSnapshot(empty))
+      .rejects.toThrow("Cannot publish a stale electoral resource: campaignAccounts");
+  });
+
+  it("accepts an initially empty complete resource with null official timestamp", async () => {
+    const initial = snapshot("initial-empty-campaign");
+    initial.resourceProvenance = resourceProvenance({ campaignAccounts: null });
+    initial.campaignEntries = [];
+
+    await expect(repository.persistSnapshot(initial)).resolves.toBeUndefined();
+    expect(await testDb.select({
+      resourceProvenance: electoralSyncRuns.resourceProvenance,
+    }).from(electoralSyncRuns)).toEqual([{
+      resourceProvenance: expect.objectContaining({
+        campaignAccounts: {
+          sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+          sourceExtractedAt: null,
+        },
+      }),
+    }]);
+  });
+
   it("normalizes campaign provenance before treating reordered entries as an equivalent retry", async () => {
     const provenanceA = {
       ...CampaignEntryRecord.parse({
@@ -293,13 +488,17 @@ describe("ElectoralRepository", () => {
         valueCents: 200n,
       }),
       sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-b.zip",
-      sourceExtractedAt: "2026-09-05T10:00:00.000Z",
+      sourceExtractedAt: "2026-09-05T09:00:00.000Z",
       checkedAt: "2026-09-05T11:00:00.000Z",
     };
     const firstAttempt = snapshot("campaign-provenance-run");
     firstAttempt.campaignEntries = [provenanceB, provenanceA];
+    firstAttempt.resourceProvenance = resourceProvenance({
+      campaignAccounts: new Date("2026-09-05T09:00:00.000Z"),
+    });
     const reorderedRetry = snapshot("campaign-provenance-run");
     reorderedRetry.campaignEntries = [provenanceA, provenanceB];
+    reorderedRetry.resourceProvenance = firstAttempt.resourceProvenance;
 
     await repository.persistSnapshot(firstAttempt);
     await expect(repository.persistSnapshot(reorderedRetry)).resolves.toBeUndefined();
@@ -353,12 +552,20 @@ describe("ElectoralRepository", () => {
 
       const newerSnapshot = snapshot(newerRunId, [candidate(primaryCandidateId, {
         status: "SNAPSHOT NOVO",
+        sourceExtractedAt: "2026-09-05T12:00:00.000Z",
       })]);
       newerSnapshot.extractedAt = new Date("2026-09-05T12:00:00.000Z");
+      newerSnapshot.resourceProvenance = resourceProvenance({
+        candidates: newerSnapshot.extractedAt,
+      });
       const olderSnapshot = snapshot(olderRunId, [candidate(primaryCandidateId, {
         status: "SNAPSHOT ANTIGO",
+        sourceExtractedAt: "2026-09-05T11:00:00.000Z",
       })]);
       olderSnapshot.extractedAt = new Date("2026-09-05T11:00:00.000Z");
+      olderSnapshot.resourceProvenance = resourceProvenance({
+        candidates: olderSnapshot.extractedAt,
+      });
       const newerRepository = new ElectoralRepository(drizzle(newerPool, { schema: databaseSchema }));
       const olderRepository = new ElectoralRepository(drizzle(olderPool, { schema: databaseSchema }));
 
@@ -396,7 +603,9 @@ describe("ElectoralRepository", () => {
       expect(newerResult).toMatchObject({ status: "fulfilled" });
       expect(olderResult).toMatchObject({
         status: "rejected",
-        reason: expect.objectContaining({ message: "Cannot publish a stale electoral snapshot" }),
+        reason: expect.objectContaining({
+          message: "Cannot publish a stale electoral resource: candidates",
+        }),
       });
       await expect(repository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
         status: "SNAPSHOT NOVO",
@@ -473,11 +682,18 @@ describe("ElectoralRepository", () => {
   it("uses a total order to resolve successful runs with identical timestamps", async () => {
     const first = snapshot("same-time-a");
     first.extractedAt = new Date("2026-09-05T15:00:00.000Z");
+    first.resourceProvenance = resourceProvenance({ candidates: first.extractedAt });
+    first.candidates = first.candidates.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: first.extractedAt,
+    }));
     await repository.persistSnapshot(first);
     const second = snapshot("same-time-z", [candidate(primaryCandidateId, {
       status: "DESEMPATE DETERMINÍSTICO",
+      sourceExtractedAt: "2026-09-05T15:00:00.000Z",
     })]);
     second.extractedAt = first.extractedAt;
+    second.resourceProvenance = first.resourceProvenance;
     await repository.persistSnapshot(second);
     const tiedAt = new Date("2026-09-05T15:30:00.000Z");
     await testDb.update(electoralSyncRuns).set({ completedAt: tiedAt })
@@ -506,6 +722,17 @@ describe("ElectoralRepository", () => {
       status: "APTO",
       snapshotRunId: "immutable-run",
     });
+  });
+
+  it("includes the six-resource provenance manifest in the immutable payload fingerprint", async () => {
+    const original = snapshot("manifest-fingerprint-run");
+    await repository.persistSnapshot(original);
+    const changedManifest = snapshot("manifest-fingerprint-run");
+    changedManifest.resourceProvenance = resourceProvenance({
+      complements: new Date("2026-09-05T11:31:00.000Z"),
+    });
+
+    await expect(repository.persistSnapshot(changedManifest)).rejects.toThrow(/different payload/i);
   });
 
   it("rejects reuse of a run id by another election", async () => {

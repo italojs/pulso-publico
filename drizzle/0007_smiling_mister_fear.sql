@@ -1,0 +1,1 @@
+ALTER TABLE "electoral_sync_runs" ADD COLUMN "resource_provenance" jsonb DEFAULT '{}'::jsonb NOT NULL;

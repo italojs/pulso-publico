@@ -78,6 +78,11 @@ export const electoralSyncStatusEnum = pgEnum("electoral_sync_status", [
   "failed",
 ]);
 
+export type ElectoralResourceProvenanceJson = Record<string, {
+  sourceArchiveUrl: string;
+  sourceExtractedAt: string | null;
+}>;
+
 export const bills = pgTable(
   "bills",
   {
@@ -387,6 +392,10 @@ export const electoralSyncRuns = pgTable("electoral_sync_runs", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   extractedAt: timestamp("extracted_at", { withTimezone: true }),
+  resourceProvenance: jsonb("resource_provenance")
+    .$type<ElectoralResourceProvenanceJson>()
+    .default({})
+    .notNull(),
   candidateCount: integer("candidate_count").default(0).notNull(),
   assetCount: integer("asset_count").default(0).notNull(),
   campaignEntryCount: integer("campaign_entry_count").default(0).notNull(),

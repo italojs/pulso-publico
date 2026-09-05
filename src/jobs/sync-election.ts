@@ -16,6 +16,7 @@ import {
   mapSocialRow,
   moneyToCents,
   normalizeTseOptionalValue,
+  parseTseGenerationInstant,
   TseContractError,
 } from "#/integrations/tse/mapper";
 import {
@@ -25,6 +26,7 @@ import {
 import type {
   CandidateLawmakerLinkSuggestion,
   ElectoralSnapshot,
+  ElectoralTabularResourceProvenance,
 } from "#/server/electoral/repository";
 
 type RowEntry = {
@@ -38,6 +40,7 @@ type ResourceStreamEvent = ({ type: "row" } & RowEntry) | {
   resource: TseResourceName;
   entryKinds: readonly string[];
   sourceArchiveUrl: string;
+  sourceExtractedAt: Date | null;
 };
 
 interface ElectionClient {
@@ -362,46 +365,68 @@ function fundingKind(row: TseRow): string {
   return "Não informado";
 }
 
-function officialSourceExtractedAt(row: TseRow): Date {
-  const date = value(row, "DT_GERACAO");
-  const time = value(row, "HH_GERACAO");
-  if (!date || !time) return fail("MISSING_SOURCE_METADATA");
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date);
-  if (!match) return fail("INVALID_SOURCE_EXTRACTED_AT");
-  if (!/^\d{2}:\d{2}:\d{2}$/.test(time)) return fail("INVALID_SOURCE_EXTRACTED_AT");
-  try {
-    const plainDate = Temporal.PlainDate.from(`${match[3]}-${match[2]}-${match[1]}`);
-    const plainTime = Temporal.PlainTime.from(time);
-    const instant = plainDate.toZonedDateTime({
-      timeZone: "America/Sao_Paulo",
-      plainTime,
-    }).toInstant();
-    return new Date(instant.epochMilliseconds);
-  } catch {
-    return fail("INVALID_SOURCE_EXTRACTED_AT");
-  }
-}
-
 class OfficialSourceMetadata {
-  readonly #byResource = new Map<TseResourceName, Date>();
+  readonly #byResource = new Map<TseResourceName, {
+    sourceArchiveUrl: string;
+    sourceExtractedAt: Date | null;
+    completed: boolean;
+  }>();
 
-  observe(resource: TseResourceName, row: TseRow): Date {
-    const extractedAt = officialSourceExtractedAt(row);
+  observe(resource: TseResourceName, row: TseRow, sourceArchiveUrl: string): Date {
+    const extractedAt = parseTseGenerationInstant(row);
     const prior = this.#byResource.get(resource);
-    if (prior && prior.getTime() !== extractedAt.getTime()) {
+    if (
+      prior
+      && (prior.sourceArchiveUrl !== sourceArchiveUrl
+        || prior.sourceExtractedAt?.getTime() !== extractedAt.getTime())
+    ) {
       fail("INCONSISTENT_SOURCE_METADATA");
     }
-    this.#byResource.set(resource, extractedAt);
+    this.#byResource.set(resource, {
+      sourceArchiveUrl,
+      sourceExtractedAt: extractedAt,
+      completed: false,
+    });
     return extractedAt;
   }
 
-  snapshotExtractedAt(): Date {
-    const instants = tabularResourceNames.map((resource) => {
-      const extractedAt = this.#byResource.get(resource);
-      if (!extractedAt) return fail("MISSING_SOURCE_METADATA");
-      return extractedAt;
+  complete(resource: TseResourceName, manifest: {
+    sourceArchiveUrl: string;
+    sourceExtractedAt: Date | null;
+  }): void {
+    const prior = this.#byResource.get(resource);
+    if (prior?.completed) fail("INVALID_RESOURCE_MANIFEST");
+    if (
+      prior
+      && (prior.sourceArchiveUrl !== manifest.sourceArchiveUrl
+        || manifest.sourceExtractedAt === null
+        || prior.sourceExtractedAt?.getTime() !== manifest.sourceExtractedAt.getTime())
+    ) fail("INCONSISTENT_SOURCE_METADATA");
+    if (manifest.sourceExtractedAt && Number.isNaN(manifest.sourceExtractedAt.getTime())) {
+      fail("INVALID_SOURCE_EXTRACTED_AT");
+    }
+    this.#byResource.set(resource, {
+      sourceArchiveUrl: manifest.sourceArchiveUrl,
+      sourceExtractedAt: manifest.sourceExtractedAt,
+      completed: true,
     });
-    return new Date(Math.max(...instants.map((instant) => instant.getTime())));
+  }
+
+  timestamp(resource: TseResourceName): Date | null {
+    const provenance = this.#byResource.get(resource);
+    if (!provenance?.completed) return fail("MISSING_RESOURCE_MANIFEST");
+    return provenance.sourceExtractedAt;
+  }
+
+  manifest(): ElectoralTabularResourceProvenance {
+    return Object.fromEntries(tabularResourceNames.map((resource) => {
+      const provenance = this.#byResource.get(resource);
+      if (!provenance?.completed) return fail("MISSING_RESOURCE_MANIFEST");
+      return [resource, {
+        sourceArchiveUrl: provenance.sourceArchiveUrl,
+        sourceExtractedAt: provenance.sourceExtractedAt,
+      }];
+    })) as ElectoralTabularResourceProvenance;
   }
 }
 
@@ -441,6 +466,7 @@ async function consumeResource(
           ? "MISSING_CAMPAIGN_SUBTYPE"
           : "INVALID_RESOURCE_MANIFEST");
       }
+      metadata.complete(resource, event);
       continue;
     }
     if (manifestSeen) fail("INVALID_RESOURCE_MANIFEST");
@@ -451,7 +477,7 @@ async function consumeResource(
     } else {
       resources[resource] += 1;
     }
-    consume(entry, metadata.observe(resource, entry.row));
+    consume(entry, metadata.observe(resource, entry.row, entry.sourceArchiveUrl));
   }
   if (!manifestSeen) fail("MISSING_RESOURCE_MANIFEST");
 }
@@ -512,10 +538,13 @@ async function performSync(
       );
     });
     applyCoalitions(rawCandidates, coalitionByKey);
+    const candidateSourceExtractedAt = sourceMetadata.timestamp("candidates")
+      ?? fail("MISSING_SOURCE_METADATA");
 
     const candidates: ElectoralSnapshot["candidates"] = [...rawCandidates.values()].map(({ row, sourceArchiveUrl }) => ({
       ...mapCandidateRow(row, startedAt),
       sourceArchiveUrl,
+      sourceExtractedAt: candidateSourceExtractedAt,
       photoStorageKey: null,
       photoSourceArchiveUrl: null,
       photoOriginalFilename: null,
@@ -581,7 +610,7 @@ async function performSync(
       }
     });
     const campaignEntries = [...campaignByCandidateKindCategory.values()];
-    const extractedAt = sourceMetadata.snapshotExtractedAt();
+    const extractedAt = candidateSourceExtractedAt;
 
     const governmentPlans: ElectoralSnapshot["governmentPlans"] = [];
     const documents: ElectoralSnapshot["documents"] = [];
@@ -598,7 +627,7 @@ async function performSync(
             candidate.photoSourceArchiveUrl = entry.sourceArchiveUrl;
             candidate.photoOriginalFilename = entry.originalFilename;
             candidate.photoMimeType = entry.mimeType;
-            candidate.photoSourceExtractedAt = extractedAt;
+            candidate.photoSourceExtractedAt = null;
             candidate.photoCheckedAt = startedAt;
           } else if (kind === "governmentPlans") {
             governmentPlans.push({
@@ -609,7 +638,7 @@ async function performSync(
               originalFilename: entry.originalFilename,
               mimeType: entry.mimeType,
               sourceArchiveUrl: entry.sourceArchiveUrl,
-              sourceExtractedAt: extractedAt.toISOString(),
+              sourceExtractedAt: null,
               checkedAt: startedAt.toISOString(),
             });
           } else {
@@ -622,7 +651,7 @@ async function performSync(
               originalFilename: entry.originalFilename,
               mimeType: entry.mimeType,
               sourceArchiveUrl: entry.sourceArchiveUrl,
-              sourceExtractedAt: extractedAt.toISOString(),
+              sourceExtractedAt: null,
               checkedAt: startedAt.toISOString(),
             });
           }
@@ -634,6 +663,7 @@ async function performSync(
       syncRunId: runId,
       electionYear: options.electionYear,
       extractedAt,
+      resourceProvenance: sourceMetadata.manifest(),
       sourceUrl: client.resourceUrl("candidates"),
       candidates,
       assets,

@@ -15,7 +15,11 @@ import {
   windows1252Decoder,
   type ArchiveByteCounter,
 } from "#/integrations/tse/archive-reader";
-import { TseContractError } from "#/integrations/tse/mapper";
+import {
+  normalizeTseOptionalValue,
+  parseTseGenerationInstant,
+  TseContractError,
+} from "#/integrations/tse/mapper";
 
 export const TSE_RESOURCES = {
   candidates: "estatistica/sead/odsele/consulta_cand/consulta_cand_2026.zip",
@@ -60,6 +64,7 @@ export interface TseResourceManifest {
   readonly resource: TseResourceName;
   readonly entryKinds: readonly TseTabularEntryKind[];
   readonly sourceArchiveUrl: string;
+  readonly sourceExtractedAt: Date | null;
 }
 
 export type TseResourceStreamEvent = ({ readonly type: "row" } & TseRowEntry)
@@ -356,6 +361,7 @@ export class TseOpenDataClient {
     let foundExpectedEntry = false;
     const seenBasenames = new Set<string>();
     const seenEntryKinds = new Set<TseTabularEntryKind>();
+    let sourceExtractedAt: Date | null = null;
 
     for await (const entry of streamZipEntries(request.body, request.signal)) {
       assertSafeArchivePath(entry.path);
@@ -400,9 +406,21 @@ export class TseOpenDataClient {
         const entryKind = tabularEntryKind(resource, filename);
         seenEntryKinds.add(entryKind);
         for await (const row of parser) {
+          const parsedRow = row as TseRow;
+          if (
+            normalizeTseOptionalValue(parsedRow.DT_GERACAO)
+            || normalizeTseOptionalValue(parsedRow.HH_GERACAO)
+          ) {
+            const rowExtractedAt = parseTseGenerationInstant(parsedRow);
+            if (
+              sourceExtractedAt
+              && sourceExtractedAt.getTime() !== rowExtractedAt.getTime()
+            ) throw new TseContractError("INCONSISTENT_SOURCE_METADATA");
+            sourceExtractedAt = rowExtractedAt;
+          }
           yield {
             type: "row",
-            row: row as TseRow,
+            row: parsedRow,
             entryKind,
             sourceArchiveUrl: request.url,
           };
@@ -430,6 +448,7 @@ export class TseOpenDataClient {
       resource,
       entryKinds: kindOrder.filter((kind) => seenEntryKinds.has(kind)),
       sourceArchiveUrl: request.url,
+      sourceExtractedAt,
     };
   }
 

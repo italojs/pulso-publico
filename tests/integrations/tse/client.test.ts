@@ -448,7 +448,27 @@ describe("TseOpenDataClient", () => {
         "campaignPaidExpenses",
       ],
       sourceArchiveUrl: "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
+      sourceExtractedAt: null,
     }]);
+  });
+
+  it("carries official generation metadata in the resource manifest when rows are present", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([{
+        name: "rede_social_candidato_2026_ES.csv",
+        contents: "DT_GERACAO;HH_GERACAO;ANO_ELEICAO;SQ_CANDIDATO;DS_URL\r\n05/09/2026;08:30:00;2026;260001234567;https://example.test\r\n",
+      }]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const events = [];
+
+    for await (const event of client.streamResource("social")) events.push(event);
+
+    expect(events.at(-1)).toMatchObject({
+      type: "manifest",
+      resource: "social",
+      sourceExtractedAt: new Date("2026-09-05T11:30:00.000Z"),
+    });
   });
 
   it("rejects traversal before exposing a regional media entry", async () => {

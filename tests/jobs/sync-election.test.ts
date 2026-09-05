@@ -108,6 +108,11 @@ function cloneRows() {
   ])) as typeof baseRows;
 }
 
+function officialInstant(metadata: { date: string; time: string }): Date {
+  const [day, month, year] = metadata.date.split("/");
+  return new Date(`${year}-${month}-${day}T${metadata.time}-03:00`);
+}
+
 class FakeClient {
   readonly calls: string[] = [];
   readonly rows: ReturnType<typeof cloneRows>;
@@ -168,6 +173,12 @@ class FakeClient {
       resource,
       entryKinds: this.manifestKinds[resource] ?? defaults,
       sourceArchiveUrl: this.resourceUrl(resource),
+      sourceExtractedAt: this.rows[resource].length === 0
+        ? null
+        : officialInstant(this.generatedAt[resource] ?? {
+          date: "05/09/2026",
+          time: "08:00:00",
+        }),
     };
   }
 
@@ -537,7 +548,7 @@ describe("syncElection", () => {
     expect(events.some((event) => event.startsWith("remove:previous-generation"))).toBe(false);
   });
 
-  it("derives a deterministic latest official snapshot instant and preserves per-resource provenance", async () => {
+  it("uses candidates as the snapshot instant and preserves every tabular resource provenance", async () => {
     const events: string[] = [];
     const repository = new FakeRepository(events, "");
     const generatedAt = {
@@ -557,13 +568,63 @@ describe("syncElection", () => {
     );
 
     expect(report.failed).toBe(false);
-    expect(repository.snapshots[0].extractedAt).toEqual(new Date("2026-09-05T11:30:00.000Z"));
+    expect(repository.snapshots[0].extractedAt).toEqual(new Date("2026-09-04T11:00:00.000Z"));
+    expect(repository.snapshots[0].resourceProvenance).toEqual({
+      candidates: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/candidates.zip",
+        sourceExtractedAt: new Date("2026-09-04T11:00:00.000Z"),
+      },
+      complements: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/complements.zip",
+        sourceExtractedAt: new Date("2026-09-04T11:05:00.000Z"),
+      },
+      assets: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/assets.zip",
+        sourceExtractedAt: new Date("2026-09-05T11:30:00.000Z"),
+      },
+      coalitions: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/coalitions.zip",
+        sourceExtractedAt: new Date("2026-09-04T11:10:00.000Z"),
+      },
+      social: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/social.zip",
+        sourceExtractedAt: new Date("2026-09-04T11:15:00.000Z"),
+      },
+      campaignAccounts: {
+        sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+        sourceExtractedAt: new Date("2026-09-04T11:20:00.000Z"),
+      },
+    });
+    expect(repository.snapshots[0].candidates[0].sourceExtractedAt)
+      .toEqual(new Date("2026-09-04T11:00:00.000Z"));
     expect(repository.snapshots[0].assets[0].sourceExtractedAt)
       .toEqual(new Date("2026-09-05T11:30:00.000Z"));
     expect(repository.snapshots[0].campaignEntries[0].sourceExtractedAt)
       .toEqual(new Date("2026-09-04T11:20:00.000Z"));
-    expect(repository.snapshots[0].candidates[0].photoSourceExtractedAt)
-      .toEqual(new Date("2026-09-05T11:30:00.000Z"));
+    expect(repository.snapshots[0].candidates[0].photoSourceExtractedAt).toBeNull();
+    expect(repository.snapshots[0].governmentPlans[0].sourceExtractedAt).toBeNull();
+    expect(repository.snapshots[0].documents[0].sourceExtractedAt).toBeNull();
+  });
+
+  it("accepts a complete campaign archive whose three present subtypes are all empty", async () => {
+    const events: string[] = [];
+    const rows = cloneRows();
+    rows.campaignAccounts = [];
+    const repository = new FakeRepository(events, "");
+
+    const report = await syncElection(
+      new FakeClient(rows),
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report.failed).toBe(false);
+    expect(repository.snapshots[0].campaignEntries).toEqual([]);
+    expect(repository.snapshots[0].resourceProvenance.campaignAccounts).toEqual({
+      sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
+      sourceExtractedAt: null,
+    });
   });
 
   it("rejects inconsistent official generation metadata inside one resource", async () => {

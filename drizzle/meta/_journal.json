@@ -50,6 +50,13 @@
       "when": 1788582105303,
       "tag": "0006_electoral_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788586025232,
+      "tag": "0007_smiling_mister_fear",
+      "breakpoints": true
     }
   ]
 }
