@@ -1,5 +1,5 @@
 {
-  "id": "6524ef1c-730f-456c-8e5f-c281cc2baae5",
+  "id": "f60012df-31ee-4bc0-bba7-269a1a2bac76",
   "prevId": "4bd083d7-6978-4e54-a307-2a690131b1fa",
   "version": "7",
   "dialect": "postgresql",
@@ -1959,15 +1959,17 @@
         }
       },
       "foreignKeys": {
-        "electoral_candidates_snapshot_run_id_electoral_sync_runs_sync_run_id_fk": {
-          "name": "electoral_candidates_snapshot_run_id_electoral_sync_runs_sync_run_id_fk",
+        "electoral_candidates_snapshot_run_year_fk": {
+          "name": "electoral_candidates_snapshot_run_year_fk",
           "tableFrom": "electoral_candidates",
           "tableTo": "electoral_sync_runs",
           "columnsFrom": [
-            "snapshot_run_id"
+            "snapshot_run_id",
+            "election_year"
           ],
           "columnsTo": [
-            "sync_run_id"
+            "sync_run_id",
+            "election_year"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -1989,6 +1991,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "publication_order": {
+          "name": "publication_order",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
         "election_year": {
           "name": "election_year",
           "type": "integer",
@@ -2001,6 +2009,12 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
+        },
+        "payload_fingerprint": {
+          "name": "payload_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "source_url": {
           "name": "source_url",
@@ -2090,6 +2104,21 @@
         }
       },
       "indexes": {
+        "electoral_sync_runs_publication_order_uq": {
+          "name": "electoral_sync_runs_publication_order_uq",
+          "columns": [
+            {
+              "expression": "publication_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "electoral_sync_runs_latest_idx": {
           "name": "electoral_sync_runs_latest_idx",
           "columns": [
@@ -2106,7 +2135,7 @@
               "nulls": "last"
             },
             {
-              "expression": "extracted_at",
+              "expression": "publication_order",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2120,7 +2149,16 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "electoral_sync_runs_id_year_uq": {
+          "name": "electoral_sync_runs_id_year_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sync_run_id",
+            "election_year"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

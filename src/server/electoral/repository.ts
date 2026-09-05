@@ -1,4 +1,6 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import type {
@@ -215,6 +217,44 @@ function categoryTotals(values: ReadonlyMap<string, bigint>): Record<string, str
   );
 }
 
+function canonicalize(value: unknown): unknown {
+  if (value instanceof Date) return { $date: value.toISOString() };
+  if (typeof value === "bigint") return { $bigint: value.toString() };
+  if (Array.isArray(value)) {
+    return value
+      .map(canonicalize)
+      .sort((left, right) =>
+        (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? "", "en-US")
+      );
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right, "en-US"))
+        .map(([key, item]) => [key, canonicalize(item)]),
+    );
+  }
+  return value;
+}
+
+function fingerprintSnapshot(snapshot: ElectoralSnapshot): string {
+  const payload = Object.fromEntries(
+    Object.entries(snapshot).filter(([key]) => key !== "syncRunId"),
+  );
+  return createHash("sha256").update(JSON.stringify(canonicalize(payload))).digest("hex");
+}
+
+async function lockTransaction(
+  database: Database,
+  scope: "election" | "run",
+  value: number | string,
+): Promise<void> {
+  await database.execute(sql`
+    select pg_advisory_xact_lock(hashtextextended(${`electoral-snapshot:${scope}:${value}`}, 0))
+  `);
+}
+
 function aggregateCampaign(
   entries: readonly ElectoralSnapshotCampaignEntry[],
   extractedAt: Date,
@@ -294,16 +334,47 @@ export class ElectoralRepository {
   async persistSnapshot(snapshot: ElectoralSnapshot): Promise<void> {
     const candidateByExternalId = assertSnapshot(snapshot);
     const extractedAt = asDate(snapshot.extractedAt, "snapshot extractedAt");
+    const payloadFingerprint = fingerprintSnapshot(snapshot);
 
     await this.#database.transaction(async (transaction) => {
       const tx = transaction as unknown as Database;
+      await lockTransaction(tx, "election", snapshot.electionYear);
+      await lockTransaction(tx, "run", snapshot.syncRunId);
+
+      const [existingRun] = await tx.select({
+        electionYear: electoralSyncRuns.electionYear,
+        status: electoralSyncRuns.status,
+        payloadFingerprint: electoralSyncRuns.payloadFingerprint,
+      }).from(electoralSyncRuns)
+        .where(eq(electoralSyncRuns.syncRunId, snapshot.syncRunId))
+        .limit(1);
+      if (existingRun) {
+        if (existingRun.electionYear !== snapshot.electionYear) {
+          throw new Error(
+            `Sync run ${snapshot.syncRunId} already belongs to election ${existingRun.electionYear}`,
+          );
+        }
+        if (
+          existingRun.status === "successful"
+          && existingRun.payloadFingerprint === payloadFingerprint
+        ) {
+          return;
+        }
+        if (existingRun.status === "successful") {
+          throw new Error(`Sync run ${snapshot.syncRunId} has a different payload`);
+        }
+        throw new Error(
+          `Sync run ${snapshot.syncRunId} cannot be reused after status ${existingRun.status}`,
+        );
+      }
+
       const [latestSuccessful] = await tx.select({
         syncRunId: electoralSyncRuns.syncRunId,
         extractedAt: electoralSyncRuns.extractedAt,
       }).from(electoralSyncRuns).where(and(
         eq(electoralSyncRuns.electionYear, snapshot.electionYear),
         eq(electoralSyncRuns.status, "successful"),
-      )).orderBy(desc(electoralSyncRuns.extractedAt), desc(electoralSyncRuns.completedAt)).limit(1);
+      )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1);
       if (
         latestSuccessful?.extractedAt
         && latestSuccessful.syncRunId !== snapshot.syncRunId
@@ -317,6 +388,7 @@ export class ElectoralRepository {
         syncRunId: snapshot.syncRunId,
         electionYear: snapshot.electionYear,
         status: "running",
+        payloadFingerprint,
         sourceUrl: snapshot.sourceUrl ?? null,
         startedAt,
         completedAt: null,
@@ -328,24 +400,6 @@ export class ElectoralRepository {
         governmentPlanCount: snapshot.governmentPlans.length,
         documentCount: snapshot.documents.length,
         errorCode: null,
-      }).onConflictDoUpdate({
-        target: electoralSyncRuns.syncRunId,
-        set: {
-          electionYear: snapshot.electionYear,
-          status: "running",
-          sourceUrl: snapshot.sourceUrl ?? null,
-          startedAt,
-          completedAt: null,
-          extractedAt: null,
-          candidateCount: snapshot.candidates.length,
-          assetCount: snapshot.assets.length,
-          campaignEntryCount: snapshot.campaignEntries.length,
-          socialLinkCount: snapshot.socialLinks.length,
-          governmentPlanCount: snapshot.governmentPlans.length,
-          documentCount: snapshot.documents.length,
-          errorCode: null,
-          updatedAt: startedAt,
-        },
       });
 
       const candidateIds = new Map<string, string>();
@@ -494,31 +548,57 @@ export class ElectoralRepository {
     }
     if (!validErrorCode.test(failure.errorCode)) throw new Error("Invalid electoral failure code");
     const failedAt = asDate(failure.failedAt, "failedAt");
-    await this.#database.insert(electoralSyncRuns).values({
-      syncRunId: failure.syncRunId,
-      electionYear: failure.electionYear,
-      status: "failed",
-      sourceUrl: failure.sourceUrl ?? null,
-      startedAt: failure.startedAt ? asDate(failure.startedAt, "startedAt") : failedAt,
-      completedAt: failedAt,
-      errorCode: failure.errorCode,
-    }).onConflictDoNothing({ target: electoralSyncRuns.syncRunId });
+    await this.#database.transaction(async (transaction) => {
+      const tx = transaction as unknown as Database;
+      await lockTransaction(tx, "run", failure.syncRunId);
+      const [existingRun] = await tx.select({
+        electionYear: electoralSyncRuns.electionYear,
+        status: electoralSyncRuns.status,
+        errorCode: electoralSyncRuns.errorCode,
+      }).from(electoralSyncRuns)
+        .where(eq(electoralSyncRuns.syncRunId, failure.syncRunId))
+        .limit(1);
+      if (existingRun) {
+        if (existingRun.electionYear !== failure.electionYear) {
+          throw new Error(
+            `Sync run ${failure.syncRunId} already belongs to election ${existingRun.electionYear}`,
+          );
+        }
+        if (existingRun.status === "failed" && existingRun.errorCode === failure.errorCode) return;
+        throw new Error(
+          `Sync run ${failure.syncRunId} cannot be reused after status ${existingRun.status}`,
+        );
+      }
+      await tx.insert(electoralSyncRuns).values({
+        syncRunId: failure.syncRunId,
+        electionYear: failure.electionYear,
+        status: "failed",
+        sourceUrl: failure.sourceUrl ?? null,
+        startedAt: failure.startedAt ? asDate(failure.startedAt, "startedAt") : failedAt,
+        completedAt: failedAt,
+        errorCode: failure.errorCode,
+      });
+    });
   }
 
   async findCandidate(electionYear: number, externalId: string) {
-    const [latestSuccessful] = await this.#database.select({
+    const latestSuccessful = this.#database.select({
       syncRunId: electoralSyncRuns.syncRunId,
     }).from(electoralSyncRuns).where(and(
       eq(electoralSyncRuns.electionYear, electionYear),
       eq(electoralSyncRuns.status, "successful"),
-    )).orderBy(desc(electoralSyncRuns.extractedAt), desc(electoralSyncRuns.completedAt)).limit(1);
-    if (!latestSuccessful) return null;
+    )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1)
+      .as("latest_successful_electoral_run");
 
-    const [candidate] = await this.#database.select().from(electoralCandidates).where(and(
-      eq(electoralCandidates.electionYear, electionYear),
-      eq(electoralCandidates.externalId, externalId),
-      eq(electoralCandidates.snapshotRunId, latestSuccessful.syncRunId),
-    )).limit(1);
+    const [candidate] = await this.#database.select(getTableColumns(electoralCandidates))
+      .from(electoralCandidates)
+      .innerJoin(
+        latestSuccessful,
+        eq(electoralCandidates.snapshotRunId, latestSuccessful.syncRunId),
+      ).where(and(
+        eq(electoralCandidates.electionYear, electionYear),
+        eq(electoralCandidates.externalId, externalId),
+      )).limit(1);
     return candidate ?? null;
   }
 

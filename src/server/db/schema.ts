@@ -1,7 +1,9 @@
 import {
   bigint,
+  bigserial,
   boolean,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -9,6 +11,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -376,8 +379,10 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
 
 export const electoralSyncRuns = pgTable("electoral_sync_runs", {
   syncRunId: text("sync_run_id").primaryKey(),
+  publicationOrder: bigserial("publication_order", { mode: "bigint" }).notNull(),
   electionYear: integer("election_year").notNull(),
   status: electoralSyncStatusEnum("status").notNull(),
+  payloadFingerprint: text("payload_fingerprint"),
   sourceUrl: text("source_url"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -391,10 +396,12 @@ export const electoralSyncRuns = pgTable("electoral_sync_runs", {
   errorCode: text("error_code"),
   ...timestamps,
 }, (table) => [
+  unique("electoral_sync_runs_id_year_uq").on(table.syncRunId, table.electionYear),
+  uniqueIndex("electoral_sync_runs_publication_order_uq").on(table.publicationOrder),
   index("electoral_sync_runs_latest_idx").on(
     table.electionYear,
     table.status,
-    table.extractedAt,
+    table.publicationOrder,
   ),
 ]);
 
@@ -402,7 +409,7 @@ export const electoralCandidates = pgTable("electoral_candidates", {
   id: uuid("id").defaultRandom().primaryKey(),
   electionYear: integer("election_year").notNull(),
   externalId: text("external_id").notNull(),
-  snapshotRunId: text("snapshot_run_id").notNull().references(() => electoralSyncRuns.syncRunId),
+  snapshotRunId: text("snapshot_run_id").notNull(),
   fullName: text("full_name").notNull(),
   ballotName: text("ballot_name").notNull(),
   socialName: text("social_name"),
@@ -450,6 +457,11 @@ export const electoralCandidates = pgTable("electoral_candidates", {
   ),
   index("electoral_candidates_status_idx").on(table.status),
   index("electoral_candidates_snapshot_run_idx").on(table.snapshotRunId),
+  foreignKey({
+    name: "electoral_candidates_snapshot_run_year_fk",
+    columns: [table.snapshotRunId, table.electionYear],
+    foreignColumns: [electoralSyncRuns.syncRunId, electoralSyncRuns.electionYear],
+  }),
 ]);
 
 export const candidateAssets = pgTable("candidate_assets", {

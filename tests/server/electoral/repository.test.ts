@@ -1,4 +1,6 @@
 import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -26,6 +28,7 @@ import {
   lawmakers,
   users,
 } from "#/server/db/schema";
+import * as databaseSchema from "#/server/db/schema";
 import {
   migrateTestDatabase,
   testDb,
@@ -35,6 +38,7 @@ import {
 
 const checkedAt = "2026-09-05T12:00:00.000Z";
 const sourceExtractedAt = "2026-09-05T11:30:00.000Z";
+const databaseUrl = process.env.DATABASE_URL!;
 
 function candidate(
   externalId: string,
@@ -157,6 +161,25 @@ function snapshot(
   };
 }
 
+function snapshotForElection(syncRunId: string, electionYear: number): ElectoralSnapshot {
+  const value = snapshot(syncRunId, [candidate(primaryCandidateId, { electionYear })]);
+  value.electionYear = electionYear;
+  value.assets = value.assets.map((item) => ({ ...item, electionYear }));
+  value.campaignEntries = value.campaignEntries.map((item) => ({ ...item, electionYear }));
+  value.socialLinks = value.socialLinks.map((item) => ({ ...item, electionYear }));
+  value.governmentPlans = value.governmentPlans.map((item) => ({ ...item, electionYear }));
+  value.documents = value.documents.map((item) => ({ ...item, electionYear }));
+  return value;
+}
+
+async function waitUntil(check: () => Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for concurrent database state");
+}
+
 async function seedLawmakerAndUser() {
   const [lawmaker] = await testDb.insert(lawmakers).values({
     source: "camara",
@@ -226,6 +249,186 @@ describe("ElectoralRepository", () => {
       revenueCents: 0n,
       expenseCents: null,
     }]);
+  });
+
+  it("serializes concurrent publications and rejects an older run after the newer run commits", async () => {
+    const suffix = crypto.randomUUID().replaceAll("-", "");
+    const triggerName = `test_electoral_gate_${suffix}`;
+    const functionName = `test_electoral_gate_fn_${suffix}`;
+    const newerRunId = `concurrent-new-${suffix}`;
+    const olderRunId = `concurrent-old-${suffix}`;
+    const lockNamespace = 7_311;
+    const lockKey = Number.parseInt(suffix.slice(0, 7), 16);
+    const controlPool = postgres(databaseUrl, { max: 1 });
+    const newerPool = postgres(databaseUrl, { max: 1 });
+    const olderPool = postgres(databaseUrl, { max: 1 });
+    const observer = postgres(databaseUrl, { max: 1 });
+    const control = await controlPool.reserve();
+    let controlLockHeld = false;
+
+    try {
+      await observer.unsafe(`
+        CREATE FUNCTION "${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.sync_run_id = '${newerRunId}' AND NEW.status = 'successful' THEN
+            PERFORM pg_advisory_xact_lock(${lockNamespace}, ${lockKey});
+          END IF;
+          RETURN NEW;
+        END
+        $$
+      `);
+      await observer.unsafe(`
+        CREATE TRIGGER "${triggerName}"
+        BEFORE UPDATE ON electoral_sync_runs
+        FOR EACH ROW EXECUTE FUNCTION "${functionName}"()
+      `);
+      await control`select pg_advisory_lock(${lockNamespace}, ${lockKey})`;
+      controlLockHeld = true;
+      await newerPool`select set_config('application_name', ${`task3-newer-${suffix}`}, false)`;
+      await olderPool`select set_config('application_name', ${`task3-older-${suffix}`}, false)`;
+
+      const newerSnapshot = snapshot(newerRunId, [candidate(primaryCandidateId, {
+        status: "SNAPSHOT NOVO",
+      })]);
+      newerSnapshot.extractedAt = new Date("2026-09-05T12:00:00.000Z");
+      const olderSnapshot = snapshot(olderRunId, [candidate(primaryCandidateId, {
+        status: "SNAPSHOT ANTIGO",
+      })]);
+      olderSnapshot.extractedAt = new Date("2026-09-05T11:00:00.000Z");
+      const newerRepository = new ElectoralRepository(drizzle(newerPool, { schema: databaseSchema }));
+      const olderRepository = new ElectoralRepository(drizzle(olderPool, { schema: databaseSchema }));
+
+      const newerPublication = newerRepository.persistSnapshot(newerSnapshot);
+      await waitUntil(async () => {
+        const [row] = await observer<{ waiting: boolean }[]>`
+          select exists (
+            select 1 from pg_stat_activity
+            where application_name = ${`task3-newer-${suffix}`}
+              and wait_event_type = 'Lock'
+          ) as waiting
+        `;
+        return row?.waiting === true;
+      });
+
+      const olderPublication = olderRepository.persistSnapshot(olderSnapshot);
+      await waitUntil(async () => {
+        const [row] = await observer<{ waiting: boolean }[]>`
+          select exists (
+            select 1 from pg_stat_activity
+            where application_name = ${`task3-older-${suffix}`}
+              and wait_event_type = 'Lock'
+          ) as waiting
+        `;
+        return row?.waiting === true;
+      });
+
+      await control`select pg_advisory_unlock(${lockNamespace}, ${lockKey})`;
+      controlLockHeld = false;
+      const [newerResult, olderResult] = await Promise.allSettled([
+        newerPublication,
+        olderPublication,
+      ]);
+
+      expect(newerResult).toMatchObject({ status: "fulfilled" });
+      expect(olderResult).toMatchObject({
+        status: "rejected",
+        reason: expect.objectContaining({ message: "Cannot publish a stale electoral snapshot" }),
+      });
+      await expect(repository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
+        status: "SNAPSHOT NOVO",
+        snapshotRunId: newerRunId,
+      });
+    } finally {
+      if (controlLockHeld) {
+        await control`select pg_advisory_unlock(${lockNamespace}, ${lockKey})`;
+      }
+      await Promise.allSettled([
+        observer.unsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON electoral_sync_runs`),
+      ]);
+      await Promise.allSettled([
+        observer.unsafe(`DROP FUNCTION IF EXISTS "${functionName}"()`),
+      ]);
+      control.release();
+      await Promise.all([
+        controlPool.end({ timeout: 5 }),
+        newerPool.end({ timeout: 5 }),
+        olderPool.end({ timeout: 5 }),
+        observer.end({ timeout: 5 }),
+      ]);
+    }
+  }, 15_000);
+
+  it("reads the latest successful run and candidate in one database statement", async () => {
+    await repository.persistSnapshot(snapshot("run-2026-01"));
+    const statements: string[] = [];
+    const readSql = postgres(databaseUrl, {
+      max: 1,
+      debug(_connection, query) {
+        statements.push(query);
+      },
+    });
+
+    try {
+      const readRepository = new ElectoralRepository(drizzle(readSql, { schema: databaseSchema }));
+      await readRepository.findCandidate(2026, primaryCandidateId);
+      statements.length = 0;
+      await expect(readRepository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
+        externalId: primaryCandidateId,
+      });
+      expect(statements.filter((statement) => /^select\b/i.test(statement.trim()))).toHaveLength(1);
+    } finally {
+      await readSql.end({ timeout: 5 });
+    }
+  });
+
+  it("uses a total order to resolve successful runs with identical timestamps", async () => {
+    const first = snapshot("same-time-a");
+    first.extractedAt = new Date("2026-09-05T15:00:00.000Z");
+    await repository.persistSnapshot(first);
+    const second = snapshot("same-time-z", [candidate(primaryCandidateId, {
+      status: "DESEMPATE DETERMINÍSTICO",
+    })]);
+    second.extractedAt = first.extractedAt;
+    await repository.persistSnapshot(second);
+    const tiedAt = new Date("2026-09-05T15:30:00.000Z");
+    await testDb.update(electoralSyncRuns).set({ completedAt: tiedAt })
+      .where(eq(electoralSyncRuns.electionYear, 2026));
+    const runs = await testDb.select({
+      syncRunId: electoralSyncRuns.syncRunId,
+      publicationOrder: electoralSyncRuns.publicationOrder,
+    }).from(electoralSyncRuns).orderBy(electoralSyncRuns.publicationOrder);
+
+    expect(runs.map(({ syncRunId }) => syncRunId)).toEqual(["same-time-a", "same-time-z"]);
+    expect(runs[0]!.publicationOrder < runs[1]!.publicationOrder).toBe(true);
+    await expect(repository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
+      status: "DESEMPATE DETERMINÍSTICO",
+      snapshotRunId: "same-time-z",
+    });
+  });
+
+  it("rejects reuse of a successful run id with a different payload", async () => {
+    await repository.persistSnapshot(snapshot("immutable-run"));
+    const incompatible = snapshot("immutable-run", [candidate(primaryCandidateId, {
+      status: "PAYLOAD DIFERENTE",
+    })]);
+
+    await expect(repository.persistSnapshot(incompatible)).rejects.toThrow(/different payload/i);
+    await expect(repository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
+      status: "APTO",
+      snapshotRunId: "immutable-run",
+    });
+  });
+
+  it("rejects reuse of a run id by another election", async () => {
+    await repository.persistSnapshot(snapshot("immutable-run"));
+
+    await expect(repository.persistSnapshot(snapshotForElection("immutable-run", 2027)))
+      .rejects.toThrow(/already belongs to election 2026/i);
+    expect(await testDb.select({
+      electionYear: electoralSyncRuns.electionYear,
+      status: electoralSyncRuns.status,
+    }).from(electoralSyncRuns).where(eq(electoralSyncRuns.syncRunId, "immutable-run")))
+      .toEqual([{ electionYear: 2026, status: "successful" }]);
   });
 
   it("keeps the previous public snapshot when persistence fails", async () => {
