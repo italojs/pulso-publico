@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { parse } from "csv-parse/sync";
 import { describe, expect, it } from "vitest";
 
+import { CandidateSocialLinkRecord } from "#/domain/electoral";
 import {
   mapAssetRow,
   mapCampaignExpenseRow,
@@ -27,6 +28,27 @@ async function readFixture(name: string): Promise<TseRow> {
 }
 
 describe("TSE electoral mapping", () => {
+  it("defines social links as credential-free HTTP(S) at the domain boundary", () => {
+    expect(CandidateSocialLinkRecord.safeParse({
+      electionYear: 2026,
+      candidateExternalId: "260001234567",
+      label: "Site",
+      url: "https://example.test/candidate",
+    }).success).toBe(true);
+    for (const url of [
+      "ftp://example.test/candidate",
+      "https://user:secret@example.test/candidate",
+      "javascript:alert(1)",
+    ]) {
+      expect(CandidateSocialLinkRecord.safeParse({
+        electionYear: 2026,
+        candidateExternalId: "260001234567",
+        label: "Site",
+        url,
+      }).success).toBe(false);
+    }
+  });
+
   it("normalizes official null sentinels before any downstream classification", () => {
     expect(normalizeTseOptionalValue("#NULO")).toBeNull();
     expect(normalizeTseOptionalValue("#NE")).toBeNull();

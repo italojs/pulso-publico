@@ -4,6 +4,7 @@ import type { CandidateFilters } from "#/server/candidates/read-models";
 export const MAX_CANDIDATE_FILTER_VALUES = 20;
 export const MAX_CANDIDATE_TEXT_LENGTH = 200;
 export const MAX_BIGINT_CENTS = 9_223_372_036_854_775_807n;
+export const MIN_BIGINT_CENTS = -9_223_372_036_854_775_808n;
 export const MAX_CANDIDATE_AGE = 150;
 export const MAX_CANDIDATE_ASSET_COUNT = 1_000_000;
 export const MAX_CANDIDATE_PAGE = 100_000;
@@ -34,6 +35,39 @@ export function centsToReais(value: bigint): string | undefined {
     : `${whole}.${fraction.toString().padStart(2, "0").replace(/0$/, "")}`;
 }
 
+export function signedReaisToCents(value: string): bigint | undefined {
+  if (!/^-?(?:0|[1-9]\d{0,16})(?:\.\d{1,2})?$/.test(value)) return undefined;
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [whole = "0", fraction = ""] = unsigned.split(".");
+  const magnitude = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  const cents = negative ? -magnitude : magnitude;
+  return cents >= MIN_BIGINT_CENTS && cents <= MAX_BIGINT_CENTS ? cents : undefined;
+}
+
+export function signedCentsToReais(value: bigint): string | undefined {
+  if (value < MIN_BIGINT_CENTS || value > MAX_BIGINT_CENTS) return undefined;
+  if (value >= 0n) return centsToReais(value);
+  const magnitude = -value;
+  const whole = magnitude / 100n;
+  const fraction = magnitude % 100n;
+  return fraction === 0n
+    ? `-${whole.toString()}`
+    : `-${whole}.${fraction.toString().padStart(2, "0").replace(/0$/, "")}`;
+}
+
+export function isSafeCandidateFilterText(value: string): boolean {
+  return value.isWellFormed()
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+}
+
+export function isValidCandidateFilterText(value: string): boolean {
+  const normalized = value.trim();
+  return isSafeCandidateFilterText(value)
+    && normalized.length > 0
+    && normalized.length <= MAX_CANDIDATE_TEXT_LENGTH;
+}
+
 export type CandidateFilterBoundField =
   | "ageMin" | "ageMax" | "assetCountMin" | "assetCountMax" | "page" | "pageSize"
   | "assetMinCents" | "assetMaxCents" | "revenueMinCents" | "revenueMaxCents"
@@ -62,6 +96,11 @@ export function validateCandidateFilterBounds(filters: Partial<CandidateFilters>
       issues.push({ code: "out_of_bounds", fields: [field], message: `${field} must fit a non-negative PostgreSQL bigint` });
     }
   };
+  const signedMoney = (field: CandidateFilterBoundField, value: bigint | undefined) => {
+    if (value !== undefined && (typeof value !== "bigint" || value < MIN_BIGINT_CENTS || value > MAX_BIGINT_CENTS)) {
+      issues.push({ code: "out_of_bounds", fields: [field], message: `${field} must fit a PostgreSQL bigint` });
+    }
+  };
   const range = (
     minimumField: CandidateFilterBoundField,
     minimum: number | bigint | undefined,
@@ -84,8 +123,9 @@ export function validateCandidateFilterBounds(filters: Partial<CandidateFilters>
     ["assetMinCents", filters.assetMinCents], ["assetMaxCents", filters.assetMaxCents],
     ["revenueMinCents", filters.revenueMinCents], ["revenueMaxCents", filters.revenueMaxCents],
     ["expenseMinCents", filters.expenseMinCents], ["expenseMaxCents", filters.expenseMaxCents],
-    ["balanceMinCents", filters.balanceMinCents], ["balanceMaxCents", filters.balanceMaxCents],
   ] as const) money(field, value);
+  signedMoney("balanceMinCents", filters.balanceMinCents);
+  signedMoney("balanceMaxCents", filters.balanceMaxCents);
 
   range("ageMin", filters.ageMin, "ageMax", filters.ageMax);
   range("assetCountMin", filters.assetCountMin, "assetCountMax", filters.assetCountMax);
@@ -128,7 +168,7 @@ const allowedFilterKeys = new Set<keyof CandidateFilters>([
 function requiredText(value: unknown, field: string): string {
   if (typeof value !== "string") throw new TypeError(`${field} must be a string`);
   const normalized = value.trim();
-  if (!normalized || normalized.length > MAX_CANDIDATE_TEXT_LENGTH) {
+  if (!isValidCandidateFilterText(value)) {
     throw new RangeError(`${field} must contain 1 to ${MAX_CANDIDATE_TEXT_LENGTH} characters`);
   }
   return normalized;
@@ -189,6 +229,14 @@ function moneyValue(value: unknown, field: string): bigint | undefined {
   return value;
 }
 
+function signedMoneyValue(value: unknown, field: string): bigint | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "bigint" || value < MIN_BIGINT_CENTS || value > MAX_BIGINT_CENTS) {
+    throw new RangeError(`${field} must fit a PostgreSQL bigint`);
+  }
+  return value;
+}
+
 function assign<T extends keyof CandidateFilters>(
   result: CandidateFilters,
   key: T,
@@ -231,8 +279,11 @@ export function canonicalizeCandidateFilters(
   }
   for (const key of [
     "assetMinCents", "assetMaxCents", "revenueMinCents", "revenueMaxCents",
-    "expenseMinCents", "expenseMaxCents", "balanceMinCents", "balanceMaxCents",
+    "expenseMinCents", "expenseMaxCents",
   ] as const) assign(result, key, moneyValue(raw[key], key));
+  for (const key of ["balanceMinCents", "balanceMaxCents"] as const) {
+    assign(result, key, signedMoneyValue(raw[key], key));
+  }
 
   if (raw.declaredAssets !== undefined) {
     result.declaredAssets = enumValue(raw.declaredAssets, "declaredAssets", ["yes", "no"] as const);

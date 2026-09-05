@@ -2,20 +2,21 @@ import {
   closeSync,
   constants,
   createReadStream,
+  createWriteStream,
   fstatSync,
   lstatSync,
   openSync,
   type ReadStream,
 } from "node:fs";
-import { lstat, mkdir, open, rename, rm, unlink } from "node:fs/promises";
+import { lstat, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 
 import type { TseMediaEntry } from "#/integrations/tse/client";
 import { TseContractError } from "#/integrations/tse/mapper";
+import { isCanonicalTseCandidateExternalId } from "#/domain/tse-source";
 
 const validRunId = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
-const validCandidateId = /^\d{11,12}$/;
 
 function storageError(code: string): TseContractError {
   return new TseContractError(code);
@@ -28,7 +29,7 @@ function validateRunId(runId: string): void {
 function validateFilename(filename: string): void {
   if (
     filename.length === 0
-    || filename.length > 255
+    || Buffer.byteLength(filename, "utf8") > 255
     || filename.includes("\0")
     || filename === "."
     || filename === ".."
@@ -121,7 +122,7 @@ export class ElectoralMediaStore {
   async stage(runId: string, entry: TseMediaEntry): Promise<string> {
     validateRunId(runId);
     validateFilename(entry.originalFilename);
-    if (!validCandidateId.test(entry.candidateExternalId)) {
+    if (!isCanonicalTseCandidateExternalId(entry.candidateExternalId)) {
       throw storageError("UNSAFE_STORAGE_PATH");
     }
     if (!(["photos", "governmentPlans", "certificates"] as const).includes(entry.kind)) {
@@ -149,13 +150,9 @@ export class ElectoralMediaStore {
     }
     let created = false;
     try {
-      const file = await open(
-        target,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-        0o600,
-      );
-      created = true;
-      await pipeline(entry.content, file.createWriteStream());
+      const output = createWriteStream(target, { flags: "wx", mode: 0o600 });
+      output.once("open", () => { created = true; });
+      await pipeline(entry.content, output);
       return relativeKey;
     } catch (error) {
       if (created) {
@@ -222,7 +219,7 @@ export class ElectoralMediaStore {
     }
     validateRunId(runId);
     validateFilename(filename);
-    if (!validCandidateId.test(candidateId)) throw storageError("UNSAFE_STORAGE_PATH");
+    if (!isCanonicalTseCandidateExternalId(candidateId)) throw storageError("UNSAFE_STORAGE_PATH");
     if (!(kind === "photos" || kind === "governmentPlans" || kind === "certificates")) {
       throw storageError("UNSAFE_STORAGE_PATH");
     }

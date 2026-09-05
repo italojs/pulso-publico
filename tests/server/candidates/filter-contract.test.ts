@@ -29,6 +29,34 @@ describe("candidate filter wire contract", () => {
     expect(parseCandidateFilterInput(input)).toEqual(filters);
   });
 
+  it("round-trips signed balance bounds across the full PostgreSQL bigint range only", () => {
+    const filters: CandidateFilters = {
+      balanceMinCents: -9_223_372_036_854_775_808n,
+      balanceMaxCents: -1n,
+    };
+
+    const input = toCandidateFilterInput(filters);
+
+    expect(input).toEqual({
+      balanceMin: "-92233720368547758.08",
+      balanceMax: "-0.01",
+    });
+    expect(parseCandidateFilterInput(input)).toEqual(filters);
+    expect(() => parseCandidateFilterInput({ balanceMin: "-92233720368547758.09" })).toThrow();
+    expect(() => parseCandidateFilterInput({ balanceMin: "-1", balanceMax: "-2" })).toThrow();
+    expect(() => parseCandidateFilterInput({ receiptMin: "-1" })).toThrow();
+    expect(() => parseCandidateFilterInput({ revenueMin: "-1" })).toThrow();
+    expect(() => parseCandidateFilterInput({ expenseMin: "-1" })).toThrow();
+    expect(() => parseCandidateFilterInput({ assetMin: "-1" })).toThrow();
+  });
+
+  it("rejects controls and malformed Unicode in every free-text wire field", () => {
+    for (const value of ["Ana\0Maria", "Ana\u001fMaria", "Ana\u007fMaria", "Ana\ud800Maria"]) {
+      expect(() => parseCandidateFilterInput({ query: value })).toThrow();
+      expect(() => parseCandidateFilterInput({ parties: [value] })).toThrow();
+    }
+  });
+
   it("accepts the complete strict input and rejects unknown fields", () => {
     const complete = {
       query: "Ana",

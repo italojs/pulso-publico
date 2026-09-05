@@ -69,7 +69,16 @@ export const CandidateSocialLinkRecord = z.object({
   electionYear: z.number().int().min(2026),
   candidateExternalId: z.string().min(1),
   label: z.string().min(1),
-  url: z.url(),
+  url: z.url().refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return (parsed.protocol === "http:" || parsed.protocol === "https:")
+        && parsed.username === ""
+        && parsed.password === "";
+    } catch {
+      return false;
+    }
+  }, "Social link must be credential-free HTTP(S)"),
 }).strict();
 
 export const CandidateGovernmentPlanRecord = z.object({

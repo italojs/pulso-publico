@@ -181,8 +181,8 @@ async function seedCandidates() {
     {
       candidateId: bia.id,
       revenueCents: 0n,
-      expenseCents: 0n,
-      balanceCents: 0n,
+      expenseCents: 1n,
+      balanceCents: -1n,
       revenueByCategory: {},
       expenseByCategory: {},
       sourceExtractedAt: extractedAt,
@@ -473,6 +473,7 @@ describe("candidate catalog queries", () => {
     expect(await ids({ revenueMinCents: 0n, revenueMaxCents: 0n })).toEqual(["2020"]);
     expect(await ids({ expenseMinCents: 20_000n, expenseMaxCents: 20_000n })).toEqual(["1010"]);
     expect(await ids({ balanceMinCents: 30_000n, balanceMaxCents: 30_000n })).toEqual(["1010"]);
+    expect(await ids({ balanceMinCents: -1n, balanceMaxCents: -1n })).toEqual(["2020"]);
     expect(await ids({ fundingKinds: ["public"] })).toEqual(["1010"]);
 
     const page = await listCandidates(testDb, { order: "number" });

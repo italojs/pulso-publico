@@ -8,10 +8,12 @@ import type { Entry } from "unzipper";
 
 import {
   TSE_DATA_ORIGIN,
+  TSE_CAMPAIGN_ENTRY_KINDS,
   TSE_REGIONAL_MEDIA_PATHS,
   TSE_REGIONS,
   TSE_RESOURCE_PATHS,
   type TseRegion,
+  type TseCampaignEntryKind,
   type TseRegionalMediaKind,
   type TseResourceName,
 } from "#/domain/tse-source";
@@ -36,14 +38,13 @@ export { TSE_REGIONS };
 export type { TseRegion, TseRegionalMediaKind, TseResourceName };
 export type TseRow = Record<string, string>;
 export type TseTabularEntryKind = Exclude<TseResourceName, "campaignAccounts">
-  | "campaignReceipts"
-  | "campaignContractedExpenses"
-  | "campaignPaidExpenses";
+  | TseCampaignEntryKind;
 
 export interface TseRowEntry {
   readonly row: TseRow;
   readonly entryKind: TseTabularEntryKind;
   readonly sourceArchiveUrl: string;
+  readonly sourceExtractedAt: Date | null;
 }
 
 export interface TseResourceManifest {
@@ -52,6 +53,7 @@ export interface TseResourceManifest {
   readonly entryKinds: readonly TseTabularEntryKind[];
   readonly sourceArchiveUrl: string;
   readonly sourceExtractedAt: Date | null;
+  readonly entryKindSourceExtractedAt?: Readonly<Record<TseCampaignEntryKind, Date | null>>;
 }
 
 export type TseResourceStreamEvent = ({ readonly type: "row" } & TseRowEntry)
@@ -105,6 +107,33 @@ const expectedTabularEntry: Record<TseResourceName, RegExp> = {
   social: new RegExp(`^rede_social_candidato_2026_${regionSuffix}\\.(?:csv|txt)$`, "i"),
   campaignAccounts: new RegExp(`^(?:receitas_candidatos|despesas_contratadas_candidatos|despesas_pagas_candidatos)_2026_${regionSuffix}\\.(?:csv|txt)$`, "i"),
 };
+
+const regionalTabularPrefixes = {
+  candidates: "consulta_cand",
+  complements: "consulta_cand_complementar",
+  assets: "bem_candidato",
+  coalitions: "consulta_coligacao",
+  social: "rede_social_candidato",
+} as const;
+
+type RegionalTabularResource = keyof typeof regionalTabularPrefixes;
+
+function isRegionalTabularResource(resource: TseResourceName): resource is RegionalTabularResource {
+  return resource !== "campaignAccounts";
+}
+
+function regionalPartition(
+  resource: RegionalTabularResource,
+  filename: string,
+): TseRegion | "BRASIL" | null {
+  const match = new RegExp(`^${regionalTabularPrefixes[resource]}_2026_([^.]+)\\.(?:csv|txt)$`, "i")
+    .exec(filename);
+  if (!match) return null;
+  const region = match[1]!.toLocaleUpperCase("en-US");
+  if (region === "BRASIL") return region;
+  if (!isTseRegion(region)) throw new TseContractError("UNEXPECTED_REGIONAL_PARTITION");
+  return region;
+}
 
 const requiredColumnGroups: Record<TseResourceName, readonly (readonly string[])[]> = {
   candidates: [
@@ -260,12 +289,24 @@ async function prepareMediaContent(
 
   const nextChunk = async (): Promise<IteratorResult<Buffer>> => {
     let result: IteratorResult<unknown>;
+    let abortListener: (() => void) | undefined;
     try {
-      result = await iterator.next();
-    } catch (error) {
       if (signal.aborted) throw new TseContractError("TSE_REQUEST_ABORTED");
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortListener = () => reject(new TseContractError("TSE_REQUEST_ABORTED"));
+        signal.addEventListener("abort", abortListener, { once: true });
+        if (signal.aborted) abortListener();
+      });
+      result = await Promise.race([iterator.next(), aborted]);
+    } catch (error) {
+      if (signal.aborted) {
+        entry.destroy();
+        throw new TseContractError("TSE_REQUEST_ABORTED");
+      }
       if (error instanceof TseContractError) throw error;
       throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
+    } finally {
+      if (abortListener) signal.removeEventListener("abort", abortListener);
     }
     if (result.done) return { done: true, value: undefined };
     const chunk = Buffer.from(result.value as Uint8Array);
@@ -373,6 +414,10 @@ export class TseOpenDataClient {
     let foundExpectedEntry = false;
     const seenBasenames = new Set<string>();
     const seenEntryKinds = new Set<TseTabularEntryKind>();
+    const seenRegionalPartitions = new Set<TseRegion>();
+    const campaignSourceExtractedAt = Object.fromEntries(
+      TSE_CAMPAIGN_ENTRY_KINDS.map((kind) => [kind, null]),
+    ) as Record<TseCampaignEntryKind, Date | null>;
     let sourceExtractedAt: Date | null = null;
 
     for await (const entry of streamZipEntries(request.body, request.signal)) {
@@ -387,6 +432,9 @@ export class TseOpenDataClient {
         continue;
       }
       const filename = basename(entry.path.replaceAll("\\", "/"));
+      const partition = isRegionalTabularResource(resource)
+        ? regionalPartition(resource, filename)
+        : null;
       if (!expectedTabularEntry[resource].test(filename)) {
         await drainBoundedArchiveEntry(
           entry,
@@ -394,6 +442,17 @@ export class TseOpenDataClient {
           request.signal,
         );
         continue;
+      }
+      if (isRegionalTabularResource(resource) && partition !== "BRASIL") {
+        if (partition === null) {
+          entry.destroy();
+          throw new TseContractError("UNEXPECTED_REGIONAL_PARTITION");
+        }
+        if (seenRegionalPartitions.has(partition)) {
+          entry.destroy();
+          throw new TseContractError("DUPLICATE_REGIONAL_PARTITION");
+        }
+        seenRegionalPartitions.add(partition);
       }
       const normalizedFilename = filename.toLocaleLowerCase("pt-BR");
       if (seenBasenames.has(normalizedFilename)) {
@@ -427,11 +486,12 @@ export class TseOpenDataClient {
         seenEntryKinds.add(entryKind);
         for await (const row of parser) {
           const parsedRow = row as TseRow;
+          let rowExtractedAt: Date | null = null;
           if (
             normalizeTseOptionalValue(parsedRow.DT_GERACAO)
             || normalizeTseOptionalValue(parsedRow.HH_GERACAO)
           ) {
-            const rowExtractedAt = parseTseGenerationInstant(parsedRow);
+            rowExtractedAt = parseTseGenerationInstant(parsedRow);
             if (
               sourceExtractedAt
               && sourceExtractedAt.getTime() !== rowExtractedAt.getTime()
@@ -440,12 +500,21 @@ export class TseOpenDataClient {
             if (!sourceExtractedAt || rowExtractedAt > sourceExtractedAt) {
               sourceExtractedAt = rowExtractedAt;
             }
+            if (resource === "campaignAccounts") {
+              const campaignKind = entryKind as TseCampaignEntryKind;
+              const priorSubtype = campaignSourceExtractedAt[campaignKind];
+              if (priorSubtype && priorSubtype.getTime() !== rowExtractedAt.getTime()) {
+                throw new TseContractError("INCONSISTENT_SOURCE_METADATA");
+              }
+              campaignSourceExtractedAt[campaignKind] = rowExtractedAt;
+            }
           }
           yield {
             type: "row",
             row: parsedRow,
             entryKind,
             sourceArchiveUrl: request.url,
+            sourceExtractedAt: rowExtractedAt,
           };
         }
         await completion;
@@ -463,6 +532,10 @@ export class TseOpenDataClient {
     }
 
     if (!foundExpectedEntry) throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
+    if (
+      isRegionalTabularResource(resource)
+      && TSE_REGIONS.some((region) => !seenRegionalPartitions.has(region))
+    ) throw new TseContractError("INCOMPLETE_REGIONAL_PARTITION");
     const kindOrder: readonly TseTabularEntryKind[] = resource === "campaignAccounts"
       ? ["campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses"]
       : [resource];
@@ -472,6 +545,9 @@ export class TseOpenDataClient {
       entryKinds: kindOrder.filter((kind) => seenEntryKinds.has(kind)),
       sourceArchiveUrl: request.url,
       sourceExtractedAt,
+      ...(resource === "campaignAccounts"
+        ? { entryKindSourceExtractedAt: campaignSourceExtractedAt }
+        : {}),
     };
   }
 

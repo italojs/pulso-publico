@@ -1,4 +1,5 @@
 import type { CandidateOffice } from "#/domain/electoral";
+import { isCanonicalTseCandidateExternalId } from "#/domain/tse-source";
 
 export interface ReconciliationCandidate {
   externalId: string;
@@ -180,7 +181,7 @@ export function parseCandidateLinkCommand(args: readonly string[]): CandidateLin
   const lawmakerExternalId = options.get("lawmaker")!;
   const lawmakerSource = options.get("source");
   if (
-    !/^\d{12}$/.test(candidateExternalId)
+    !isCanonicalTseCandidateExternalId(candidateExternalId)
     || !/^\d+$/.test(lawmakerExternalId)
     || (lawmakerSource !== "camara" && lawmakerSource !== "senado")
   ) {

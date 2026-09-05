@@ -19,7 +19,7 @@ import {
   validateCandidateFilterBounds,
   type CandidateFilterBoundField,
 } from "#/server/candidates/filter-validation";
-import { centsToReais, reaisToCents } from "#/server/candidates/search-params";
+import { centsToReais, reaisToCents, signedCentsToReais, signedReaisToCents } from "#/server/candidates/search-params";
 import {
   buildCandidateCatalogHref,
   countCandidateFilters,
@@ -68,12 +68,21 @@ function candidateDraft(filters: CandidateFilters): CandidateFilters {
 }
 
 function moneyDraft(filters: CandidateFilters): Record<MoneyKey, string> {
-  return Object.fromEntries(moneyKeys.map((key) => [key, filters[key] === undefined ? "" : (centsToReais(filters[key]) ?? "").replace(".", ",")])) as Record<MoneyKey, string>;
+  return Object.fromEntries(moneyKeys.map((key) => [
+    key,
+    filters[key] === undefined
+      ? ""
+      : ((key === "balanceMinCents" || key === "balanceMaxCents"
+        ? signedCentsToReais(filters[key])
+        : centsToReais(filters[key])) ?? "").replace(".", ","),
+  ])) as Record<MoneyKey, string>;
 }
 
-function parseMoneyInput(value: string): bigint | undefined {
+function parseMoneyInput(key: MoneyKey, value: string): bigint | undefined {
   const normalized = value.trim().replace(",", ".");
-  return reaisToCents(normalized);
+  return key === "balanceMinCents" || key === "balanceMaxCents"
+    ? signedReaisToCents(normalized)
+    : reaisToCents(normalized);
 }
 
 export function candidatePreviewInput(filters: CandidateFilters) {
@@ -286,10 +295,10 @@ export function CandidateAdvancedFilters({ authenticated, comparison, filters, o
   };
   const updateMoney = (key: MoneyKey, value: string) => {
     setMoneyInputs((current) => ({ ...current, [key]: value }));
-    update(key, value.trim() ? parseMoneyInput(value) : undefined);
+    update(key, value.trim() ? parseMoneyInput(key, value) : undefined);
   };
 
-  const invalidMoney = (key: MoneyKey) => moneyInputs[key].trim() !== "" && parseMoneyInput(moneyInputs[key]) === undefined;
+  const invalidMoney = (key: MoneyKey) => moneyInputs[key].trim() !== "" && parseMoneyInput(key, moneyInputs[key]) === undefined;
   const bounds = validateCandidateFilterBounds(draft);
   const hasBoundsIssue = (fields: CandidateFilterBoundField[], code?: "out_of_bounds" | "reversed_range") => bounds.issues.some((issue) => (
     (!code || issue.code === code) && issue.fields.some((field) => fields.includes(field))
@@ -455,7 +464,11 @@ export function CandidateAdvancedFilters({ authenticated, comparison, filters, o
           {draft.query ? <input name="q" type="hidden" value={draft.query} /> : null}
           {draft.allBrazil ? <input name="abrangencia" type="hidden" value="brasil" /> : null}
           {moneyKeys.map((key) => {
-            const value = draft[key] === undefined ? undefined : centsToReais(draft[key]);
+            const value = draft[key] === undefined
+              ? undefined
+              : key === "balanceMinCents" || key === "balanceMaxCents"
+                ? signedCentsToReais(draft[key])
+                : centsToReais(draft[key]);
             return value === undefined ? null : <input key={key} name={moneyParameterNames[key]} type="hidden" value={value} />;
           })}
           <header className="advancedFilters__header">

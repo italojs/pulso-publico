@@ -7,6 +7,8 @@ import {
   CANDIDATE_ORDER_VALUES,
   CANDIDATE_REGION_VALUES,
   centsToReais,
+  isSafeCandidateFilterText,
+  isValidCandidateFilterText,
   MAX_CANDIDATE_AGE,
   MAX_CANDIDATE_ASSET_COUNT,
   MAX_CANDIDATE_FILTER_VALUES,
@@ -14,9 +16,11 @@ import {
   MAX_CANDIDATE_PAGE_SIZE,
   MAX_CANDIDATE_TEXT_LENGTH,
   reaisToCents,
+  signedCentsToReais,
+  signedReaisToCents,
 } from "#/server/candidates/filter-validation";
 
-export { centsToReais, reaisToCents } from "#/server/candidates/filter-validation";
+export { centsToReais, reaisToCents, signedCentsToReais, signedReaisToCents } from "#/server/candidates/filter-validation";
 
 export type CandidateRawSearchParams = Record<string, string | string[] | undefined>;
 
@@ -97,15 +101,18 @@ function values(value: string | string[] | undefined): string[] {
 
 function text(value: string | string[] | undefined): string | undefined {
   const selected = values(value)[0];
-  return selected?.slice(0, MAX_TEXT_LENGTH) || undefined;
+  if (selected === undefined || !isSafeCandidateFilterText(selected)) return undefined;
+  const bounded = selected?.slice(0, MAX_TEXT_LENGTH);
+  return bounded !== undefined && isValidCandidateFilterText(bounded) ? bounded : undefined;
 }
 
 function texts(value: string | string[] | undefined): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const selected of values(value)) {
+    if (!isSafeCandidateFilterText(selected)) continue;
     const bounded = selected.slice(0, MAX_TEXT_LENGTH);
-    if (!bounded || seen.has(bounded)) continue;
+    if (!isValidCandidateFilterText(bounded) || seen.has(bounded)) continue;
     seen.add(bounded);
     result.push(bounded);
   }
@@ -143,6 +150,11 @@ function boolean(value: string | string[] | undefined): boolean | undefined {
 function money(value: string | string[] | undefined): bigint | undefined {
   const selected = values(value)[0];
   return selected === undefined ? undefined : reaisToCents(selected);
+}
+
+function signedMoney(value: string | string[] | undefined): bigint | undefined {
+  const selected = values(value)[0];
+  return selected === undefined ? undefined : signedReaisToCents(selected);
 }
 
 function setArray<K extends keyof CandidateFilters>(
@@ -196,7 +208,7 @@ export function parseCandidateSearchParams(params: CandidateRawSearchParams): Ca
   setArray(filters, "assetCategories", texts(params.categoriaBem));
   setRange(filters, "revenueMinCents", "revenueMaxCents", money(params.receitaMin), money(params.receitaMax));
   setRange(filters, "expenseMinCents", "expenseMaxCents", money(params.despesaMin), money(params.despesaMax));
-  setRange(filters, "balanceMinCents", "balanceMaxCents", money(params.saldoMin), money(params.saldoMax));
+  setRange(filters, "balanceMinCents", "balanceMaxCents", signedMoney(params.saldoMin), signedMoney(params.saldoMax));
   setArray(filters, "fundingKinds", enums(params.origemRecurso, CANDIDATE_FUNDING_KIND_VALUES));
   for (const [key, parameter] of [
     ["hasPhoto", "comFoto"], ["hasSocial", "comRedes"], ["hasGovernmentPlan", "comProposta"],
@@ -228,6 +240,12 @@ function appendValues(params: URLSearchParams, key: string, selected: readonly (
 function appendMoney(params: URLSearchParams, key: string, selected: bigint | undefined) {
   if (selected === undefined) return;
   const encoded = centsToReais(selected);
+  if (encoded !== undefined) params.set(key, encoded);
+}
+
+function appendSignedMoney(params: URLSearchParams, key: string, selected: bigint | undefined) {
+  if (selected === undefined) return;
+  const encoded = signedCentsToReais(selected);
   if (encoded !== undefined) params.set(key, encoded);
 }
 
@@ -264,8 +282,8 @@ export function buildCandidateHref(filters: Partial<CandidateFilters>, page = fi
   appendMoney(params, "receitaMax", filters.revenueMaxCents);
   appendMoney(params, "despesaMin", filters.expenseMinCents);
   appendMoney(params, "despesaMax", filters.expenseMaxCents);
-  appendMoney(params, "saldoMin", filters.balanceMinCents);
-  appendMoney(params, "saldoMax", filters.balanceMaxCents);
+  appendSignedMoney(params, "saldoMin", filters.balanceMinCents);
+  appendSignedMoney(params, "saldoMax", filters.balanceMaxCents);
   appendValues(params, "origemRecurso", filters.fundingKinds);
   appendBoolean(params, "comFoto", filters.hasPhoto);
   appendBoolean(params, "comRedes", filters.hasSocial);

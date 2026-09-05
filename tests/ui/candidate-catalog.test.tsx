@@ -598,6 +598,19 @@ describe("candidate catalog", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("accepts signed balance inputs and emits them through the native GET form", () => {
+    renderFilters({ balanceMinCents: -12_345n, balanceMaxCents: -1n });
+    const dialog = openAdvanced();
+
+    expect(within(dialog).getByLabelText("Saldo mínimo")).toHaveValue("-123,45");
+    expect(within(dialog).getByLabelText("Saldo máximo")).toHaveValue("-0,01");
+    const form = dialog.querySelector("form")!;
+    const data = new FormData(form);
+    expect(data.get("saldoMin")).toBe("-123.45");
+    expect(data.get("saldoMax")).toBe("-0.01");
+    expect(within(dialog).getByRole("button", { name: "Aplicar filtros" })).toBeEnabled();
+  });
+
   it("caps every repeated group at twenty choices", () => {
     const parties = Array.from({ length: 21 }, (_, index) => `P${String(index).padStart(2, "0")}`);
     renderFilters({ parties: parties.slice(0, 20) }, true, undefined, { ...options, parties });

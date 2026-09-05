@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCandidateExternalId,
   TseOpenDataClient,
+  TSE_REGIONS,
 } from "#/integrations/tse/client";
 
 interface ZipFixtureEntry {
@@ -127,6 +128,50 @@ function candidateCsv(rows: readonly [string, string][]): string {
   ).join("\r\n")}\r\n`;
 }
 
+const regionalFixtures = {
+  candidates: {
+    prefix: "consulta_cand",
+    contents: `${candidateHeader}\r\n`,
+  },
+  complements: {
+    prefix: "consulta_cand_complementar",
+    contents: "ANO_ELEICAO;SQ_CANDIDATO\r\n",
+  },
+  assets: {
+    prefix: "bem_candidato",
+    contents: "ANO_ELEICAO;SQ_CANDIDATO;NR_ORDEM_BEM_CANDIDATO;DS_TIPO_BEM_CANDIDATO;VR_BEM_CANDIDATO\r\n",
+  },
+  coalitions: {
+    prefix: "consulta_coligacao",
+    contents: "ANO_ELEICAO;SG_UF;DS_CARGO;SG_PARTIDO;NM_COLIGACAO\r\n",
+  },
+  social: {
+    prefix: "rede_social_candidato",
+    contents: "ANO_ELEICAO;SQ_CANDIDATO;DS_URL\r\n",
+  },
+} as const;
+
+type RegionalResource = keyof typeof regionalFixtures;
+
+function completeRegionalEntries(
+  resource: RegionalResource,
+  overrides: readonly ZipFixtureEntry[] = [],
+): ZipFixtureEntry[] {
+  const fixture = regionalFixtures[resource];
+  const overridden = new Set(overrides.flatMap((entry) => {
+    const match = new RegExp(`^${fixture.prefix}_2026_([A-Z]{2})\\.(?:csv|txt)$`, "i")
+      .exec(entry.name.split("/").at(-1)!);
+    return match ? [match[1]!.toLocaleUpperCase("en-US")] : [];
+  }));
+  return [
+    ...overrides,
+    ...TSE_REGIONS.filter((region) => !overridden.has(region)).map((region) => ({
+      name: `${fixture.prefix}_2026_${region}.csv`,
+      contents: fixture.contents,
+    })),
+  ];
+}
+
 async function collectRows(
   client: TseOpenDataClient,
   signal?: AbortSignal,
@@ -143,6 +188,50 @@ async function consume(stream: NodeJS.ReadableStream): Promise<Buffer> {
 }
 
 describe("TseOpenDataClient", () => {
+  it.each(Object.keys(regionalFixtures) as RegionalResource[])(
+    "requires the exact BR plus 27-UF partition for %s",
+    async (resource) => {
+      const complete = completeRegionalEntries(resource);
+      const valid = new TseOpenDataClient({
+        fetch: fakeZipFetch(complete),
+        baseUrl: "https://cdn.tse.jus.br/",
+      });
+      const events = [];
+      for await (const event of valid.streamResource(resource)) events.push(event);
+      expect(events.at(-1)).toMatchObject({ type: "manifest", resource });
+
+      for (const incomplete of [
+        complete.filter((entry) => !entry.name.includes("_TO.")),
+        complete.filter((entry) => entry.name.includes("_ES.")),
+      ]) {
+        const client = new TseOpenDataClient({
+          fetch: fakeZipFetch(incomplete),
+          baseUrl: "https://cdn.tse.jus.br/",
+        });
+        await expect(async () => {
+          for await (const _event of client.streamResource(resource)) void _event;
+        }).rejects.toMatchObject({ code: "INCOMPLETE_REGIONAL_PARTITION" });
+      }
+    },
+  );
+
+  it("rejects duplicate or unexpected regional partitions even when all canonical files exist", async () => {
+    for (const extra of [
+      { name: "copy/consulta_cand_2026_ES.txt", contents: `${candidateHeader}\r\n` },
+      { name: "consulta_cand_2026_ZZ.csv", contents: `${candidateHeader}\r\n` },
+    ]) {
+      const client = new TseOpenDataClient({
+        fetch: fakeZipFetch([...completeRegionalEntries("candidates"), extra]),
+        baseUrl: "https://cdn.tse.jus.br/",
+      });
+      await expect(async () => {
+        for await (const _event of client.streamResource("candidates")) void _event;
+      }).rejects.toMatchObject({
+        code: expect.stringMatching(/DUPLICATE_REGIONAL_PARTITION|UNEXPECTED_REGIONAL_PARTITION/),
+      });
+    }
+  });
+
   it("extracts the official 11- or 12-digit candidate sequence from media names", () => {
     expect(parseCandidateExternalId("FAC12345678901_div.jpg")).toBe("12345678901");
     expect(parseCandidateExternalId("FBR123456789012_div.jpg")).toBe("123456789012");
@@ -150,13 +239,13 @@ describe("TseOpenDataClient", () => {
 
   it("streams every Windows-1252 CSV row from the official 2026 resource", async () => {
     const client = new TseOpenDataClient({
-      fetch: fakeZipFetch([{
+      fetch: fakeZipFetch(completeRegionalEntries("candidates", [{
         name: "consulta_cand_2026_ES.csv",
         contents: candidateCsv([
           ["260001234567", "ANA CIDADÃ"],
           ["260009876543", "JOÃO PÚBLICO"],
         ]),
-      }]),
+      }])),
       baseUrl: "https://cdn.tse.jus.br/",
     });
 
@@ -168,7 +257,7 @@ describe("TseOpenDataClient", () => {
 
   it("does not emit the BRASIL aggregate alongside the disjoint regional candidate files", async () => {
     const client = new TseOpenDataClient({
-      fetch: fakeZipFetch([
+      fetch: fakeZipFetch(completeRegionalEntries("candidates", [
         {
           name: "consulta_cand_2026_ES.csv",
           contents: candidateCsv([["260001234567", "ANA CIDADÃ"]]),
@@ -184,7 +273,7 @@ describe("TseOpenDataClient", () => {
             ["260009876543", "JOÃO PÚBLICO"],
           ]),
         },
-      ]),
+      ])),
       baseUrl: "https://cdn.tse.jus.br/",
     });
 
@@ -198,12 +287,12 @@ describe("TseOpenDataClient", () => {
 
   it("streams deflated entries that use a ZIP data descriptor", async () => {
     const client = new TseOpenDataClient({
-      fetch: fakeZipFetch([{
+      fetch: fakeZipFetch(completeRegionalEntries("candidates", [{
         name: "consulta_cand_2026_ES.csv",
         contents: candidateCsv([["260001234567", "ANA CIDADÃ"]]),
         compression: "deflate",
         dataDescriptor: true,
-      }]),
+      }])),
       baseUrl: "https://cdn.tse.jus.br/",
     });
 
@@ -267,11 +356,11 @@ describe("TseOpenDataClient", () => {
   });
 
   it("rejects a declared oversize entry without downloading its full payload", async () => {
-    const archive = storedZip([{
+    const archive = storedZip(completeRegionalEntries("candidates", [{
       name: "ignored.bin",
       contents: "x".repeat(1024 * 1024),
       declaredUncompressedSize: 1024 * 1024 * 1024,
-    }]);
+    }]));
     let pulledBytes = 0;
     const client = new TseOpenDataClient({
       fetch: streamingZipFetch(archive, { onPull: (bytes) => { pulledBytes += bytes; } }),
@@ -332,7 +421,7 @@ describe("TseOpenDataClient", () => {
     for (const entries of invalidCases) {
       const client = new TseOpenDataClient({ fetch: fakeZipFetch(entries), baseUrl: "https://cdn.tse.jus.br/" });
       await expect(collectRows(client)).rejects.toMatchObject({
-        code: expect.stringMatching(/INVALID_(?:ARCHIVE_RESPONSE|TABULAR_SCHEMA)|DUPLICATE_ARCHIVE_ENTRY/),
+        code: expect.stringMatching(/INVALID_(?:ARCHIVE_RESPONSE|TABULAR_SCHEMA)|DUPLICATE_(?:ARCHIVE_ENTRY|REGIONAL_PARTITION)|UNEXPECTED_REGIONAL_PARTITION/),
       });
     }
   });
@@ -452,7 +541,18 @@ describe("TseOpenDataClient", () => {
     expect(events.at(-1)).toMatchObject({
       type: "manifest",
       sourceExtractedAt: new Date("2026-09-04T07:05:48.000Z"),
+      entryKindSourceExtractedAt: {
+        campaignReceipts: new Date("2026-09-04T07:05:48.000Z"),
+        campaignContractedExpenses: new Date("2026-09-04T07:05:47.000Z"),
+        campaignPaidExpenses: new Date("2026-09-04T07:05:40.000Z"),
+      },
     });
+    expect(events.filter((event) => event.type === "row").map((event) => event.sourceExtractedAt))
+      .toEqual([
+        new Date("2026-09-04T07:05:48.000Z"),
+        new Date("2026-09-04T07:05:47.000Z"),
+        new Date("2026-09-04T07:05:40.000Z"),
+      ]);
   });
 
   it("exposes the controlled archive subtype and official provenance for campaign rows", async () => {
@@ -568,15 +668,20 @@ describe("TseOpenDataClient", () => {
       ],
       sourceArchiveUrl: "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas/prestacao_de_contas_eleitorais_candidatos_2026.zip",
       sourceExtractedAt: null,
+      entryKindSourceExtractedAt: {
+        campaignReceipts: null,
+        campaignContractedExpenses: null,
+        campaignPaidExpenses: null,
+      },
     }]);
   });
 
   it("carries official generation metadata in the resource manifest when rows are present", async () => {
     const client = new TseOpenDataClient({
-      fetch: fakeZipFetch([{
+      fetch: fakeZipFetch(completeRegionalEntries("social", [{
         name: "rede_social_candidato_2026_ES.csv",
         contents: "DT_GERACAO;HH_GERACAO;ANO_ELEICAO;SQ_CANDIDATO;DS_URL\r\n05/09/2026;08:30:00;2026;260001234567;https://example.test\r\n",
-      }]),
+      }])),
       baseUrl: "https://cdn.tse.jus.br/",
     });
     const events = [];
@@ -815,6 +920,32 @@ describe("TseOpenDataClient", () => {
     await expect(collectRows(client, controller.signal)).rejects.toMatchObject({
       code: "TSE_REQUEST_ABORTED",
     });
+  });
+
+  it("reports cancellation while an already-yielded media entry stalls mid-content", async () => {
+    const controller = new AbortController();
+    const filename = "260001234567.jpg";
+    const archive = storedZip([{
+      name: filename,
+      contents: Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, ...new Uint8Array(1_024)]),
+    }]);
+    const deliveredBytes = 30 + Buffer.byteLength(filename) + 4;
+    const client = new TseOpenDataClient({
+      fetch: async () => new Response(new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(archive.slice(0, deliveredBytes));
+        },
+        pull() { return new Promise(() => undefined); },
+      }) as BodyInit, { headers: { "content-type": "application/zip" } }),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(async () => {
+      for await (const entry of client.streamRegionalMedia("photos", "ES", controller.signal)) {
+        await consume(entry.content);
+      }
+    }).rejects.toMatchObject({ code: "TSE_REQUEST_ABORTED" });
   });
 
   it("accepts only the canonical CDN origin and root base path", () => {

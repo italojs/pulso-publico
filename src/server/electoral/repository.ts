@@ -15,7 +15,9 @@ import {
   isCanonicalTseMediaArchiveUrl,
   isCanonicalTseResourceArchiveUrl,
   isSafeOfficialTseUrl,
+  TSE_CAMPAIGN_ENTRY_KINDS,
   TSE_RESOURCE_PATHS,
+  type TseCampaignEntryKind,
   type TseResourceName,
 } from "#/domain/tse-source";
 import {
@@ -42,6 +44,7 @@ export type ElectoralTabularResourceProvenance = Record<
   {
     sourceArchiveUrl: string;
     sourceExtractedAt: DateInput | null;
+    entryKindSourceExtractedAt?: Record<TseCampaignEntryKind, DateInput | null>;
   }
 >;
 
@@ -140,6 +143,7 @@ function normalizeResourceProvenance(
 ): Record<ElectoralTabularResourceName, {
   sourceArchiveUrl: string;
   sourceExtractedAt: Date | null;
+  entryKindSourceExtractedAt?: Record<TseCampaignEntryKind, Date | null>;
 }> {
   if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) {
     throw new Error("Invalid electoral resource provenance");
@@ -155,16 +159,43 @@ function normalizeResourceProvenance(
     if (!entry || !isCanonicalTseResourceArchiveUrl(resource, entry.sourceArchiveUrl)) {
       throw new Error(`Invalid electoral resource provenance URL: ${resource}`);
     }
-    return [resource, {
+    const normalized = {
       sourceArchiveUrl: entry.sourceArchiveUrl,
       sourceExtractedAt: optionalDate(
         entry.sourceExtractedAt,
         `${resource} sourceExtractedAt`,
       ),
-    }];
+    };
+    if (resource !== "campaignAccounts") return [resource, normalized];
+    const subtypeProvenance = entry.entryKindSourceExtractedAt;
+    if (
+      !subtypeProvenance
+      || typeof subtypeProvenance !== "object"
+      || Array.isArray(subtypeProvenance)
+      || Object.keys(subtypeProvenance).length !== TSE_CAMPAIGN_ENTRY_KINDS.length
+      || Object.keys(subtypeProvenance).some((key) =>
+        !TSE_CAMPAIGN_ENTRY_KINDS.includes(key as TseCampaignEntryKind)
+      )
+    ) throw new Error("Invalid campaign subtype provenance");
+    const entryKindSourceExtractedAt = Object.fromEntries(
+      TSE_CAMPAIGN_ENTRY_KINDS.map((kind) => [kind, optionalDate(
+        subtypeProvenance[kind],
+        `${kind} sourceExtractedAt`,
+      )]),
+    ) as Record<TseCampaignEntryKind, Date | null>;
+    const latestSubtype = TSE_CAMPAIGN_ENTRY_KINDS
+      .map((kind) => entryKindSourceExtractedAt[kind])
+      .filter((value): value is Date => value !== null)
+      .reduce<Date | null>((latest, value) => !latest || value > latest ? value : latest, null);
+    if (
+      normalized.sourceExtractedAt?.getTime() !== latestSubtype?.getTime()
+      || (normalized.sourceExtractedAt === null) !== (latestSubtype === null)
+    ) throw new Error("Campaign aggregate provenance must equal the newest subtype timestamp");
+    return [resource, { ...normalized, entryKindSourceExtractedAt }];
   })) as Record<ElectoralTabularResourceName, {
     sourceArchiveUrl: string;
     sourceExtractedAt: Date | null;
+    entryKindSourceExtractedAt?: Record<TseCampaignEntryKind, Date | null>;
   }>;
 }
 
@@ -204,10 +235,21 @@ function assertNullMediaTimestamp(
 function resourceProvenanceJson(
   provenance: ReturnType<typeof normalizeResourceProvenance>,
 ): schema.ElectoralResourceProvenanceJson {
-  return Object.fromEntries(electoralTabularResources.map((resource) => [resource, {
-    sourceArchiveUrl: provenance[resource].sourceArchiveUrl,
-    sourceExtractedAt: provenance[resource].sourceExtractedAt?.toISOString() ?? null,
-  }]));
+  return Object.fromEntries(electoralTabularResources.map((resource) => {
+    const entry = provenance[resource];
+    return [resource, {
+      sourceArchiveUrl: entry.sourceArchiveUrl,
+      sourceExtractedAt: entry.sourceExtractedAt?.toISOString() ?? null,
+      ...(resource === "campaignAccounts" && entry.entryKindSourceExtractedAt
+        ? { entryKindSourceExtractedAt: Object.fromEntries(
+          TSE_CAMPAIGN_ENTRY_KINDS.map((kind) => [
+            kind,
+            entry.entryKindSourceExtractedAt![kind]?.toISOString() ?? null,
+          ]),
+        ) }
+        : {}),
+    }];
+  }));
 }
 
 function assertResourceTimestamp(
@@ -311,7 +353,7 @@ function assertSnapshot(
     candidates.set(candidate.externalId, candidate);
   }
 
-  const assetKeys = new Set<string>();
+  const assetsByOfficialIdentity = new Map<string, ElectoralSnapshotAsset>();
   for (const asset of snapshot.assets) {
     if (asset.electionYear !== snapshot.electionYear || !candidates.has(asset.candidateExternalId)) {
       throw new Error(`Asset references absent candidate ${asset.candidateExternalId}`);
@@ -328,15 +370,17 @@ function assertSnapshot(
       provenance.assets.sourceArchiveUrl,
       "asset",
     );
-    const key = JSON.stringify([
-      asset.candidateExternalId,
-      asset.sourceOrder,
-      asset.category,
-      asset.description,
-      asset.valueCents.toString(),
-    ]);
-    if (assetKeys.has(key)) throw new Error("Duplicate asset in electoral snapshot");
-    assetKeys.add(key);
+    const key = `${asset.candidateExternalId}:${asset.sourceOrder}`;
+    const existing = assetsByOfficialIdentity.get(key);
+    if (existing) {
+      const exactDuplicate = existing.category === asset.category
+        && existing.description === asset.description
+        && existing.valueCents === asset.valueCents;
+      throw new Error(exactDuplicate
+        ? "Duplicate asset in electoral snapshot"
+        : "Conflicting asset for candidate and official source order");
+    }
+    assetsByOfficialIdentity.set(key, asset);
   }
 
   const validateResource = (resource: { electionYear: number; candidateExternalId: string }) => {
@@ -352,9 +396,12 @@ function assertSnapshot(
     if (typeof entry.valueCents !== "bigint" || entry.valueCents < 0n) {
       throw new Error("Campaign money must be a non-negative bigint");
     }
+    const subtype = entry.kind === "receipt"
+      ? "campaignReceipts"
+      : "campaignContractedExpenses";
     assertResourceTimestamp(
       entry.sourceExtractedAt,
-      provenance.campaignAccounts.sourceExtractedAt,
+      provenance.campaignAccounts.entryKindSourceExtractedAt?.[subtype] ?? null,
       "campaign",
     );
     assertResourceArchiveUrl(
@@ -471,13 +518,17 @@ function aggregateCampaign(
         revenueByCategory: new Map(),
         expenseByCategory: new Map(),
         sourceArchiveUrl: entry.sourceArchiveUrl ?? null,
-        sourceExtractedAt: optionalDate(entry.sourceExtractedAt, "campaign sourceExtractedAt") ?? extractedAt,
+        sourceExtractedAt: extractedAt,
         checkedAt: checkedAtFor(candidateByExternalId, entry.candidateExternalId, entry.checkedAt),
       };
       aggregates.set(entry.candidateExternalId, aggregate);
     }
     if (aggregate.sourceArchiveUrl == null && entry.sourceArchiveUrl) {
       aggregate.sourceArchiveUrl = entry.sourceArchiveUrl;
+    }
+    const entryExtractedAt = optionalDate(entry.sourceExtractedAt, "campaign sourceExtractedAt") ?? extractedAt;
+    if (entryExtractedAt > aggregate.sourceExtractedAt) {
+      aggregate.sourceExtractedAt = entryExtractedAt;
     }
     const category = entry.category ?? "Não informado";
     if (entry.kind === "receipt") {
@@ -580,6 +631,34 @@ export class ElectoralRepository {
             : resource === "candidates"
               ? latestSuccessful.extractedAt
               : null;
+          if (resource === "campaignAccounts" && hasResourceManifest) {
+            const previousCampaign = latestSuccessful.resourceProvenance?.campaignAccounts;
+            const previousSubtypes = previousCampaign?.entryKindSourceExtractedAt;
+            const currentSubtypes = resourceProvenance.campaignAccounts.entryKindSourceExtractedAt!;
+            if (
+              previousSubtypes
+              && typeof previousSubtypes === "object"
+              && !Array.isArray(previousSubtypes)
+              && TSE_CAMPAIGN_ENTRY_KINDS.every((kind) => Object.hasOwn(previousSubtypes, kind))
+            ) {
+              for (const kind of TSE_CAMPAIGN_ENTRY_KINDS) {
+                const previousSubtype = previousSubtypes[kind];
+                if (!previousSubtype) continue;
+                const previous = asDate(previousSubtype, `${kind} previous sourceExtractedAt`);
+                const current = currentSubtypes[kind];
+                if (!current || previous > current) {
+                  throw new Error(`Cannot publish a stale electoral resource: campaignAccounts.${kind}`);
+                }
+              }
+            } else if (previousValue) {
+              const previous = asDate(previousValue, "campaignAccounts previous sourceExtractedAt");
+              const current = resourceProvenance.campaignAccounts.sourceExtractedAt;
+              if (!current || previous > current) {
+                throw new Error("Cannot publish a stale electoral resource: campaignAccounts");
+              }
+            }
+            continue;
+          }
           if (!previousValue) continue;
           const previous = asDate(previousValue, `${resource} previous sourceExtractedAt`);
           const current = resourceProvenance[resource].sourceExtractedAt;
@@ -682,7 +761,11 @@ export class ElectoralRepository {
         })));
       }
 
-      const campaign = aggregateCampaign(snapshot.campaignEntries, extractedAt, candidateByExternalId);
+      const campaign = aggregateCampaign(
+        snapshot.campaignEntries,
+        resourceProvenance.campaignAccounts.sourceExtractedAt ?? extractedAt,
+        candidateByExternalId,
+      );
       for (const batch of batches(campaign)) {
         await tx.insert(candidateCampaignTotals).values(batch.map((total) => ({
           candidateId: candidateIds.get(total.candidateExternalId)!,
@@ -815,6 +898,25 @@ export class ElectoralRepository {
       eq(electoralSyncRuns.status, "successful"),
     )).orderBy(desc(electoralSyncRuns.publicationOrder)).limit(1);
     return run?.syncRunId ?? null;
+  }
+
+  async findSyncRunOutcome(electionYear: number, syncRunId: string): Promise<{
+    status: "running" | "successful" | "failed";
+    candidateGenerationCount: number;
+  } | null> {
+    const [run] = await this.#database.select({
+      status: electoralSyncRuns.status,
+      candidateGenerationCount: sql<number>`(
+        select count(*)::int
+        from ${electoralCandidates}
+        where ${electoralCandidates.electionYear} = ${electionYear}
+          and ${electoralCandidates.snapshotRunId} = ${syncRunId}
+      )`,
+    }).from(electoralSyncRuns).where(and(
+      eq(electoralSyncRuns.electionYear, electionYear),
+      eq(electoralSyncRuns.syncRunId, syncRunId),
+    )).limit(1);
+    return run ?? null;
   }
 
   async findLawmaker(source: "camara" | "senado", externalId: string) {

@@ -10,6 +10,7 @@ import {
   CANDIDATE_ORDER_VALUES,
   CANDIDATE_REGION_VALUES,
   centsToReais,
+  isValidCandidateFilterText,
   MAX_CANDIDATE_AGE,
   MAX_CANDIDATE_ASSET_COUNT,
   MAX_CANDIDATE_FILTER_VALUES,
@@ -17,6 +18,8 @@ import {
   MAX_CANDIDATE_PAGE_SIZE,
   MAX_CANDIDATE_TEXT_LENGTH,
   reaisToCents,
+  signedCentsToReais,
+  signedReaisToCents,
 } from "#/server/candidates/filter-validation";
 import type { CandidateFilters } from "#/server/candidates/read-models";
 
@@ -24,11 +27,13 @@ const MAX_FILTER_VALUES = MAX_CANDIDATE_FILTER_VALUES;
 const MAX_TEXT_LENGTH = MAX_CANDIDATE_TEXT_LENGTH;
 const MAX_REQUEST_BYTES = 65_536;
 
-const text = z.string().trim().min(1).max(MAX_TEXT_LENGTH);
+const text = z.string().trim().min(1).max(MAX_TEXT_LENGTH)
+  .refine(isValidCandidateFilterText, "Text must not contain controls or malformed Unicode");
 const values = <T extends z.ZodType>(schema: T) => z.array(schema).min(1).max(MAX_FILTER_VALUES);
 const nonNegativeInteger = z.number().int().safe().nonnegative();
 const positiveInteger = z.number().int().safe().positive();
 const money = z.string().refine((value) => reaisToCents(value) !== undefined, "Invalid non-negative reais value");
+const signedMoney = z.string().refine((value) => signedReaisToCents(value) !== undefined, "Invalid signed reais value");
 
 export const candidateFilterInputSchema = z.object({
   allBrazil: z.literal(true).optional(),
@@ -57,8 +62,8 @@ export const candidateFilterInputSchema = z.object({
   revenueMax: money.optional(),
   expenseMin: money.optional(),
   expenseMax: money.optional(),
-  balanceMin: money.optional(),
-  balanceMax: money.optional(),
+  balanceMin: signedMoney.optional(),
+  balanceMax: signedMoney.optional(),
   fundingKinds: values(z.enum(CANDIDATE_FUNDING_KIND_VALUES)).optional(),
   hasPhoto: z.boolean().optional(),
   hasSocial: z.boolean().optional(),
@@ -85,13 +90,18 @@ export const candidateFilterInputSchema = z.object({
   }
   for (const [minimumKey, maximumKey] of [
     ["assetMin", "assetMax"], ["revenueMin", "revenueMax"],
-    ["expenseMin", "expenseMax"], ["balanceMin", "balanceMax"],
+    ["expenseMin", "expenseMax"],
   ] as const) {
     const minimum = input[minimumKey] === undefined ? undefined : reaisToCents(input[minimumKey]);
     const maximum = input[maximumKey] === undefined ? undefined : reaisToCents(input[maximumKey]);
     if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
       context.addIssue({ code: "custom", path: [maximumKey], message: `${minimumKey} must not exceed ${maximumKey}` });
     }
+  }
+  const balanceMinimum = input.balanceMin === undefined ? undefined : signedReaisToCents(input.balanceMin);
+  const balanceMaximum = input.balanceMax === undefined ? undefined : signedReaisToCents(input.balanceMax);
+  if (balanceMinimum !== undefined && balanceMaximum !== undefined && balanceMinimum > balanceMaximum) {
+    context.addIssue({ code: "custom", path: ["balanceMax"], message: "balanceMin must not exceed balanceMax" });
   }
 });
 
@@ -105,6 +115,8 @@ const moneyPairs = [
   ["assetMin", "assetMinCents"], ["assetMax", "assetMaxCents"],
   ["revenueMin", "revenueMinCents"], ["revenueMax", "revenueMaxCents"],
   ["expenseMin", "expenseMinCents"], ["expenseMax", "expenseMaxCents"],
+] as const;
+const signedMoneyPairs = [
   ["balanceMin", "balanceMinCents"], ["balanceMax", "balanceMaxCents"],
 ] as const;
 
@@ -115,6 +127,11 @@ export function parseCandidateFilterInput(input: unknown): CandidateFilters {
     const value = parsed[wireKey];
     delete filters[wireKey];
     if (value !== undefined) filters[domainKey] = reaisToCents(value)!;
+  }
+  for (const [wireKey, domainKey] of signedMoneyPairs) {
+    const value = parsed[wireKey];
+    delete filters[wireKey];
+    if (value !== undefined) filters[domainKey] = signedReaisToCents(value)!;
   }
   return canonicalizeCandidateFilters(filters as CandidateFilters);
 }
@@ -127,6 +144,15 @@ export function toCandidateFilterInput(filters: CandidateFilters): CandidateFilt
     delete wire[domainKey];
     if (value !== undefined) {
       const encoded = centsToReais(value);
+      if (encoded === undefined) throw new RangeError(`${domainKey} is outside PostgreSQL bigint range`);
+      wire[wireKey] = encoded;
+    }
+  }
+  for (const [wireKey, domainKey] of signedMoneyPairs) {
+    const value = filters[domainKey];
+    delete wire[domainKey];
+    if (value !== undefined) {
+      const encoded = signedCentsToReais(value);
       if (encoded === undefined) throw new RangeError(`${domainKey} is outside PostgreSQL bigint range`);
       wire[wireKey] = encoded;
     }

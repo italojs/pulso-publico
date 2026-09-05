@@ -68,7 +68,7 @@ Os comandos imprimem apenas um resultado JSON sanitizado; nenhuma linha bruta do
 
 - `/candidatos` lista o retrato nacional de 2026 com busca, filtros rápidos e avançados, chips removíveis e paginação. `GEO_PROVIDER=cloudflare` ou `vercel` pode sugerir uma UF em produção; `none` mantém Brasil inteiro e é obrigatório para o comportamento previsível em desenvolvimento local.
 - `/candidatos/2026/<id público do TSE>` abre o dossiê neutro com foto ou fallback, situação, bens, finanças, redes, proposta, certidões e proveniência oficial. Valor zero é preservado como zero; campo ausente continua “não informado”.
-- `/candidatos/comparar?candidato=2026:<id>&candidato=2026:<id>` compara até três candidaturas compatíveis. A seleção pode atravessar páginas do catálogo; a tela apresenta fatos lado a lado, sem nota, ranking ou recomendação de voto.
+- `/candidatos/comparar?ano=2026&id=<id>&id=<id>` compara até três candidaturas compatíveis. A seleção pode atravessar páginas do catálogo; a tela apresenta fatos lado a lado, sem nota, ranking ou recomendação de voto.
 - O botão **Seguir candidatura** exige sessão e redireciona visitantes para entrar ou criar conta com o retorno preservado. Acompanhamentos são exclusivos da conta autenticada, aparecem em `/seguindo` e nunca são compartilhados com outra conta.
 
 O histórico legislativo no perfil só aparece para vínculos revisados e confirmados pelo operador. Sugestões pendentes e rejeições permanecem privadas e não alteram o catálogo público.

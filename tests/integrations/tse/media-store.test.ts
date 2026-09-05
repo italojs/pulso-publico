@@ -94,6 +94,17 @@ describe("ElectoralMediaStore", () => {
     }));
   });
 
+  it("bounds media filenames by UTF-8 bytes, not JavaScript code units", async () => {
+    const { store } = await createStore();
+    const oversizedUtf8Name = `${"á".repeat(126)}.jpg`;
+
+    expect(oversizedUtf8Name.length).toBeLessThan(255);
+    expect(Buffer.byteLength(oversizedUtf8Name, "utf8")).toBeGreaterThan(255);
+    await expect(store.stage("safe-run", mediaEntry("data", oversizedUtf8Name))).rejects.toMatchObject({
+      code: "UNSAFE_STORAGE_PATH",
+    });
+  });
+
   it("rejects symlinks below staging before writing or publishing", async () => {
     const { root, store } = await createStore();
     const outside = await mkdtemp(join(tmpdir(), "electoral-media-outside-"));

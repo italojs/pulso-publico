@@ -8,6 +8,10 @@ import { syncElection } from "#/jobs/sync-election";
 
 type Resource = "candidates" | "complements" | "assets" | "coalitions" | "social" | "campaignAccounts";
 type EntryKind = Resource | "campaignReceipts" | "campaignContractedExpenses" | "campaignPaidExpenses";
+type CampaignEntryKind = "campaignReceipts" | "campaignContractedExpenses" | "campaignPaidExpenses";
+const campaignEntryKinds = [
+  "campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses",
+] as const satisfies readonly CampaignEntryKind[];
 
 const checkedAt = new Date("2026-09-05T12:00:00.000Z");
 const candidateId = "260001234567";
@@ -152,14 +156,19 @@ class FakeClient {
         date: "05/09/2026",
         time: "08:00:00",
       };
+      const row = {
+        DT_GERACAO: generatedAt.date,
+        HH_GERACAO: generatedAt.time,
+        ...entry.row,
+      };
       yield {
         ...entry,
-        row: {
-          DT_GERACAO: generatedAt.date,
-          HH_GERACAO: generatedAt.time,
-          ...entry.row,
-        },
+        row,
         sourceArchiveUrl: this.resourceUrl(resource),
+        sourceExtractedAt: officialInstant({
+          date: row.DT_GERACAO,
+          time: row.HH_GERACAO,
+        }),
       };
     }
   }
@@ -171,17 +180,34 @@ class FakeClient {
     const defaults = resource === "campaignAccounts"
       ? ["campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses"]
       : [resource];
+    const entryKindSourceExtractedAt = resource === "campaignAccounts"
+      ? Object.fromEntries(campaignEntryKinds.map((kind) => {
+        const entry = this.rows.campaignAccounts.find((candidate) => candidate.entryKind === kind);
+        if (!entry) return [kind, null];
+        const generatedAt = this.generatedAt.campaignAccounts ?? { date: "05/09/2026", time: "08:00:00" };
+        return [kind, officialInstant({
+          date: entry.row.DT_GERACAO ?? generatedAt.date,
+          time: entry.row.HH_GERACAO ?? generatedAt.time,
+        })];
+      })) as Record<CampaignEntryKind, Date | null>
+      : undefined;
+    const campaignInstants = Object.values(entryKindSourceExtractedAt ?? {})
+      .filter((instant): instant is Date => instant instanceof Date);
     yield {
       type: "manifest" as const,
       resource,
       entryKinds: this.manifestKinds[resource] ?? defaults,
       sourceArchiveUrl: this.resourceUrl(resource),
-      sourceExtractedAt: this.rows[resource].length === 0
-        ? null
-        : officialInstant(this.generatedAt[resource] ?? {
+      sourceExtractedAt: resource === "campaignAccounts"
+        ? campaignInstants.reduce<Date | null>((latest, instant) =>
+          !latest || instant > latest ? instant : latest, null)
+        : this.rows[resource].length === 0
+          ? null
+          : officialInstant(this.generatedAt[resource] ?? {
           date: "05/09/2026",
           time: "08:00:00",
         }),
+      ...(entryKindSourceExtractedAt ? { entryKindSourceExtractedAt } : {}),
     };
   }
 
@@ -248,6 +274,8 @@ class FakeRepository {
   snapshots: any[] = [];
   failures: any[] = [];
   pending: any[] = [];
+  outcome: { status: "running" | "successful" | "failed"; candidateGenerationCount: number } | null = null;
+  outcomeError: Error | undefined;
 
   constructor(
     events: string[],
@@ -279,6 +307,12 @@ class FakeRepository {
     }
     this.snapshots.push(snapshot);
     this.events.push("persist");
+  }
+
+  async findSyncRunOutcome() {
+    this.events.push("outcome");
+    if (this.outcomeError) throw this.outcomeError;
+    return this.outcome;
   }
 
   async recordFailure(failure: unknown) {
@@ -469,7 +503,7 @@ describe("syncElection", () => {
     });
   });
 
-  it("normalizes campaign subtype generation times to the newest archive instant", async () => {
+  it("preserves each campaign subtype generation time instead of overwriting with the aggregate max", async () => {
     const rows = cloneRows();
     Object.assign(rows.campaignAccounts[0]!.row, { DT_GERACAO: "04/09/2026", HH_GERACAO: "04:05:48" });
     Object.assign(rows.campaignAccounts[1]!.row, { DT_GERACAO: "04/09/2026", HH_GERACAO: "04:05:47" });
@@ -487,7 +521,16 @@ describe("syncElection", () => {
 
     expect(report.failed).toBe(false);
     expect(repository.snapshots[0].campaignEntries.map((entry: any) => entry.sourceExtractedAt))
-      .toEqual([new Date("2026-09-04T07:05:48.000Z"), new Date("2026-09-04T07:05:48.000Z")]);
+      .toEqual([new Date("2026-09-04T07:05:48.000Z"), new Date("2026-09-04T07:05:47.000Z")]);
+    expect(repository.snapshots[0].resourceProvenance.campaignAccounts)
+      .toMatchObject({
+        sourceExtractedAt: new Date("2026-09-04T07:05:48.000Z"),
+        entryKindSourceExtractedAt: {
+          campaignReceipts: new Date("2026-09-04T07:05:48.000Z"),
+          campaignContractedExpenses: new Date("2026-09-04T07:05:47.000Z"),
+          campaignPaidExpenses: new Date("2026-09-04T07:05:40.000Z"),
+        },
+      });
   });
 
   it("records a stable failure and discards only the new generation on a required-resource error", async () => {
@@ -536,6 +579,80 @@ describe("syncElection", () => {
       .toBeLessThan(events.findIndex((event) => event === "persist-failed"));
     expect(events.findIndex((event) => event === "persist-failed"))
       .toBeLessThan(events.findIndex((event) => event.startsWith("discard:")));
+  });
+
+  it("recovers truthful success when persistence commits and only its acknowledgement throws", async () => {
+    const events: string[] = [];
+    const media = new FakeMediaStore(events);
+    const repository = new FakeRepository(events, "previous-generation", new Error("ack lost"));
+    repository.outcome = { status: "successful", candidateGenerationCount: 1 };
+
+    const report = await syncElection(new FakeClient(), media, repository, {
+      electionYear: 2026,
+      now: () => checkedAt,
+      withLock: acquiredLock(events),
+    });
+
+    expect(report).toMatchObject({
+      failed: false,
+      candidates: 1,
+      warnings: expect.arrayContaining(["PERSISTENCE_ACKNOWLEDGEMENT_RECOVERED"]),
+    });
+    expect(media.discarded).toEqual([]);
+    expect(media.removed).toEqual(["previous-generation"]);
+    expect(repository.failures).toEqual([]);
+  });
+
+  it("retains published media while a pending persistence outcome remains ambiguous", async () => {
+    const events: string[] = [];
+    const media = new FakeMediaStore(events);
+    const repository = new FakeRepository(events, "previous-generation", new Error("ack lost"));
+    repository.outcome = { status: "running", candidateGenerationCount: 1 };
+
+    const report = await syncElection(new FakeClient(), media, repository, {
+      electionYear: 2026,
+      now: () => checkedAt,
+      withLock: acquiredLock(events),
+    });
+
+    expect(report).toMatchObject({ failed: true, errorCode: "PERSISTENCE_OUTCOME_UNKNOWN" });
+    expect(media.discarded).toEqual([]);
+    expect(media.removed).toEqual([]);
+    expect(repository.failures).toEqual([]);
+  });
+
+  it("discards published media after a definitively failed persistence outcome", async () => {
+    const events: string[] = [];
+    const media = new FakeMediaStore(events);
+    const repository = new FakeRepository(events, "previous-generation", new Error("commit failed"));
+    repository.outcome = { status: "failed", candidateGenerationCount: 0 };
+
+    const report = await syncElection(new FakeClient(), media, repository, {
+      electionYear: 2026,
+      now: () => checkedAt,
+      withLock: acquiredLock(events),
+    });
+
+    expect(report).toMatchObject({ failed: true, errorCode: "ELECTORAL_SYNC_FAILED" });
+    expect(media.discarded).toHaveLength(1);
+    expect(repository.failures).toHaveLength(1);
+  });
+
+  it("retains published media when the persistence status check itself fails", async () => {
+    const events: string[] = [];
+    const media = new FakeMediaStore(events);
+    const repository = new FakeRepository(events, "previous-generation", new Error("ack lost"));
+    repository.outcomeError = new Error("status unavailable");
+
+    const report = await syncElection(new FakeClient(), media, repository, {
+      electionYear: 2026,
+      now: () => checkedAt,
+      withLock: acquiredLock(events),
+    });
+
+    expect(report).toMatchObject({ failed: true, errorCode: "PERSISTENCE_OUTCOME_UNKNOWN" });
+    expect(media.discarded).toEqual([]);
+    expect(repository.failures).toEqual([]);
   });
 
   it("does no work when the PostgreSQL advisory lock is already held", async () => {
@@ -770,6 +887,11 @@ describe("syncElection", () => {
       campaignAccounts: {
         sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
         sourceExtractedAt: new Date("2026-09-04T11:20:00.000Z"),
+        entryKindSourceExtractedAt: {
+          campaignReceipts: new Date("2026-09-04T11:20:00.000Z"),
+          campaignContractedExpenses: new Date("2026-09-04T11:20:00.000Z"),
+          campaignPaidExpenses: new Date("2026-09-04T11:20:00.000Z"),
+        },
       },
     });
     expect(repository.snapshots[0].candidates[0].sourceExtractedAt)
@@ -801,6 +923,11 @@ describe("syncElection", () => {
     expect(repository.snapshots[0].resourceProvenance.campaignAccounts).toEqual({
       sourceArchiveUrl: "https://cdn.tse.jus.br/campaignAccounts.zip",
       sourceExtractedAt: null,
+      entryKindSourceExtractedAt: {
+        campaignReceipts: null,
+        campaignContractedExpenses: null,
+        campaignPaidExpenses: null,
+      },
     });
   });
 

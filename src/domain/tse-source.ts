@@ -11,6 +11,14 @@ export const TSE_RESOURCE_PATHS = {
 
 export type TseResourceName = keyof typeof TSE_RESOURCE_PATHS;
 
+export const TSE_CAMPAIGN_ENTRY_KINDS = [
+  "campaignReceipts",
+  "campaignContractedExpenses",
+  "campaignPaidExpenses",
+] as const;
+
+export type TseCampaignEntryKind = typeof TSE_CAMPAIGN_ENTRY_KINDS[number];
+
 export const TSE_REGIONS = [
   "BR",
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
@@ -19,6 +27,12 @@ export const TSE_REGIONS = [
 ] as const;
 
 export type TseRegion = typeof TSE_REGIONS[number];
+
+export const TSE_CANDIDATE_EXTERNAL_ID_PATTERN = /^\d{11,12}$/;
+
+export function isCanonicalTseCandidateExternalId(value: string): boolean {
+  return TSE_CANDIDATE_EXTERNAL_ID_PATTERN.test(value);
+}
 
 export const TSE_REGIONAL_MEDIA_PATHS = {
   photos: (region: TseRegion) => `estatistica/sead/eleicoes/eleicoes2026/fotos/foto_cand2026_${region}_div.zip`,

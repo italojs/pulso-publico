@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "candidate_assets_candidate_source_order_uq" ON "candidate_assets" USING btree ("candidate_id","source_order") WHERE "candidate_assets"."source_order" is not null;

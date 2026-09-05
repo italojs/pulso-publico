@@ -63,14 +63,29 @@ const certificateArchiveUrl = "https://cdn.tse.jus.br/estatistica/sead/odsele/ce
 function resourceProvenance(
   overrides: Partial<Record<typeof tabularResources[number], Date | null>> = {},
 ) {
-  return Object.fromEntries(tabularResources.map((resource) => [resource, {
-    sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths[resource]}`,
-    sourceExtractedAt: overrides[resource] === undefined
+  return Object.fromEntries(tabularResources.map((resource) => {
+    const timestamp = overrides[resource] === undefined
       ? new Date(sourceExtractedAt)
-      : overrides[resource],
-  }])) as Record<typeof tabularResources[number], {
+      : overrides[resource];
+    return [resource, {
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths[resource]}`,
+      sourceExtractedAt: timestamp,
+      ...(resource === "campaignAccounts" ? {
+        entryKindSourceExtractedAt: {
+          campaignReceipts: timestamp,
+          campaignContractedExpenses: timestamp,
+          campaignPaidExpenses: timestamp,
+        },
+      } : {}),
+    }];
+  })) as Record<typeof tabularResources[number], {
     sourceArchiveUrl: string;
     sourceExtractedAt: Date | null;
+    entryKindSourceExtractedAt?: {
+      campaignReceipts: Date | null;
+      campaignContractedExpenses: Date | null;
+      campaignPaidExpenses: Date | null;
+    };
   }>;
 }
 
@@ -310,6 +325,16 @@ describe("ElectoralRepository", () => {
     }]);
   });
 
+  it("reports a stored run outcome with its exact candidate generation count", async () => {
+    await expect(repository.findSyncRunOutcome(2026, "missing-run")).resolves.toBeNull();
+    await repository.persistSnapshot(snapshot("outcome-run"));
+
+    await expect(repository.findSyncRunOutcome(2026, "outcome-run")).resolves.toEqual({
+      status: "successful",
+      candidateGenerationCount: 1,
+    });
+  });
+
   it("persists an unavailable re-election declaration as null", async () => {
     const candidateSnapshot = snapshot("run-unknown-reelection", [candidate(primaryCandidateId, {
       seekingReelection: null,
@@ -504,6 +529,10 @@ describe("ElectoralRepository", () => {
           sourceExtractedAt: provenance.sourceExtractedAt == null
             ? null
             : new Date(provenance.sourceExtractedAt).toISOString(),
+          ...(provenance.entryKindSourceExtractedAt ? {
+            entryKindSourceExtractedAt: Object.fromEntries(Object.entries(provenance.entryKindSourceExtractedAt)
+              .map(([kind, timestamp]) => [kind, timestamp == null ? null : new Date(timestamp).toISOString()])),
+          } : {}),
         }])),
     }]);
     expect(await testDb.select({ sourceExtractedAt: electoralCandidates.sourceExtractedAt })
@@ -565,6 +594,92 @@ describe("ElectoralRepository", () => {
       .rejects.toThrow("Cannot publish a stale electoral resource: assets");
     expect(await testDb.select({ syncRunId: electoralSyncRuns.syncRunId })
       .from(electoralSyncRuns)).toEqual([{ syncRunId: "resource-version-first" }]);
+  });
+
+  it("atomically rejects a regressed campaign subtype even when another subtype advances", async () => {
+    const first = snapshot("campaign-subtype-first");
+    first.resourceProvenance.campaignAccounts = {
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
+      sourceExtractedAt: new Date("2026-09-05T11:00:00.000Z"),
+      entryKindSourceExtractedAt: {
+        campaignReceipts: new Date("2026-09-05T11:00:00.000Z"),
+        campaignContractedExpenses: new Date("2026-09-05T10:00:00.000Z"),
+        campaignPaidExpenses: new Date("2026-09-05T09:00:00.000Z"),
+      },
+    };
+    first.campaignEntries = first.campaignEntries.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T11:00:00.000Z",
+    }));
+    await repository.persistSnapshot(first);
+
+    const mixed = snapshot("campaign-subtype-mixed");
+    mixed.resourceProvenance.campaignAccounts = {
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
+      sourceExtractedAt: new Date("2026-09-05T12:00:00.000Z"),
+      entryKindSourceExtractedAt: {
+        campaignReceipts: new Date("2026-09-05T10:59:59.000Z"),
+        campaignContractedExpenses: new Date("2026-09-05T12:00:00.000Z"),
+        campaignPaidExpenses: new Date("2026-09-05T09:00:00.000Z"),
+      },
+    };
+    mixed.campaignEntries = mixed.campaignEntries.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T10:59:59.000Z",
+    }));
+
+    await expect(repository.persistSnapshot(mixed))
+      .rejects.toThrow("campaignAccounts.campaignReceipts");
+    expect(await testDb.select({ syncRunId: electoralSyncRuns.syncRunId })
+      .from(electoralSyncRuns)).toEqual([{ syncRunId: "campaign-subtype-first" }]);
+  });
+
+  it("uses a legacy aggregate campaign guard while the first new sync establishes subtype baselines", async () => {
+    const legacyTimestamp = new Date("2026-09-05T11:00:00.000Z");
+    await testDb.insert(electoralSyncRuns).values({
+      syncRunId: "legacy-campaign-aggregate",
+      electionYear: 2026,
+      status: "successful",
+      sourceUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.candidates}`,
+      startedAt: legacyTimestamp,
+      completedAt: legacyTimestamp,
+      extractedAt: null,
+      resourceProvenance: {
+        campaignAccounts: {
+          sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
+          sourceExtractedAt: legacyTimestamp.toISOString(),
+        },
+      },
+    });
+    const firstTyped = snapshot("first-typed-campaign-manifest");
+    firstTyped.resourceProvenance.campaignAccounts = {
+      sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
+      sourceExtractedAt: new Date("2026-09-05T12:00:00.000Z"),
+      entryKindSourceExtractedAt: {
+        campaignReceipts: new Date("2026-09-05T10:00:00.000Z"),
+        campaignContractedExpenses: new Date("2026-09-05T12:00:00.000Z"),
+        campaignPaidExpenses: new Date("2026-09-05T09:00:00.000Z"),
+      },
+    };
+    firstTyped.campaignEntries = firstTyped.campaignEntries.map((entry) => ({
+      ...entry,
+      sourceExtractedAt: "2026-09-05T10:00:00.000Z",
+    }));
+
+    await expect(repository.persistSnapshot(firstTyped)).resolves.toBeUndefined();
+    const [stored] = await testDb.select({ resourceProvenance: electoralSyncRuns.resourceProvenance })
+      .from(electoralSyncRuns)
+      .where(eq(electoralSyncRuns.syncRunId, firstTyped.syncRunId));
+    expect(stored?.resourceProvenance.campaignAccounts?.entryKindSourceExtractedAt)
+      .toEqual({
+        campaignReceipts: "2026-09-05T10:00:00.000Z",
+        campaignContractedExpenses: "2026-09-05T12:00:00.000Z",
+        campaignPaidExpenses: "2026-09-05T09:00:00.000Z",
+      });
+    expect(await testDb.select({ sourceExtractedAt: candidateCampaignTotals.sourceExtractedAt })
+      .from(candidateCampaignTotals)).toEqual([{
+      sourceExtractedAt: new Date("2026-09-05T12:00:00.000Z"),
+    }]);
   });
 
   it("uses a legacy successful extractedAt as the candidates-only migration baseline", async () => {
@@ -648,6 +763,11 @@ describe("ElectoralRepository", () => {
         campaignAccounts: {
           sourceArchiveUrl: `https://cdn.tse.jus.br/${tabularArchivePaths.campaignAccounts}`,
           sourceExtractedAt: null,
+          entryKindSourceExtractedAt: {
+            campaignReceipts: null,
+            campaignContractedExpenses: null,
+            campaignPaidExpenses: null,
+          },
         },
       }),
     }]);
@@ -948,6 +1068,53 @@ describe("ElectoralRepository", () => {
     });
     expect(await testDb.select({ syncRunId: electoralSyncRuns.syncRunId }).from(electoralSyncRuns))
       .toEqual([{ syncRunId: "run-2026-01" }]);
+  });
+
+  it("rejects conflicting assets with the same official candidate/order identity atomically", async () => {
+    await repository.persistSnapshot(snapshot("run-2026-01"));
+    const conflicting = snapshot("run-2026-02");
+    conflicting.assets.push({
+      ...conflicting.assets[0]!,
+      category: "Conta bancária",
+      description: "Conflito para a mesma ordem oficial",
+      valueCents: 99n,
+    });
+
+    await expect(repository.persistSnapshot(conflicting)).rejects.toThrow(/conflicting asset/i);
+    await expect(repository.findCandidate(2026, primaryCandidateId)).resolves.toMatchObject({
+      snapshotRunId: "run-2026-01",
+    });
+  });
+
+  it("enforces non-null official asset order uniqueness while preserving legacy null rows", async () => {
+    await repository.persistSnapshot(snapshot("asset-order-index"));
+    const [storedCandidate] = await testDb.select({ id: electoralCandidates.id })
+      .from(electoralCandidates)
+      .where(eq(electoralCandidates.externalId, primaryCandidateId));
+    if (!storedCandidate) throw new Error("candidate fixture missing");
+    const candidateId = storedCandidate.id;
+    const base = {
+      candidateId: candidateId!,
+      category: "Legado",
+      valueCents: 1n,
+      sourceExtractedAt: new Date(sourceExtractedAt),
+      checkedAt: new Date(checkedAt),
+    };
+
+    await expect(testDb.insert(candidateAssets).values([
+      { ...base, sourceOrder: null },
+      { ...base, sourceOrder: null },
+    ])).resolves.toBeDefined();
+    await testDb.insert(candidateAssets).values({
+      ...base,
+      sourceOrder: 1,
+      category: "Conflito",
+    }).then(
+      () => { throw new Error("expected unique constraint violation"); },
+      (error: unknown) => {
+        expect((error as { cause?: { code?: string } }).cause?.code).toBe("23505");
+      },
+    );
   });
 
   it("rolls back candidate and child replacement when a database constraint fails", async () => {

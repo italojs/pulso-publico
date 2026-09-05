@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -81,6 +82,7 @@ export const electoralSyncStatusEnum = pgEnum("electoral_sync_status", [
 export type ElectoralResourceProvenanceJson = Record<string, {
   sourceArchiveUrl: string;
   sourceExtractedAt: string | null;
+  entryKindSourceExtractedAt?: Record<string, string | null>;
 }>;
 
 export const bills = pgTable(
@@ -487,6 +489,9 @@ export const candidateAssets = pgTable("candidate_assets", {
 }, (table) => [
   index("candidate_assets_candidate_idx").on(table.candidateId),
   index("candidate_assets_money_idx").on(table.valueCents),
+  uniqueIndex("candidate_assets_candidate_source_order_uq")
+    .on(table.candidateId, table.sourceOrder)
+    .where(sql`${table.sourceOrder} is not null`),
 ]);
 
 export const candidateCampaignTotals = pgTable("candidate_campaign_totals", {

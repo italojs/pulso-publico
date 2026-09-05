@@ -69,6 +69,33 @@ describe("candidate link operator command", () => {
     });
   });
 
+  it("accepts both canonical eleven- and twelve-digit TSE candidate identifiers", () => {
+    for (const externalId of ["12345678901", "260001234567"]) {
+      expect(parseCandidateLinkCommand([
+        "confirm",
+        "--year=2026",
+        `--candidate=${externalId}`,
+        "--source=camara",
+        "--lawmaker=220530",
+        "--evidence=https://dadosabertos.camara.leg.br/api/v2/deputados/220530",
+      ]).candidateExternalId).toBe(externalId);
+    }
+  });
+
+  it.each(["1234567890", "1234567890123", "1234567890a"])(
+    "rejects noncanonical TSE candidate identifier %s",
+    (externalId) => {
+      expect(() => parseCandidateLinkCommand([
+        "confirm",
+        "--year=2026",
+        `--candidate=${externalId}`,
+        "--source=camara",
+        "--lawmaker=220530",
+        "--evidence=https://dadosabertos.camara.leg.br/api/v2/deputados/220530",
+      ])).toThrow("INVALID_ARGUMENTS");
+    },
+  );
+
   it("rejects duplicate, unknown, unsupported-year and nonofficial evidence arguments", () => {
     const base = [
       "reject",

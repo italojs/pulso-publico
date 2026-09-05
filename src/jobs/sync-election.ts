@@ -9,6 +9,10 @@ import type {
 } from "#/integrations/tse/client";
 import { TSE_REGIONS } from "#/integrations/tse/client";
 import {
+  TSE_CAMPAIGN_ENTRY_KINDS,
+  type TseCampaignEntryKind,
+} from "#/domain/tse-source";
+import {
   mapAssetRow,
   mapCampaignExpenseRow,
   mapCampaignReceiptRow,
@@ -33,6 +37,7 @@ type RowEntry = {
   row: TseRow;
   entryKind: string;
   sourceArchiveUrl: string;
+  sourceExtractedAt: Date | null;
 };
 
 type ResourceStreamEvent = ({ type: "row" } & RowEntry) | {
@@ -41,6 +46,7 @@ type ResourceStreamEvent = ({ type: "row" } & RowEntry) | {
   entryKinds: readonly string[];
   sourceArchiveUrl: string;
   sourceExtractedAt: Date | null;
+  entryKindSourceExtractedAt?: Readonly<Record<TseCampaignEntryKind, Date | null>>;
 };
 
 interface ElectionClient {
@@ -66,6 +72,10 @@ interface ElectionMediaStore {
 
 interface ElectionRepository {
   findLatestSuccessfulSyncRun(electionYear: number): Promise<string | null>;
+  findSyncRunOutcome(electionYear: number, syncRunId: string): Promise<{
+    status: "running" | "successful" | "failed";
+    candidateGenerationCount: number;
+  } | null>;
   persistSnapshot(snapshot: ElectoralSnapshot): Promise<void>;
   recordFailure(failure: {
     syncRunId: string;
@@ -373,12 +383,23 @@ class OfficialSourceMetadata {
   readonly #byResource = new Map<TseResourceName, {
     sourceArchiveUrl: string;
     sourceExtractedAt: Date | null;
+    entryKindSourceExtractedAt?: Record<TseCampaignEntryKind, Date | null>;
     completed: boolean;
   }>();
 
-  observe(resource: TseResourceName, row: TseRow, sourceArchiveUrl: string): Date {
+  observe(
+    resource: TseResourceName,
+    entryKind: string,
+    row: TseRow,
+    sourceArchiveUrl: string,
+    reportedExtractedAt: Date | null,
+  ): Date {
     const extractedAt = parseTseGenerationInstant(row);
     const prior = this.#byResource.get(resource);
+    if (
+      !reportedExtractedAt
+      || reportedExtractedAt.getTime() !== extractedAt.getTime()
+    ) fail("INCONSISTENT_SOURCE_METADATA");
     if (
       prior
       && (prior.sourceArchiveUrl !== sourceArchiveUrl
@@ -387,11 +408,25 @@ class OfficialSourceMetadata {
     ) {
       fail("INCONSISTENT_SOURCE_METADATA");
     }
+    const entryKindSourceExtractedAt = resource === "campaignAccounts"
+      ? prior?.entryKindSourceExtractedAt ?? Object.fromEntries(
+        TSE_CAMPAIGN_ENTRY_KINDS.map((kind) => [kind, null]),
+      ) as Record<TseCampaignEntryKind, Date | null>
+      : undefined;
+    if (resource === "campaignAccounts") {
+      const campaignKind = entryKind as TseCampaignEntryKind;
+      const previousSubtype = entryKindSourceExtractedAt![campaignKind];
+      if (previousSubtype && previousSubtype.getTime() !== extractedAt.getTime()) {
+        fail("INCONSISTENT_SOURCE_METADATA");
+      }
+      entryKindSourceExtractedAt![campaignKind] = extractedAt;
+    }
     this.#byResource.set(resource, {
       sourceArchiveUrl,
       sourceExtractedAt: prior?.sourceExtractedAt && prior.sourceExtractedAt > extractedAt
         ? prior.sourceExtractedAt
         : extractedAt,
+      ...(entryKindSourceExtractedAt ? { entryKindSourceExtractedAt } : {}),
       completed: false,
     });
     return extractedAt;
@@ -400,6 +435,7 @@ class OfficialSourceMetadata {
   complete(resource: TseResourceName, manifest: {
     sourceArchiveUrl: string;
     sourceExtractedAt: Date | null;
+    entryKindSourceExtractedAt?: Readonly<Record<TseCampaignEntryKind, Date | null>>;
   }): void {
     const prior = this.#byResource.get(resource);
     if (prior?.completed) fail("INVALID_RESOURCE_MANIFEST");
@@ -412,9 +448,37 @@ class OfficialSourceMetadata {
     if (manifest.sourceExtractedAt && Number.isNaN(manifest.sourceExtractedAt.getTime())) {
       fail("INVALID_SOURCE_EXTRACTED_AT");
     }
+    let entryKindSourceExtractedAt: Record<TseCampaignEntryKind, Date | null> | undefined;
+    if (resource === "campaignAccounts") {
+      const manifestSubtypes = manifest.entryKindSourceExtractedAt;
+      if (
+        !manifestSubtypes
+        || Object.keys(manifestSubtypes).length !== TSE_CAMPAIGN_ENTRY_KINDS.length
+        || TSE_CAMPAIGN_ENTRY_KINDS.some((kind) => !Object.hasOwn(manifestSubtypes, kind))
+      ) fail("INVALID_RESOURCE_MANIFEST");
+      entryKindSourceExtractedAt = Object.fromEntries(TSE_CAMPAIGN_ENTRY_KINDS.map((kind) => {
+        const timestamp = manifestSubtypes[kind];
+        if (timestamp && Number.isNaN(timestamp.getTime())) fail("INVALID_SOURCE_EXTRACTED_AT");
+        const observed = prior?.entryKindSourceExtractedAt?.[kind];
+        if (observed && observed.getTime() !== timestamp?.getTime()) {
+          fail("INCONSISTENT_SOURCE_METADATA");
+        }
+        return [kind, timestamp];
+      })) as Record<TseCampaignEntryKind, Date | null>;
+      const latest = TSE_CAMPAIGN_ENTRY_KINDS
+        .map((kind) => entryKindSourceExtractedAt![kind])
+        .filter((timestamp): timestamp is Date => timestamp !== null)
+        .reduce<Date | null>((maximum, timestamp) =>
+          !maximum || timestamp > maximum ? timestamp : maximum, null);
+      if (
+        latest?.getTime() !== manifest.sourceExtractedAt?.getTime()
+        || (latest === null) !== (manifest.sourceExtractedAt === null)
+      ) fail("INCONSISTENT_SOURCE_METADATA");
+    }
     this.#byResource.set(resource, {
       sourceArchiveUrl: manifest.sourceArchiveUrl,
       sourceExtractedAt: manifest.sourceExtractedAt,
+      ...(entryKindSourceExtractedAt ? { entryKindSourceExtractedAt } : {}),
       completed: true,
     });
   }
@@ -432,6 +496,9 @@ class OfficialSourceMetadata {
       return [resource, {
         sourceArchiveUrl: provenance.sourceArchiveUrl,
         sourceExtractedAt: provenance.sourceExtractedAt,
+        ...(provenance.entryKindSourceExtractedAt
+          ? { entryKindSourceExtractedAt: provenance.entryKindSourceExtractedAt }
+          : {}),
       }];
     })) as ElectoralTabularResourceProvenance;
   }
@@ -484,7 +551,13 @@ async function consumeResource(
     } else {
       resources[resource] += 1;
     }
-    consume(entry, metadata.observe(resource, entry.row, entry.sourceArchiveUrl));
+    consume(entry, metadata.observe(
+      resource,
+      entry.entryKind,
+      entry.row,
+      entry.sourceArchiveUrl,
+      entry.sourceExtractedAt,
+    ));
   }
   if (!manifestSeen) fail("MISSING_RESOURCE_MANIFEST");
 }
@@ -511,6 +584,7 @@ async function performSync(
   const runId = `election-${options.electionYear}-${startedAt.toISOString().replace(/\D/g, "")}-${randomUUID()}`;
   let previousRunId: string | null = null;
   let persisted = false;
+  let retainPublishedGeneration = false;
 
   try {
     previousRunId = await repository.findLatestSuccessfulSyncRun(options.electionYear);
@@ -634,11 +708,7 @@ async function performSync(
         aggregateCampaignEntry({ ...mapCampaignExpenseRow(entry.row), ...provenance });
       }
     });
-    const campaignSourceExtractedAt = sourceMetadata.timestamp("campaignAccounts");
-    const campaignEntries = [...campaignByCandidateKindCategory.values()].map((entry) => ({
-      ...entry,
-      sourceExtractedAt: campaignSourceExtractedAt ?? entry.sourceExtractedAt,
-    }));
+    const campaignEntries = [...campaignByCandidateKindCategory.values()];
     const extractedAt = candidateSourceExtractedAt;
 
     const governmentPlans: ElectoralSnapshot["governmentPlans"] = [];
@@ -710,8 +780,30 @@ async function performSync(
       documents,
     };
     await mediaStore.publish(runId);
-    await repository.persistSnapshot(snapshot);
-    persisted = true;
+    try {
+      await repository.persistSnapshot(snapshot);
+      persisted = true;
+    } catch (persistenceError) {
+      let outcome: Awaited<ReturnType<ElectionRepository["findSyncRunOutcome"]>>;
+      try {
+        outcome = await repository.findSyncRunOutcome(options.electionYear, runId);
+      } catch {
+        retainPublishedGeneration = true;
+        throw new TseContractError("PERSISTENCE_OUTCOME_UNKNOWN");
+      }
+      if (
+        outcome?.status === "successful"
+        && outcome.candidateGenerationCount === candidates.length
+      ) {
+        persisted = true;
+        warnings.push("PERSISTENCE_ACKNOWLEDGEMENT_RECOVERED");
+      } else if (outcome?.status === "running" || outcome?.status === "successful") {
+        retainPublishedGeneration = true;
+        throw new TseContractError("PERSISTENCE_OUTCOME_UNKNOWN");
+      } else {
+        throw persistenceError;
+      }
+    }
 
     try {
       const lawmakers = await repository.listLawmakersForCandidateReconciliation();
@@ -750,6 +842,19 @@ async function performSync(
   } catch (error) {
     const errorCode = stableErrorCode(error);
     if (!persisted) {
+      if (retainPublishedGeneration) {
+        const failedAt = options.now();
+        return {
+          failed: true,
+          errorCode,
+          electionYear: options.electionYear,
+          syncRunId: runId,
+          candidates: 0,
+          startedAt: startedAt.toISOString(),
+          finishedAt: failedAt.toISOString(),
+          resources,
+        };
+      }
       await mediaStore.discard(runId).catch(() => undefined);
       const failedAt = options.now();
       await repository.recordFailure({

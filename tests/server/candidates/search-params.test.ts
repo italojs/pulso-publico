@@ -119,6 +119,34 @@ describe("candidate search params", () => {
     expect(parseCandidateSearchParams(rawFromHref(href))).toEqual(filters);
   });
 
+  it("round-trips negative balance bounds while keeping other money nonnegative", () => {
+    const filters: CandidateFilters = {
+      balanceMinCents: -9_223_372_036_854_775_808n,
+      balanceMaxCents: -1n,
+    };
+
+    const href = buildCandidateHref(filters, 1);
+
+    expect(href).toContain("saldoMin=-92233720368547758.08");
+    expect(href).toContain("saldoMax=-0.01");
+    expect(parseCandidateSearchParams(rawFromHref(href))).toMatchObject(filters);
+    expect(parseCandidateSearchParams({ saldoMin: "-92233720368547758.09" }))
+      .not.toHaveProperty("balanceMinCents");
+    expect(parseCandidateSearchParams({ receitaMin: "-1", despesaMin: "-1", patrimonioMin: "-1" }))
+      .not.toMatchObject({ revenueMinCents: expect.anything(), expenseMinCents: expect.anything(), assetMinCents: expect.anything() });
+  });
+
+  it("rejects unsafe free text consistently at URL, JSON, and builder boundaries", () => {
+    for (const value of [
+      "Ana\0Maria", "Ana\u001fMaria", "Ana\u007fMaria", "Ana\ud800Maria",
+      `${"A".repeat(200)}\0ignored`,
+    ]) {
+      expect(parseCandidateSearchParams({ q: value, partido: value })).toEqual({ page: 1, pageSize: 20 });
+      expect(() => parseCandidateFilterInput({ query: value })).toThrow();
+      expect(() => buildCandidateHref({ query: value }, 1)).toThrow();
+    }
+  });
+
   it("deduplicates and bounds repeated and free-text values", () => {
     const values = Array.from({ length: 24 }, (_, index) => `Partido ${index}`);
     const filters = parseCandidateSearchParams({
