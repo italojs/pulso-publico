@@ -4,6 +4,7 @@ coverage/
 .env
 .env.local
 data/
+.data/electoral-assets/
 *.log
 *.tsbuildinfo
 .DS_Store
