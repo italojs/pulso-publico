@@ -251,6 +251,26 @@ describe("ElectoralRepository", () => {
     }]);
   });
 
+  it("persists multiple certificates for one candidate when each official URL identifies its file", async () => {
+    const candidateSnapshot = snapshot("run-two-certificates");
+    candidateSnapshot.documents = [
+      candidateSnapshot.documents[0]!,
+      {
+        ...candidateSnapshot.documents[0]!,
+        officialUrl: "https://cdn.tse.jus.br/certidoes.zip#entry=segunda-certidao.pdf",
+        storageKey: "run-two-certificates/certificates/260001234567/segunda-certidao.pdf",
+        originalFilename: "segunda-certidao.pdf",
+      },
+    ];
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({
+      officialUrl: candidateDocuments.officialUrl,
+      originalFilename: candidateDocuments.originalFilename,
+    }).from(candidateDocuments)).toHaveLength(2);
+  });
+
   it("normalizes campaign provenance before treating reordered entries as an equivalent retry", async () => {
     const provenanceA = {
       ...CampaignEntryRecord.parse({

@@ -93,11 +93,13 @@ export class TseContractError extends Error {
   }
 }
 
-function blankToNull(value: string | undefined): string | null {
+export function normalizeTseOptionalValue(value: string | undefined): string | null {
   const normalized = value?.trim();
   if (!normalized || nullSentinels.has(normalized.toLocaleUpperCase("pt-BR"))) return null;
   return normalized;
 }
+
+const blankToNull = normalizeTseOptionalValue;
 
 function required(row: TseRow, column: string, code = `MISSING_${column}`): string {
   const value = blankToNull(row[column]);

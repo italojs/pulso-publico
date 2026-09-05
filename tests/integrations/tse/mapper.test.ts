@@ -10,6 +10,7 @@ import {
   mapCandidateRow,
   mapSocialRow,
   moneyToCents,
+  normalizeTseOptionalValue,
   TseContractError,
 } from "#/integrations/tse/mapper";
 
@@ -26,6 +27,13 @@ async function readFixture(name: string): Promise<TseRow> {
 }
 
 describe("TSE electoral mapping", () => {
+  it("normalizes official null sentinels before any downstream classification", () => {
+    expect(normalizeTseOptionalValue("#NULO")).toBeNull();
+    expect(normalizeTseOptionalValue("#NE")).toBeNull();
+    expect(normalizeTseOptionalValue("-1")).toBeNull();
+    expect(normalizeTseOptionalValue("  valor oficial  ")).toBe("valor oficial");
+  });
+
   it("maps an official-shaped 2026 candidacy without retaining private identifiers", async () => {
     const row = await readFixture("candidates.csv");
     const candidate = mapCandidateRow({

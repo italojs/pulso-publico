@@ -55,6 +55,16 @@ export interface TseRowEntry {
   readonly sourceArchiveUrl: string;
 }
 
+export interface TseResourceManifest {
+  readonly type: "manifest";
+  readonly resource: TseResourceName;
+  readonly entryKinds: readonly TseTabularEntryKind[];
+  readonly sourceArchiveUrl: string;
+}
+
+export type TseResourceStreamEvent = ({ readonly type: "row" } & TseRowEntry)
+  | TseResourceManifest;
+
 export interface TseMediaEntry {
   readonly kind: TseRegionalMediaKind;
   readonly region: TseRegion;
@@ -328,11 +338,24 @@ export class TseOpenDataClient {
     resource: TseResourceName,
     signal?: AbortSignal,
   ): AsyncGenerator<TseRowEntry> {
+    for await (const event of this.streamResource(resource, signal)) {
+      if (event.type === "row") {
+        const { type: _type, ...entry } = event;
+        yield entry;
+      }
+    }
+  }
+
+  async *streamResource(
+    resource: TseResourceName,
+    signal?: AbortSignal,
+  ): AsyncGenerator<TseResourceStreamEvent> {
     const path = TSE_RESOURCES[resource];
     if (!path) throw new TseContractError("UNKNOWN_TSE_RESOURCE");
     const request = await this.#requestArchive(path, signal);
     let foundExpectedEntry = false;
     const seenBasenames = new Set<string>();
+    const seenEntryKinds = new Set<TseTabularEntryKind>();
 
     for await (const entry of streamZipEntries(request.body, request.signal)) {
       assertSafeArchivePath(entry.path);
@@ -375,8 +398,14 @@ export class TseOpenDataClient {
       void completion.catch(() => undefined);
       try {
         const entryKind = tabularEntryKind(resource, filename);
+        seenEntryKinds.add(entryKind);
         for await (const row of parser) {
-          yield { row: row as TseRow, entryKind, sourceArchiveUrl: request.url };
+          yield {
+            type: "row",
+            row: row as TseRow,
+            entryKind,
+            sourceArchiveUrl: request.url,
+          };
         }
         await completion;
       } catch (error) {
@@ -393,6 +422,15 @@ export class TseOpenDataClient {
     }
 
     if (!foundExpectedEntry) throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
+    const kindOrder: readonly TseTabularEntryKind[] = resource === "campaignAccounts"
+      ? ["campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses"]
+      : [resource];
+    yield {
+      type: "manifest",
+      resource,
+      entryKinds: kindOrder.filter((kind) => seenEntryKinds.has(kind)),
+      sourceArchiveUrl: request.url,
+    };
   }
 
   async *streamRegionalMedia(

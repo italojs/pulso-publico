@@ -112,13 +112,24 @@ class FakeClient {
   readonly calls: string[] = [];
   readonly rows: ReturnType<typeof cloneRows>;
   readonly failure: { resource: Resource; error: Error } | undefined;
+  readonly manifestKinds: Partial<Record<Resource, string[]>>;
+  readonly generatedAt: Partial<Record<Resource, { date: string; time: string }>>;
+  readonly certificateCount: number;
 
   constructor(
     rows = cloneRows(),
     failure?: { resource: Resource; error: Error },
+    options: {
+      manifestKinds?: Partial<Record<Resource, string[]>>;
+      generatedAt?: Partial<Record<Resource, { date: string; time: string }>>;
+      certificateCount?: number;
+    } = {},
   ) {
     this.rows = rows;
     this.failure = failure;
+    this.manifestKinds = options.manifestKinds ?? {};
+    this.generatedAt = options.generatedAt ?? {};
+    this.certificateCount = options.certificateCount ?? 1;
   }
 
   resourceUrl(resource: Resource) {
@@ -129,26 +140,53 @@ class FakeClient {
     this.calls.push(`rows:${resource}`);
     if (this.failure?.resource === resource) throw this.failure.error;
     for (const entry of this.rows[resource]) {
+      const generatedAt = this.generatedAt[resource] ?? {
+        date: "05/09/2026",
+        time: "08:00:00",
+      };
       yield {
         ...entry,
+        row: {
+          DT_GERACAO: generatedAt.date,
+          HH_GERACAO: generatedAt.time,
+          ...entry.row,
+        },
         sourceArchiveUrl: this.resourceUrl(resource),
       };
     }
+  }
+
+  async *streamResource(resource: Resource) {
+    for await (const entry of this.streamRowEntries(resource)) {
+      yield { type: "row" as const, ...entry };
+    }
+    const defaults = resource === "campaignAccounts"
+      ? ["campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses"]
+      : [resource];
+    yield {
+      type: "manifest" as const,
+      resource,
+      entryKinds: this.manifestKinds[resource] ?? defaults,
+      sourceArchiveUrl: this.resourceUrl(resource),
+    };
   }
 
   async *streamRegionalMedia(kind: TseMediaEntry["kind"], region: TseRegion) {
     this.calls.push(`media:${kind}:${region}`);
     if (region !== "ES") return;
     const extension = kind === "photos" ? "jpg" : "pdf";
-    yield {
-      kind,
-      region,
-      candidateExternalId: candidateId,
-      originalFilename: `${kind}_${candidateId}.${extension}`,
-      mimeType: kind === "photos" ? "image/jpeg" : "application/pdf",
-      sourceArchiveUrl: `https://cdn.tse.jus.br/${kind}_${region}.zip`,
-      content: Readable.from([kind]),
-    } as TseMediaEntry;
+    const count = kind === "certificates" ? this.certificateCount : 1;
+    for (let index = 0; index < count; index += 1) {
+      yield {
+        kind,
+        region,
+        candidateExternalId: candidateId,
+        originalFilename: `${kind}_${candidateId}_${index + 1}.${extension}`,
+        mimeType: kind === "photos" ? "image/jpeg" : "application/pdf",
+        sourceArchiveUrl: `https://cdn.tse.jus.br/${kind}_${region}.zip`,
+        content: Readable.from([`${kind}-${index + 1}`]),
+      } as TseMediaEntry;
+    }
   }
 }
 
@@ -192,6 +230,7 @@ class FakeRepository {
   readonly events: string[];
   readonly previousRun: string;
   readonly persistError: Error | undefined;
+  readonly minimumExtractedAt: Date | undefined;
   snapshots: any[] = [];
   failures: any[] = [];
   pending: any[] = [];
@@ -200,10 +239,12 @@ class FakeRepository {
     events: string[],
     previousRun = "previous-generation",
     persistError?: Error,
+    minimumExtractedAt?: Date,
   ) {
     this.events = events;
     this.previousRun = previousRun;
     this.persistError = persistError;
+    this.minimumExtractedAt = minimumExtractedAt;
   }
 
   async findLatestSuccessfulSyncRun() {
@@ -214,6 +255,13 @@ class FakeRepository {
     if (this.persistError) {
       this.events.push("persist-failed");
       throw this.persistError;
+    }
+    if (
+      this.minimumExtractedAt
+      && (snapshot as { extractedAt: Date }).extractedAt < this.minimumExtractedAt
+    ) {
+      this.events.push("persist-stale");
+      throw new Error("Cannot publish a stale electoral snapshot");
     }
     this.snapshots.push(snapshot);
     this.events.push("persist");
@@ -440,6 +488,180 @@ describe("syncElection", () => {
     expect(repository.snapshots).toHaveLength(0);
   });
 
+  it("requires all three campaign archive subtypes even when one would contain zero rows", async () => {
+    const events: string[] = [];
+    const rows = cloneRows();
+    rows.campaignAccounts = rows.campaignAccounts.filter((entry) =>
+      entry.entryKind !== "campaignPaidExpenses"
+    );
+    const repository = new FakeRepository(events);
+    const client = new FakeClient(rows, undefined, {
+      manifestKinds: {
+        campaignAccounts: ["campaignReceipts", "campaignContractedExpenses"],
+      },
+    });
+
+    const report = await syncElection(
+      client,
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report).toMatchObject({ failed: true, errorCode: "MISSING_CAMPAIGN_SUBTYPE" });
+    expect(repository.snapshots).toHaveLength(0);
+    expect(events.some((event) => event.startsWith("publish:"))).toBe(false);
+  });
+
+  it("uses official generation metadata for stale protection instead of local start time", async () => {
+    const events: string[] = [];
+    const repository = new FakeRepository(
+      events,
+      "previous-generation",
+      undefined,
+      new Date("2026-09-05T00:00:00.000Z"),
+    );
+    const generatedAt = Object.fromEntries([
+      "candidates", "complements", "assets", "coalitions", "social", "campaignAccounts",
+    ].map((resource) => [resource, { date: "04/09/2026", time: "08:00:00" }]));
+
+    const report = await syncElection(
+      new FakeClient(cloneRows(), undefined, { generatedAt }),
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report).toMatchObject({ failed: true, errorCode: "ELECTORAL_SYNC_FAILED" });
+    expect(events).toContain("persist-stale");
+    expect(events.some((event) => event.startsWith("remove:previous-generation"))).toBe(false);
+  });
+
+  it("derives a deterministic latest official snapshot instant and preserves per-resource provenance", async () => {
+    const events: string[] = [];
+    const repository = new FakeRepository(events, "");
+    const generatedAt = {
+      candidates: { date: "04/09/2026", time: "08:00:00" },
+      complements: { date: "04/09/2026", time: "08:05:00" },
+      assets: { date: "05/09/2026", time: "08:30:00" },
+      coalitions: { date: "04/09/2026", time: "08:10:00" },
+      social: { date: "04/09/2026", time: "08:15:00" },
+      campaignAccounts: { date: "04/09/2026", time: "08:20:00" },
+    };
+
+    const report = await syncElection(
+      new FakeClient(cloneRows(), undefined, { generatedAt }),
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report.failed).toBe(false);
+    expect(repository.snapshots[0].extractedAt).toEqual(new Date("2026-09-05T11:30:00.000Z"));
+    expect(repository.snapshots[0].assets[0].sourceExtractedAt)
+      .toEqual(new Date("2026-09-05T11:30:00.000Z"));
+    expect(repository.snapshots[0].campaignEntries[0].sourceExtractedAt)
+      .toEqual(new Date("2026-09-04T11:20:00.000Z"));
+    expect(repository.snapshots[0].candidates[0].photoSourceExtractedAt)
+      .toEqual(new Date("2026-09-05T11:30:00.000Z"));
+  });
+
+  it("rejects inconsistent official generation metadata inside one resource", async () => {
+    const events: string[] = [];
+    const rows = cloneRows();
+    rows.candidates.push({
+      entryKind: "candidates",
+      row: {
+        ...rows.candidates[0]!.row,
+        SQ_CANDIDATO: "260009876543",
+        NM_CANDIDATO: "BIA PÚBLICA",
+        NM_URNA_CANDIDATO: "BIA",
+        DT_GERACAO: "04/09/2026",
+      },
+    });
+
+    const report = await syncElection(
+      new FakeClient(rows),
+      new FakeMediaStore(events),
+      new FakeRepository(events),
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report).toMatchObject({ failed: true, errorCode: "INCONSISTENT_SOURCE_METADATA" });
+  });
+
+  it("rejects an impossible official generation date deterministically", async () => {
+    const events: string[] = [];
+    const rows = cloneRows();
+    rows.assets[0]!.row.DT_GERACAO = "31/02/2026";
+
+    const report = await syncElection(
+      new FakeClient(rows),
+      new FakeMediaStore(events),
+      new FakeRepository(events),
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report).toMatchObject({ failed: true, errorCode: "INVALID_SOURCE_EXTRACTED_AT" });
+  });
+
+  it("creates a stable distinct official URL identity for every candidate certificate", async () => {
+    const events: string[] = [];
+    const repository = new FakeRepository(events, "");
+
+    const report = await syncElection(
+      new FakeClient(cloneRows(), undefined, { certificateCount: 2 }),
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report.failed).toBe(false);
+    expect(repository.snapshots[0].documents).toHaveLength(2);
+    expect(new Set(repository.snapshots[0].documents.map((document: any) => document.officialUrl)).size)
+      .toBe(2);
+    expect(repository.snapshots[0].documents.every((document: any) =>
+      new URL(document.officialUrl).hostname === "cdn.tse.jus.br"
+    )).toBe(true);
+  });
+
+  it("keeps matching declared coalition data and rejects conflicting coalition or federation enrichment", async () => {
+    const matchingRows = cloneRows();
+    matchingRows.candidates[0]!.row.NM_COLIGACAO = "UNIÃO CIDADÃ";
+    matchingRows.candidates[0]!.row.NM_FEDERACAO = "FEDERAÇÃO DEMOCRÁTICA";
+    matchingRows.coalitions[0]!.row.NM_FEDERACAO = "FEDERAÇÃO DEMOCRÁTICA";
+    const matchingEvents: string[] = [];
+    const matchingRepository = new FakeRepository(matchingEvents, "");
+    const matching = await syncElection(
+      new FakeClient(matchingRows),
+      new FakeMediaStore(matchingEvents),
+      matchingRepository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(matchingEvents) },
+    );
+    expect(matching.failed).toBe(false);
+    expect(matchingRepository.snapshots[0].candidates[0]).toMatchObject({
+      coalition: "UNIÃO CIDADÃ",
+      federation: "FEDERAÇÃO DEMOCRÁTICA",
+    });
+
+    for (const field of ["NM_COLIGACAO", "NM_FEDERACAO"] as const) {
+      const events: string[] = [];
+      const rows = cloneRows();
+      rows.candidates[0]!.row[field] = "DECLARADO PELA CANDIDATURA";
+      rows.coalitions[0]!.row[field] = "DIVERGENTE NA COLIGAÇÃO";
+      const report = await syncElection(
+        new FakeClient(rows),
+        new FakeMediaStore(events),
+        new FakeRepository(events),
+        { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+      );
+      expect(report).toMatchObject({
+        failed: true,
+        errorCode: "CONFLICTING_COALITION_ENRICHMENT",
+      });
+    }
+  });
+
   it("classifies campaign funding from all official category columns", async () => {
     const events: string[] = [];
     const rows = cloneRows();
@@ -490,5 +712,32 @@ describe("syncElection", () => {
       { category: "Recursos públicos", valueCents: 6_000n },
       { category: "Recursos próprios", valueCents: 2_000n },
     ]);
+  });
+
+  it("maps sentinels and unknown campaign origins to Não informado", async () => {
+    const events: string[] = [];
+    const rows = cloneRows();
+    rows.campaignAccounts = [{
+      entryKind: "campaignReceipts",
+      row: {
+        ANO_ELEICAO: "2026",
+        SQ_CANDIDATO: candidateId,
+        VR_RECEITA: "1,00",
+        DS_ORIGEM_RECEITA: "#NULO",
+        DS_FONTE_RECEITA: "#NE",
+        DS_RECEITA: "Categoria futura não mapeada",
+      },
+    }];
+    const repository = new FakeRepository(events, "");
+
+    const report = await syncElection(
+      new FakeClient(rows),
+      new FakeMediaStore(events),
+      repository,
+      { electionYear: 2026, now: () => checkedAt, withLock: acquiredLock(events) },
+    );
+
+    expect(report.failed).toBe(false);
+    expect(repository.snapshots[0].campaignEntries[0]).toMatchObject({ category: "Não informado" });
   });
 });

@@ -15,6 +15,7 @@ import {
   mapCandidateRow,
   mapSocialRow,
   moneyToCents,
+  normalizeTseOptionalValue,
   TseContractError,
 } from "#/integrations/tse/mapper";
 import {
@@ -32,8 +33,18 @@ type RowEntry = {
   sourceArchiveUrl: string;
 };
 
+type ResourceStreamEvent = ({ type: "row" } & RowEntry) | {
+  type: "manifest";
+  resource: TseResourceName;
+  entryKinds: readonly string[];
+  sourceArchiveUrl: string;
+};
+
 interface ElectionClient {
-  streamRowEntries(resource: TseResourceName, signal?: AbortSignal): AsyncIterable<RowEntry>;
+  streamResource(
+    resource: TseResourceName,
+    signal?: AbortSignal,
+  ): AsyncIterable<ResourceStreamEvent>;
   streamRegionalMedia(
     kind: TseRegionalMediaKind,
     region: TseRegion,
@@ -85,6 +96,15 @@ const mediaKinds = [
   "certificates",
 ] as const satisfies readonly TseRegionalMediaKind[];
 
+const tabularResourceNames = [
+  "candidates",
+  "complements",
+  "assets",
+  "coalitions",
+  "social",
+  "campaignAccounts",
+] as const satisfies readonly TseResourceName[];
+
 const complementAllowlist = [
   "NM_SOCIAL_CANDIDATO",
   "ST_REELEICAO",
@@ -121,6 +141,8 @@ const candidateRowAllowlist = [
   "DS_DETALHE_SITUACAO_CAND",
   "NM_FEDERACAO",
   "NM_COLIGACAO",
+  "DT_GERACAO",
+  "HH_GERACAO",
   ...complementAllowlist,
 ] as const;
 
@@ -134,6 +156,8 @@ const coalitionRowAllowlist = [
   "SG_PARTIDO",
   "NM_COLIGACAO",
   "NM_FEDERACAO",
+  "DT_GERACAO",
+  "HH_GERACAO",
 ] as const;
 
 export interface ElectionSyncReport {
@@ -190,8 +214,7 @@ function fail(code: string): never {
 }
 
 function value(row: TseRow, key: string): string | null {
-  const normalized = row[key]?.trim();
-  return normalized ? normalized : null;
+  return normalizeTseOptionalValue(row[key]);
 }
 
 function pickPublicRow(row: TseRow, columns: readonly string[]): TseRow {
@@ -238,58 +261,72 @@ function coalitionKey(row: TseRow): string {
   ].join("|");
 }
 
-function mergeComplements(
+function mergeComplement(
   candidates: Map<string, { row: TseRow; sourceArchiveUrl: string }>,
-  complements: readonly RowEntry[],
+  row: TseRow,
   expectedYear: number,
 ): void {
-  const mergedByCandidate = new Map<string, TseRow>();
-  for (const { row } of complements) {
-    assertRowYear(row, expectedYear);
-    const externalId = candidateExternalId(row);
-    if (!candidates.has(externalId)) fail("ORPHAN_CANDIDATE_COMPLEMENT");
-    const merged = mergedByCandidate.get(externalId) ?? {};
-    for (const column of complementAllowlist) {
-      const next = value(row, column);
-      if (!next) continue;
-      const prior = value(merged, column);
-      if (prior && prior !== next) fail("CONFLICTING_CANDIDATE_COMPLEMENT");
-      merged[column] = next;
+  assertRowYear(row, expectedYear);
+  const externalId = candidateExternalId(row);
+  const candidate = candidates.get(externalId);
+  if (!candidate) fail("ORPHAN_CANDIDATE_COMPLEMENT");
+  for (const column of complementAllowlist) {
+    const next = value(row, column);
+    if (!next) continue;
+    const prior = value(candidate.row, column);
+    if (prior && normalizeKey(prior) !== normalizeKey(next)) {
+      fail("CONFLICTING_CANDIDATE_COMPLEMENT");
     }
-    mergedByCandidate.set(externalId, merged);
-  }
-  for (const [externalId, fields] of mergedByCandidate) {
-    const candidate = candidates.get(externalId)!;
-    candidate.row = { ...candidate.row, ...fields };
+    candidate.row[column] = next;
   }
 }
 
-function mergeCoalitions(
-  candidates: Map<string, { row: TseRow; sourceArchiveUrl: string }>,
-  coalitions: readonly RowEntry[],
+type CoalitionEnrichment = { coalition: string | null; federation: string | null };
+
+function collectCoalition(
+  coalitionByKey: Map<string, CoalitionEnrichment>,
+  row: TseRow,
   expectedYear: number,
 ): void {
-  const coalitionByKey = new Map<string, { coalition: string | null; federation: string | null }>();
-  for (const { row } of coalitions) {
-    assertRowYear(row, expectedYear);
-    const key = coalitionKey(row);
-    const next = {
-      coalition: value(row, "NM_COLIGACAO"),
-      federation: value(row, "NM_FEDERACAO"),
-    };
-    const prior = coalitionByKey.get(key);
+  assertRowYear(row, expectedYear);
+  const key = coalitionKey(row);
+  const next: CoalitionEnrichment = {
+    coalition: value(row, "NM_COLIGACAO"),
+    federation: value(row, "NM_FEDERACAO"),
+  };
+  const prior = coalitionByKey.get(key);
+  for (const field of ["coalition", "federation"] as const) {
     if (
-      prior
-      && (normalizeKey(prior.coalition) !== normalizeKey(next.coalition)
-        || normalizeKey(prior.federation) !== normalizeKey(next.federation))
+      prior?.[field]
+      && next[field]
+      && normalizeKey(prior[field]) !== normalizeKey(next[field])
     ) {
       fail("CONFLICTING_COALITION_MATCH");
     }
-    coalitionByKey.set(key, next);
   }
+  coalitionByKey.set(key, {
+    coalition: prior?.coalition ?? next.coalition,
+    federation: prior?.federation ?? next.federation,
+  });
+}
+
+function applyCoalitions(
+  candidates: Map<string, { row: TseRow; sourceArchiveUrl: string }>,
+  coalitionByKey: ReadonlyMap<string, CoalitionEnrichment>,
+): void {
   for (const candidate of candidates.values()) {
     const coalition = coalitionByKey.get(coalitionKey(candidate.row));
     if (!coalition) continue;
+    for (const [candidateColumn, enrichmentField] of [
+      ["NM_COLIGACAO", "coalition"],
+      ["NM_FEDERACAO", "federation"],
+    ] as const) {
+      const declared = value(candidate.row, candidateColumn);
+      const enriched = coalition[enrichmentField];
+      if (declared && enriched && normalizeKey(declared) !== normalizeKey(enriched)) {
+        fail("CONFLICTING_COALITION_ENRICHMENT");
+      }
+    }
     candidate.row = {
       ...candidate.row,
       ...(coalition.coalition ? { NM_COLIGACAO: coalition.coalition } : {}),
@@ -313,19 +350,59 @@ function fundingKind(row: TseRow): string {
     || description.includes("FEFC")
   ) return "Recursos públicos";
   if (description.includes("RECURSOS PROPRIOS")) return "Recursos próprios";
-  return "Recursos privados";
+  if (
+    description.includes("PESSOAS FISICAS")
+    || description.includes("FINANCIAMENTO COLETIVO")
+    || description.includes("COMERCIALIZACAO DE BENS")
+    || description.includes("DOACAO")
+    || description.includes("DOACOES")
+    || description.includes("EVENTOS")
+    || description.includes("RENDIMENTOS DE APLICACOES")
+  ) return "Recursos privados";
+  return "Não informado";
 }
 
-function sourceExtractedAt(row: TseRow, fallback: Date): Date {
+function officialSourceExtractedAt(row: TseRow): Date {
   const date = value(row, "DT_GERACAO");
-  if (!date) return fallback;
+  const time = value(row, "HH_GERACAO");
+  if (!date || !time) return fail("MISSING_SOURCE_METADATA");
   const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date);
   if (!match) return fail("INVALID_SOURCE_EXTRACTED_AT");
-  const time = value(row, "HH_GERACAO") ?? "00:00:00";
   if (!/^\d{2}:\d{2}:\d{2}$/.test(time)) return fail("INVALID_SOURCE_EXTRACTED_AT");
-  const parsed = new Date(`${match[3]}-${match[2]}-${match[1]}T${time}-03:00`);
-  if (Number.isNaN(parsed.getTime())) return fail("INVALID_SOURCE_EXTRACTED_AT");
-  return parsed;
+  try {
+    const plainDate = Temporal.PlainDate.from(`${match[3]}-${match[2]}-${match[1]}`);
+    const plainTime = Temporal.PlainTime.from(time);
+    const instant = plainDate.toZonedDateTime({
+      timeZone: "America/Sao_Paulo",
+      plainTime,
+    }).toInstant();
+    return new Date(instant.epochMilliseconds);
+  } catch {
+    return fail("INVALID_SOURCE_EXTRACTED_AT");
+  }
+}
+
+class OfficialSourceMetadata {
+  readonly #byResource = new Map<TseResourceName, Date>();
+
+  observe(resource: TseResourceName, row: TseRow): Date {
+    const extractedAt = officialSourceExtractedAt(row);
+    const prior = this.#byResource.get(resource);
+    if (prior && prior.getTime() !== extractedAt.getTime()) {
+      fail("INCONSISTENT_SOURCE_METADATA");
+    }
+    this.#byResource.set(resource, extractedAt);
+    return extractedAt;
+  }
+
+  snapshotExtractedAt(): Date {
+    const instants = tabularResourceNames.map((resource) => {
+      const extractedAt = this.#byResource.get(resource);
+      if (!extractedAt) return fail("MISSING_SOURCE_METADATA");
+      return extractedAt;
+    });
+    return new Date(Math.max(...instants.map((instant) => instant.getTime())));
+  }
 }
 
 function assertEntryKind(resource: TseResourceName, entryKind: string): void {
@@ -344,17 +421,50 @@ async function consumeResource(
   client: ElectionClient,
   resource: TseResourceName,
   resources: ElectionSyncReport["resources"],
-  consume: (entry: RowEntry) => void,
+  metadata: OfficialSourceMetadata,
+  consume: (entry: RowEntry, sourceExtractedAt: Date) => void,
 ): Promise<void> {
-  for await (const entry of client.streamRowEntries(resource)) {
+  let manifestSeen = false;
+  for await (const event of client.streamResource(resource)) {
+    if (event.type === "manifest") {
+      if (manifestSeen || event.resource !== resource) fail("INVALID_RESOURCE_MANIFEST");
+      manifestSeen = true;
+      const expectedKinds = resource === "campaignAccounts"
+        ? ["campaignReceipts", "campaignContractedExpenses", "campaignPaidExpenses"]
+        : [resource];
+      const actualKinds = new Set(event.entryKinds);
+      if (
+        actualKinds.size !== expectedKinds.length
+        || expectedKinds.some((kind) => !actualKinds.has(kind))
+      ) {
+        fail(resource === "campaignAccounts"
+          ? "MISSING_CAMPAIGN_SUBTYPE"
+          : "INVALID_RESOURCE_MANIFEST");
+      }
+      continue;
+    }
+    if (manifestSeen) fail("INVALID_RESOURCE_MANIFEST");
+    const { type: _type, ...entry } = event;
     assertEntryKind(resource, entry.entryKind);
     if (resource === "campaignAccounts") {
       resources[entry.entryKind as "campaignReceipts"] += 1;
     } else {
       resources[resource] += 1;
     }
-    consume(entry);
+    consume(entry, metadata.observe(resource, entry.row));
   }
+  if (!manifestSeen) fail("MISSING_RESOURCE_MANIFEST");
+}
+
+function officialMediaEntryUrl(sourceArchiveUrl: string, originalFilename: string): string {
+  const url = new URL(sourceArchiveUrl);
+  const hostname = url.hostname.toLocaleLowerCase("en-US");
+  if (
+    url.protocol !== "https:"
+    || !(hostname === "tse.jus.br" || hostname.endsWith(".tse.jus.br"))
+  ) return fail("INVALID_MEDIA_SOURCE_URL");
+  url.hash = new URLSearchParams({ entry: originalFilename }).toString();
+  return url.toString();
 }
 
 async function performSync(
@@ -372,8 +482,9 @@ async function performSync(
   try {
     previousRunId = await repository.findLatestSuccessfulSyncRun(options.electionYear);
     await mediaStore.prepare(runId);
+    const sourceMetadata = new OfficialSourceMetadata();
     const rawCandidates = new Map<string, { row: TseRow; sourceArchiveUrl: string }>();
-    await consumeResource(client, "candidates", resources, (entry) => {
+    await consumeResource(client, "candidates", resources, sourceMetadata, (entry) => {
       assertRowYear(entry.row, options.electionYear);
       const externalId = candidateExternalId(entry.row);
       if (rawCandidates.has(externalId)) fail("DUPLICATE_CANDIDATE");
@@ -383,21 +494,24 @@ async function performSync(
       });
     });
     if (rawCandidates.size === 0) fail("EMPTY_CANDIDATE_RESOURCE");
-    const complements: RowEntry[] = [];
-    await consumeResource(client, "complements", resources, (entry) => {
-      complements.push({
-        ...entry,
-        row: pickPublicRow(entry.row, [
+    await consumeResource(client, "complements", resources, sourceMetadata, (entry) => {
+      mergeComplement(
+        rawCandidates,
+        pickPublicRow(entry.row, [
           "ANO_ELEICAO", "AA_ELEICAO", "SQ_CANDIDATO", ...complementAllowlist,
         ]),
-      });
+        options.electionYear,
+      );
     });
-    mergeComplements(rawCandidates, complements, options.electionYear);
-    const coalitions: RowEntry[] = [];
-    await consumeResource(client, "coalitions", resources, (entry) => {
-      coalitions.push({ ...entry, row: pickPublicRow(entry.row, coalitionRowAllowlist) });
+    const coalitionByKey = new Map<string, CoalitionEnrichment>();
+    await consumeResource(client, "coalitions", resources, sourceMetadata, (entry) => {
+      collectCoalition(
+        coalitionByKey,
+        pickPublicRow(entry.row, coalitionRowAllowlist),
+        options.electionYear,
+      );
     });
-    mergeCoalitions(rawCandidates, coalitions, options.electionYear);
+    applyCoalitions(rawCandidates, coalitionByKey);
 
     const candidates: ElectoralSnapshot["candidates"] = [...rawCandidates.values()].map(({ row, sourceArchiveUrl }) => ({
       ...mapCandidateRow(row, startedAt),
@@ -412,24 +526,24 @@ async function performSync(
     const candidateByExternalId = new Map(candidates.map((candidate) => [candidate.externalId, candidate]));
 
     const assets: ElectoralSnapshot["assets"] = [];
-    await consumeResource(client, "assets", resources, (entry) => {
+    await consumeResource(client, "assets", resources, sourceMetadata, (entry, extractedAt) => {
       assertRowYear(entry.row, options.electionYear);
       const mapped = mapAssetRow(entry.row);
       assets.push({
         ...mapped,
         sourceArchiveUrl: entry.sourceArchiveUrl,
-        sourceExtractedAt: sourceExtractedAt(entry.row, startedAt),
+        sourceExtractedAt: extractedAt,
         checkedAt: startedAt,
       });
     });
     const socialLinks: ElectoralSnapshot["socialLinks"] = [];
-    await consumeResource(client, "social", resources, (entry) => {
+    await consumeResource(client, "social", resources, sourceMetadata, (entry, extractedAt) => {
       assertRowYear(entry.row, options.electionYear);
       const mapped = mapSocialRow(entry.row);
       if (mapped) socialLinks.push({
         ...mapped,
         sourceArchiveUrl: entry.sourceArchiveUrl,
-        sourceExtractedAt: sourceExtractedAt(entry.row, startedAt),
+        sourceExtractedAt: extractedAt,
         checkedAt: startedAt,
       });
     });
@@ -445,13 +559,13 @@ async function performSync(
         campaignByCandidateKindCategory.set(key, entry);
       }
     };
-    await consumeResource(client, "campaignAccounts", resources, (entry) => {
+    await consumeResource(client, "campaignAccounts", resources, sourceMetadata, (entry, extractedAt) => {
       assertRowYear(entry.row, options.electionYear);
       const externalId = candidateExternalId(entry.row);
       if (!candidateByExternalId.has(externalId)) fail("ORPHAN_CAMPAIGN_ENTRY");
       const provenance = {
         sourceArchiveUrl: entry.sourceArchiveUrl,
-        sourceExtractedAt: sourceExtractedAt(entry.row, startedAt),
+        sourceExtractedAt: extractedAt,
         checkedAt: startedAt,
       };
       if (entry.entryKind === "campaignReceipts") {
@@ -467,6 +581,7 @@ async function performSync(
       }
     });
     const campaignEntries = [...campaignByCandidateKindCategory.values()];
+    const extractedAt = sourceMetadata.snapshotExtractedAt();
 
     const governmentPlans: ElectoralSnapshot["governmentPlans"] = [];
     const documents: ElectoralSnapshot["documents"] = [];
@@ -483,18 +598,18 @@ async function performSync(
             candidate.photoSourceArchiveUrl = entry.sourceArchiveUrl;
             candidate.photoOriginalFilename = entry.originalFilename;
             candidate.photoMimeType = entry.mimeType;
-            candidate.photoSourceExtractedAt = startedAt;
+            candidate.photoSourceExtractedAt = extractedAt;
             candidate.photoCheckedAt = startedAt;
           } else if (kind === "governmentPlans") {
             governmentPlans.push({
               electionYear: options.electionYear,
               candidateExternalId: entry.candidateExternalId,
-              officialUrl: entry.sourceArchiveUrl,
+              officialUrl: officialMediaEntryUrl(entry.sourceArchiveUrl, entry.originalFilename),
               storageKey,
               originalFilename: entry.originalFilename,
               mimeType: entry.mimeType,
               sourceArchiveUrl: entry.sourceArchiveUrl,
-              sourceExtractedAt: startedAt.toISOString(),
+              sourceExtractedAt: extractedAt.toISOString(),
               checkedAt: startedAt.toISOString(),
             });
           } else {
@@ -502,12 +617,12 @@ async function performSync(
               electionYear: options.electionYear,
               candidateExternalId: entry.candidateExternalId,
               label: "Certidão criminal publicada pelo TSE",
-              officialUrl: entry.sourceArchiveUrl,
+              officialUrl: officialMediaEntryUrl(entry.sourceArchiveUrl, entry.originalFilename),
               storageKey,
               originalFilename: entry.originalFilename,
               mimeType: entry.mimeType,
               sourceArchiveUrl: entry.sourceArchiveUrl,
-              sourceExtractedAt: startedAt.toISOString(),
+              sourceExtractedAt: extractedAt.toISOString(),
               checkedAt: startedAt.toISOString(),
             });
           }
@@ -518,7 +633,7 @@ async function performSync(
     const snapshot: ElectoralSnapshot = {
       syncRunId: runId,
       electionYear: options.electionYear,
-      extractedAt: startedAt,
+      extractedAt,
       sourceUrl: client.resourceUrl("candidates"),
       candidates,
       assets,
