@@ -106,6 +106,68 @@ Limitação honesta: o modo reduzido de movimento foi validado por DOM/CSS e tes
 7. A navegação media 420 px em viewport de 390 px; um teste RED capturou o overflow e a regra móvel reduziu o documento a 390 px mantendo nomes acessíveis.
 8. As telas de entrada/cadastro ainda omitiam candidaturas na explicação da conta; o teste RED de copy falhou em 2/2 e passou em 2/2 depois da correção mínima.
 
+## Rodada de revisão final — 5 de setembro de 2026
+
+A revisão partiu do HEAD `d639e62` e produziu o commit funcional `0662858` (`fix: harden candidate release invariants`). Todos os achados foram reproduzidos em teste antes da mudança de produção.
+
+### Contratos endurecidos
+
+- Cada um dos cinco recursos tabulares regionais agora só é aceito quando o ZIP contém exatamente a partição canônica Brasil mais as 27 UFs. Ausência, duplicidade, região inesperada e arquivo regional isolado rejeitam a carga antes de qualquer manifest; somente os arquivos disjuntos pretendidos são processados e as demais entradas são drenadas sob limites.
+- Receitas, despesas contratadas e despesas pagas preservam suas próprias marcas temporais tanto nos registros quanto no manifest. A marca agregada continua sendo o máximo somente para exibição. Se um manifest legado tiver apenas a marca agregada, ela ainda funciona como piso para os três subtipos na primeira carga nova; essa primeira carga estabelece os três baselines independentes e qualquer regressão posterior de um único subtipo rejeita a publicação inteira.
+- A identidade oficial de bem passou a ser candidatura mais `source_order` quando a ordem existe. Duplicata exata tem rejeição determinística conforme o contrato, conflito na mesma ordem é recusado e linhas legadas com ordem nula continuam compatíveis. A migração `0010_naive_mac_gargan.sql` adiciona o índice único parcial correspondente.
+- O comando de vínculo usa a mesma validação canônica do domínio: IDs públicos de candidatura com 11 ou 12 dígitos são aceitos; comprimentos diferentes são rejeitados.
+- Somente `saldoMin` e `saldoMax` aceitam sinal, dentro de todo o intervalo `bigint` do PostgreSQL e com mínimo menor ou igual ao máximo. Receita, despesa e bens continuam não negativos. O comportamento é simétrico entre GET nativo, JSON, URL canônica, formatter e consulta SQL.
+- Depois de uma exceção ambígua na persistência, o job consulta status, ano e contagem da geração: sucesso confirmado é normalizado como sucesso verdadeiro sem remover mídia; falha definitiva descarta staging; resultado pendente, divergente ou impossível de consultar retém a geração para reconciliação segura e devolve somente erro sanitizado.
+- O próprio record de rede social exige HTTP(S) sem credencial; nomes de mídia são limitados por bytes UTF-8; texto livre rejeita NUL, controles C0/C1 e Unicode malformado em todas as fronteiras; a URL de comparação do README usa `ano=2026` e parâmetros `id` repetidos.
+
+Durante o resync em Node 26.8.1, dois problemas adicionais de robustez foram reproduzidos antes da correção. O staging mantinha um `FileHandle` sujeito à finalização fatal do runtime; ele passou a usar criação exclusiva por stream, mantendo as garantias contra colisão e symlink. Uma entrada de mídia que parasse depois de ser entregue pelo ZIP não observava o cancelamento; a iteração agora disputa cada avanço com o `AbortSignal`, destrói a entrada e termina com `TSE_REQUEST_ABORTED`. O teste RED exato excedia 5 segundos; o GREEN encerrou em cerca de 16 ms.
+
+### Migração e sincronização oficial repetida
+
+A migração nova foi aplicada duas vezes, com exit 0, em uma base descartável, na base de teste e na base de desenvolvimento. A verificação prévia encontrou zero pares candidatura/ordem duplicados; a verificação posterior encontrou exatamente um índice parcial. Uma integração real provocou a violação `23505` esperada para ordem não nula repetida e confirmou que a compatibilidade de ordem nula permanece. Nenhuma base foi truncada ou substituída.
+
+O novo sync oficial começou em `2026-09-05T13:19:27.877Z`, terminou em `2026-09-05T13:25:01.505Z` e durou 333,628 segundos. A persistência local ocorreu entre `2026-09-05T13:24:37.978Z` e `2026-09-05T13:24:57.872Z`. O recurso principal de candidaturas tinha extração oficial em `2026-09-05T11:31:47Z`.
+
+| Recurso | Entrada oficial aceita |
+|---|---:|
+| Candidaturas | 20.883 |
+| Complementos | 20.883 |
+| Bens | 76.806 |
+| Coligações | 4.337 |
+| Redes sociais, antes da deduplicação | 56.791 |
+| Receitas | 38.931 |
+| Despesas contratadas | 62.836 |
+| Despesas pagas | 19.214 |
+| Fotos | 20.872 |
+| Propostas de governo | 227 |
+| Certidões | 12.318 |
+
+O retrato publicado contém 20.883 candidaturas, 76.806 bens, 37.288 componentes financeiros agregados, 11.796 totais de campanha, 47.932 links sociais, 227 propostas e 12.318 documentos. As três marcas financeiras publicadas são, respectivamente, `2026-09-04T07:05:48Z`, `2026-09-04T07:05:47Z` e `2026-09-04T07:05:40Z`; a marca agregada é o máximo `2026-09-04T07:05:48Z`. Os únicos avisos foram `ORPHAN_TABULAR_ENTRIES_SKIPPED`, `DUPLICATE_SOCIAL_LINKS_SKIPPED` e `ORPHAN_MEDIA_ENTRIES_SKIPPED`.
+
+Tentativas anteriores da rodada falharam ou foram interrompidas antes da publicação enquanto os dois problemas de streaming eram diagnosticados. Cada geração exata foi descartada depois de o resultado ser conhecido. O retrato válido anterior permaneceu disponível em todas elas. A tentativa final usou timeout regional limitado a 120 segundos, publicou exatamente uma geração e deixou zero gerações em staging.
+
+### Invariantes e smokes da rodada
+
+- Existem duas execuções bem-sucedidas de 2026, ordenadas; somente a mais recente define o retrato público. As 20.883 candidaturas têm 20.883 IDs externos distintos, uma identidade de geração por candidatura e zero linha fora da geração mais recente.
+- Bens, totais financeiros, redes, propostas e documentos têm zero filhos fora do retrato. Há zero grupos repetidos de ordem oficial de bem e exatamente um índice parcial ativo.
+- Os 11.796 totais financeiros têm zero divergência de receita, despesa ou saldo. Há 9.087 candidaturas sem total financeiro, 322 saldos negativos, mínimo de -R$ 1.349.775,00 e máximo de R$ 35.216.006,65.
+- O manifest tem as três chaves de subtipo. Há 75 vínculos, todos pendentes; nenhum pendente ou rejeitado ficou público. O esquema eleitoral continua com zero coluna privada proibida e acompanhamentos continuam únicos por conta/candidatura.
+- Em `127.0.0.1:3100`, o GET nativo e o POST JSON do intervalo de saldo negativo retornaram HTTP 200 e exatamente 322 candidaturas, sem serializar `bigint` nem chave de armazenamento. A foto semântica real retornou HTTP 200, `image/jpeg`, `nosniff` e corpo não vazio; tentativa de travessia retornou 404.
+- O smoke do CLI aceitou os dois comprimentos canônicos e rejeitou os dois comprimentos inválidos sem fazer escrita. Um perfil real com vínculo pendente retornou HTTP 200, mostrou o texto neutro de ausência e não renderizou histórico confirmado. O endpoint de saúde respondeu HTTP 200.
+
+### Gates repetidos
+
+```text
+migration 0010 em descartável/teste/dev, duas vezes    # exit 0
+11 suítes focadas                                      # 295/295; duas vezes
+npm test                                               # 51 arquivos, 644/644
+npm run typecheck                                      # exit 0
+npm run build                                          # exit 0, Next.js 16.3.4
+git diff --check                                       # exit 0
+```
+
+As suítes focadas cobriram cliente regional, mapper, mídia/ownership, job/ack, repositório real, CLI, contratos de filtro, URL, consulta e UI. A validação desktop/mobile/autenticada da execução original permanece aplicável às superfícies não alteradas; nesta rodada, os filtros assinados, o CLI e a mídia foram exercitados novamente nas fronteiras modificadas.
+
 ## Estado final
 
 O servidor de validação foi encerrado ao final; portas 3100 e 3101 ficaram livres. O processo preexistente na porta 3000 permaneceu ativo. O endpoint de saúde do servidor da branch respondeu HTTP 200, mas informou `degraded` para as fontes legislativas Câmara/Senado já presentes no banco; isso é uma limitação externa/operacional independente do retrato eleitoral TSE, não foi mascarada.
