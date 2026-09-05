@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   currentUser: vi.fn(),
   listCandidates: vi.fn(),
   listOptions: vi.fn(),
+  routerPush: vi.fn(),
   redirect: vi.fn((target: string): never => {
     throw new Error(`NEXT_REDIRECT:${target}`);
   }),
@@ -20,7 +21,10 @@ vi.mock("next/headers.js", () => ({
   cookies: async () => ({ toString: () => mocks.cookieText }),
   headers: mocks.headers,
 }));
-vi.mock("next/navigation.js", () => ({ redirect: mocks.redirect }));
+vi.mock("next/navigation.js", () => ({
+  redirect: mocks.redirect,
+  useRouter: () => ({ push: mocks.routerPush }),
+}));
 vi.mock("#/auth/current-user", () => ({ currentUserFromCookie: mocks.currentUser }));
 vi.mock("#/auth/user-repository", () => ({ UserRepository: class UserRepository {} }));
 vi.mock("#/server/config", () => ({ env: { GEO_PROVIDER: "cloudflare" } }));
@@ -182,9 +186,11 @@ describe("candidate catalog route", () => {
 
     const view = render(await CandidateCatalogPage({ searchParams: Promise.resolve({ uf: "ES" }) }));
 
-    expect(view.container).toHaveTextContent("1 candidatura encontrada");
+    expect(view.container).toHaveTextContent("1 candidatura oficial");
     expect(view.getByText("Ana Cidadã")).toBeInTheDocument();
-    expect(view.getByText(/Número 1234 · Deputado federal · ES · ABC/)).toBeInTheDocument();
+    expect(view.getByLabelText("Número de urna 1234")).toBeInTheDocument();
+    expect(view.getByText("Deputado federal · ES")).toBeInTheDocument();
+    expect(view.getByText("ABC · Partido ABC")).toBeInTheDocument();
     expect(view.getByText("Retrato oficial do TSE")).toBeInTheDocument();
     expect(view.getByText("5 de set. de 2026, 08:00")).toBeInTheDocument();
   });
