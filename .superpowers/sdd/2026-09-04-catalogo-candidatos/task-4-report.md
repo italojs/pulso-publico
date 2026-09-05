@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementada sobre a base `f6d63d3` e consolidada no commit de código `3b703e6` (`feat: synchronize TSE election data`). Nenhuma parte da Task 5 foi iniciada.
+Implementada sobre a base `f6d63d3`, com a fatia inicial no commit `3b703e6` (`feat: synchronize TSE election data`) e a primeira rodada de correções de revisão no commit `f23e7cf` (`fix: enforce complete electoral sync contracts`). Nenhuma parte da Task 5 foi iniciada.
 
 ## Arquivos
 
@@ -60,3 +60,50 @@ Todos os comandos usaram Node `26.8.1` por `PATH=/Users/italojose/.local/share/f
 - A carga nacional real não foi disparada durante o teste para evitar baixar todos os arquivos oficiais; os limites, subtipos, 84 chamadas regionais e ciclo de publicação foram validados com ZIPs/streams controlados. A primeira execução real depende de os arquivos 2026 estarem publicados nos caminhos oficiais previstos.
 - Uma falha ao apagar a geração antiga depois do commit pode deixar arquivos obsoletos ocupando disco; o novo retrato permanece correto e o relatório inclui `PREVIOUS_MEDIA_CLEANUP_FAILED` para limpeza operacional posterior.
 - Sugestões automáticas continuam deliberadamente conservadoras e invisíveis ao público até confirmação administrativa com evidência oficial.
+
+## Rodada de revisão 1/5
+
+### Achados reproduzidos em RED
+
+O comando focado foi executado antes das correções:
+
+`npm test -- tests/integrations/tse/client.test.ts tests/integrations/tse/mapper.test.ts tests/jobs/sync-election.test.ts tests/server/electoral/repository.test.ts`
+
+Foram observadas 9 falhas cobrindo os contratos apontados pela revisão:
+
+- ausência de manifesto final no streaming do recurso;
+- publicação possível sem os três subtipos de prestação de contas;
+- uso do horário local de início no lugar dos metadados oficiais;
+- ausência de rejeição para metadados oficiais inconsistentes;
+- colisão de URL entre duas certidões da mesma candidatura;
+- sobrescrita de coligação/federação declarada com enriquecimento divergente;
+- classificação de origem financeira desconhecida ou sentinela como recurso privado;
+- ausência de uma normalização pública e compartilhada para sentinelas TSE.
+
+O teste de integração do repositório para duas certidões com URLs oficiais distintas já passou no RED, demonstrando que a restrição existente aceita a identidade por arquivo e que uma migração não era necessária.
+
+### Correções e decisões
+
+- `TseOpenDataClient.streamResource` agora emite linhas tipadas e exatamente um manifesto após o consumo completo do ZIP. O manifesto registra a presença das entradas oficiais, não a quantidade de linhas; portanto um CSV válido apenas com cabeçalho ainda satisfaz o subtipo, enquanto a ausência de receitas, despesas contratadas ou despesas pagas falha com `MISSING_CAMPAIGN_SUBTYPE` antes da publicação.
+- Cada linha dos seis recursos tabulares precisa conter `DT_GERACAO` e `HH_GERACAO` válidos. A consistência é estrita dentro de cada recurso; como arquivos oficiais independentes podem ser gerados em instantes diferentes, o instante do snapshot é o máximo determinístico entre os seis recursos. Proveniências de bens, redes e contas conservam o instante do próprio recurso. Datas impossíveis, formato inválido, metadata ausente ou divergente falham com códigos estáveis.
+- A proteção contra snapshot antigo usa o instante oficial calculado, e não `startedAt`. O horário local continua somente como `checkedAt` e timestamps operacionais.
+- Propostas e certidões recebem uma identidade pública estável por entrada, preservando o host oficial do TSE e adicionando o nome do arquivo no fragmento da URL do arquivo oficial. Assim, duas certidões da mesma candidatura persistem separadamente sob a restrição `(candidate_id, official_url)`, sem alteração de schema.
+- O enriquecimento de coligação/federação preserva valores declarados equivalentes e falha com `CONFLICTING_COALITION_ENRICHMENT` quando encontra divergência. Divergências entre linhas da própria fonte de coligações continuam falhando com `CONFLICTING_COALITION_MATCH`.
+- Complementos são aplicados incrementalmente ao mapa de candidaturas e coligações/federações são reduzidas incrementalmente a um mapa limitado por chave eleitoral; nenhuma lista bruta desses recursos permanece em memória.
+- A normalização de sentinelas TSE foi centralizada em `normalizeTseOptionalValue`. `#NULO`, `#NE`, `-1` e demais sentinelas suportadas viram ausência. A classificação financeira passou a uma allowlist explícita; valores desconhecidos produzem `Não informado`.
+- O ciclo de gerações permaneceu protegido por regressões: uma falha de persistência descarta somente a geração nova e a antiga só é removida depois do commit bem-sucedido. Os 84 streams regionais e a ausência de colunas privadas também permanecem cobertos.
+
+### GREEN e verificação da rodada
+
+Todos os comandos usaram Node `26.8.1` e, nos testes de integração, `TEST_DATABASE_URL=postgres://italojose@127.0.0.1:5435/legislativo_codex_test`.
+
+- Testes focados finais: 7 arquivos, 85 testes aprovados, 0 falhas.
+- `npm run typecheck`: aprovado, 0 erros.
+- `git diff --check`: aprovado.
+- Suíte completa: 39 arquivos, 330 testes aprovados, 0 falhas.
+- Commit de código da rodada: `f23e7cf` (`fix: enforce complete electoral sync contracts`).
+
+### Riscos remanescentes após a rodada
+
+- A carga nacional real continua não executada nesta etapa; o contrato foi validado com arquivos ZIP e streams controlados, incluindo entradas sem linhas, duas certidões, metadata oficial e todas as regiões.
+- A identidade pública por fragmento depende do nome da entrada no ZIP permanecer estável para manter a mesma URL entre cargas, embora continue apontando para o arquivo oficial do TSE e não exija alteração de schema.
