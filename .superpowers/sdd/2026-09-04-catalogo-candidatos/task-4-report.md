@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementada sobre a base `f6d63d3`, com a fatia inicial no commit `3b703e6` (`feat: synchronize TSE election data`), a primeira rodada de correções no commit `f23e7cf` (`fix: enforce complete electoral sync contracts`) e a segunda rodada no commit `e75e282` (`fix: version electoral resources independently`). Nenhuma parte da Task 5 foi iniciada.
+Implementada sobre a base `f6d63d3`, com a fatia inicial no commit `3b703e6` (`feat: synchronize TSE election data`), correções de revisão nos commits `f23e7cf` (`fix: enforce complete electoral sync contracts`), `e75e282` (`fix: version electoral resources independently`) e `1b6aa61` (`fix: validate official electoral provenance`). Nenhuma parte da Task 5 foi iniciada.
 
 ## Arquivos
 
@@ -150,5 +150,50 @@ Todos os comandos usaram `PATH=/Users/italojose/.local/share/fnm/node-versions/v
 
 ### Riscos remanescentes após a rodada
 
-- Runs bem-sucedidos criados antes da migração permanecem com manifesto `{}` porque as seis versões históricas não podem ser reconstruídas com segurança a partir do antigo timestamp agregado. A primeira sincronização nova estabelece as seis versões confiáveis; a comparação independente vale integralmente a partir dela.
+- Runs bem-sucedidos criados antes da migração permanecem com manifesto `{}` porque as seis versões históricas não podem ser reconstruídas com segurança. A rodada 3 usa o `extracted_at` legado apenas como baseline conservadora de candidatos; os outros cinco recursos permanecem sem baseline inventada até a primeira sincronização nova.
 - Um recurso oficial vazio não oferece timestamp embutido e, portanto, fica explicitamente desconhecido (`null`). Essa ausência é preservada no fingerprint e nunca pode apagar um timestamp anteriormente conhecido.
+
+## Rodada de revisão 3/5
+
+### Achados reproduzidos em RED
+
+O teste de integração do repositório foi executado antes da implementação:
+
+`npm test -- tests/server/electoral/repository.test.ts`
+
+O RED apresentou 5 falhas e 22 aprovações:
+
+- um manifesto aceitava protocolo HTTP, credenciais, domínio externo e caminho pertencente a outro recurso;
+- candidaturas, bens, redes e contas podiam declarar uma URL diferente daquela registrada no manifesto;
+- mídia aceitava URLs inseguras ou de origem não oficial;
+- mídia aceitava timestamps de extração inventados, apesar de os ZIPs não fornecerem metadata embutida;
+- um run legado com manifesto `{}` não usava seu `extracted_at` conhecido como baseline conservadora de candidatos.
+
+O caso positivo que mantém os outros cinco recursos sem baseline histórica inventada já passou no RED.
+
+### Correções e decisões
+
+- Os caminhos oficiais de recursos tabulares, regiões e mídia foram movidos para `src/domain/tse-source.ts`, módulo sem dependência de integração ou servidor. O cliente TSE e o repositório agora consomem o mesmo contrato, evitando divergência e ciclo entre camadas.
+- O repositório exige, para cada uma das seis entradas do manifesto, HTTPS sem credenciais, origem exata `cdn.tse.jus.br`, nenhum query/fragment e o caminho canônico do arquivo 2026 correspondente ao recurso.
+- Cada candidatura, bem, rede social e lançamento financeiro precisa repetir exatamente a URL de arquivo do respectivo manifesto e manter o mesmo timestamp já validado na rodada anterior. Complementos e coligações são cobertos pelo manifesto porque não geram linhas persistidas próprias.
+- Fotos, propostas e certidões exigem URLs de arquivos regionais canônicos. `officialUrl` de propostas/certidões aceita fragmentos estáveis por arquivo, mas continua exigindo HTTPS sem credenciais em domínio oficial do TSE.
+- `photoSourceExtractedAt`, o timestamp de propostas e o timestamp de certidões precisam ser `null` nesta entrega. Chaves opacas de armazenamento continuam passando pela validação existente.
+- Sob o lock de eleição, se o último run bem-sucedido não possui a entrada `candidates` no manifesto legado, seu `electoral_sync_runs.extracted_at` não nulo vira somente a baseline de candidatos. Uma candidatura atual mais antiga é rejeitada; bens e os demais recursos não recebem uma versão histórica que não possa ser demonstrada.
+- O caso positivo de duas certidões da mesma candidatura continua válido com URLs oficiais distintas por fragmento.
+
+### GREEN e verificação da rodada
+
+Todos os comandos usaram Node `26.8.1` e o banco `postgres://italojose@127.0.0.1:5435/legislativo_codex_test` nos testes de integração.
+
+- GREEN do repositório: 27 testes aprovados, 0 falhas.
+- Testes focados de cliente, job e repositório: 3 arquivos, 72 testes aprovados, 0 falhas.
+- O teste de integração do repositório foi executado duas vezes consecutivas: 27/27 em ambas.
+- Suíte completa: 39 arquivos, 343 testes aprovados, 0 falhas.
+- `npm run typecheck`: aprovado, 0 erros.
+- `git diff --check`: aprovado.
+- Commit de código: `1b6aa61` (`fix: validate official electoral provenance`).
+
+### Riscos remanescentes após a rodada
+
+- Para runs legados, somente candidatos têm uma baseline recuperável. Essa escolha é deliberadamente conservadora e evita atribuir o antigo timestamp agregado a bens, coligações, redes ou contas sem evidência.
+- A allowlist de caminhos está restrita aos arquivos oficiais 2026 definidos para esta entrega. Uma mudança futura de publicação do TSE deve atualizar o contrato compartilhado e seus testes antes de ser aceita pelo repositório.
