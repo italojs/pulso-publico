@@ -115,6 +115,7 @@ const requiredColumnGroups: Record<TseResourceName, readonly (readonly string[])
   complements: [["ANO_ELEICAO", "AA_ELEICAO"], ["SQ_CANDIDATO"]],
   assets: [
     ["ANO_ELEICAO", "AA_ELEICAO"], ["SQ_CANDIDATO"],
+    ["NR_ORDEM_BEM_CANDIDATO"],
     ["DS_TIPO_BEM_CANDIDATO"], ["VR_BEM_CANDIDATO"],
   ],
   coalitions: [
@@ -142,10 +143,14 @@ function validateTabularHeaders(
 ): string[] {
   const headers = rawHeaders.map((header) => header.trim());
   const headerSet = new Set(headers);
+  const requiredGroups = resource === "campaignAccounts"
+    && filename.toLocaleLowerCase("pt-BR").startsWith("despesas_pagas_")
+    ? [["ANO_ELEICAO", "AA_ELEICAO"], ["SQ_PRESTADOR_CONTAS"]]
+    : requiredColumnGroups[resource];
   if (
     headers.some((header) => header.length === 0)
     || headerSet.size !== headers.length
-    || requiredColumnGroups[resource].some((alternatives) =>
+    || requiredGroups.some((alternatives) =>
       !alternatives.some((column) => headerSet.has(column))
     )
   ) {
@@ -158,7 +163,7 @@ function validateTabularHeaders(
       ? ["VR_RECEITA", "VR_RECEITA_BRUTA"]
       : normalizedFilename.startsWith("despesas_contratadas_")
         ? ["VR_DESPESA_CONTRATADA"]
-        : ["VR_PAGTO"];
+        : ["VR_PAGTO_DESPESA"];
     if (!valueColumns.some((column) => headerSet.has(column))) {
       throw new TseContractError("INVALID_TABULAR_SCHEMA");
     }
@@ -199,6 +204,14 @@ function tabularEntryKind(
   throw new TseContractError("INVALID_ARCHIVE_RESPONSE");
 }
 
+function shouldStreamTabularEntry(
+  resource: TseResourceName,
+  filename: string,
+): boolean {
+  const isBrasilAggregate = /_2026_brasil\.(?:csv|txt)$/i.test(filename);
+  return resource === "campaignAccounts" ? isBrasilAggregate : !isBrasilAggregate;
+}
+
 function mediaContract(kind: TseRegionalMediaKind): {
   extension: RegExp;
   mimeType: TseMediaEntry["mimeType"];
@@ -215,9 +228,21 @@ function mediaContract(kind: TseRegionalMediaKind): {
 }
 
 export function parseCandidateExternalId(filename: string): string {
-  const identifiers = [...filename.matchAll(/(?<!\d)(\d{12})(?!\d)/g)].map((match) => match[1]!);
+  const identifiers = [...filename.matchAll(/(?<!\d)(\d{11,12})(?!\d)/g)].map((match) => match[1]!);
   if (identifiers.length !== 1) throw new TseContractError("INVALID_MEDIA_CANDIDATE_ID");
   return identifiers[0]!;
+}
+
+function parseRegionalMediaCandidateExternalId(
+  filename: string,
+  kind: TseRegionalMediaKind,
+  region: TseRegion,
+): string {
+  if (kind !== "photos") {
+    const officialPrefix = new RegExp(`^2026${region}(\\d{11,12})(?=_)`, "i").exec(filename);
+    if (officialPrefix) return officialPrefix[1]!;
+  }
+  return parseCandidateExternalId(filename);
 }
 
 async function prepareMediaContent(
@@ -376,6 +401,14 @@ export class TseOpenDataClient {
         throw new TseContractError("DUPLICATE_ARCHIVE_ENTRY");
       }
       seenBasenames.add(normalizedFilename);
+      if (!shouldStreamTabularEntry(resource, filename)) {
+        await drainBoundedArchiveEntry(
+          entry,
+          this.#limits.tabularEntryBytes,
+          request.signal,
+        );
+        continue;
+      }
       foundExpectedEntry = true;
 
       const limiter = limitedBytes(this.#limits.tabularEntryBytes);
@@ -402,8 +435,11 @@ export class TseOpenDataClient {
             if (
               sourceExtractedAt
               && sourceExtractedAt.getTime() !== rowExtractedAt.getTime()
+              && resource !== "campaignAccounts"
             ) throw new TseContractError("INCONSISTENT_SOURCE_METADATA");
-            sourceExtractedAt = rowExtractedAt;
+            if (!sourceExtractedAt || rowExtractedAt > sourceExtractedAt) {
+              sourceExtractedAt = rowExtractedAt;
+            }
           }
           yield {
             type: "row",
@@ -470,17 +506,30 @@ export class TseOpenDataClient {
         continue;
       }
       const originalFilename = basename(entry.path.replaceAll("\\", "/"));
+      const normalizedFilename = originalFilename.toLocaleLowerCase("pt-BR");
+      if (normalizedFilename === "leiame.pdf") {
+        await drainBoundedArchiveEntry(
+          entry,
+          this.#limits.mediaEntryBytes,
+          request.signal,
+          total,
+        );
+        continue;
+      }
       if (!contract.extension.test(originalFilename)) {
         entry.destroy();
         throw new TseContractError("INVALID_MEDIA_FORMAT");
       }
-      const normalizedFilename = originalFilename.toLocaleLowerCase("pt-BR");
       if (seenBasenames.has(normalizedFilename)) {
         entry.destroy();
         throw new TseContractError("DUPLICATE_ARCHIVE_ENTRY");
       }
       seenBasenames.add(normalizedFilename);
-      const candidateExternalId = parseCandidateExternalId(originalFilename);
+      const candidateExternalId = parseRegionalMediaCandidateExternalId(
+        originalFilename,
+        kind,
+        region,
+      );
       const content = await prepareMediaContent(
         entry,
         contract.magic,

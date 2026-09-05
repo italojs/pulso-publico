@@ -143,6 +143,11 @@ async function consume(stream: NodeJS.ReadableStream): Promise<Buffer> {
 }
 
 describe("TseOpenDataClient", () => {
+  it("extracts the official 11- or 12-digit candidate sequence from media names", () => {
+    expect(parseCandidateExternalId("FAC12345678901_div.jpg")).toBe("12345678901");
+    expect(parseCandidateExternalId("FBR123456789012_div.jpg")).toBe("123456789012");
+  });
+
   it("streams every Windows-1252 CSV row from the official 2026 resource", async () => {
     const client = new TseOpenDataClient({
       fetch: fakeZipFetch([{
@@ -159,6 +164,36 @@ describe("TseOpenDataClient", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ SQ_CANDIDATO: "260001234567", NM_CANDIDATO: "ANA CIDADÃ" });
     expect(rows[1]).toMatchObject({ SQ_CANDIDATO: "260009876543", NM_CANDIDATO: "JOÃO PÚBLICO" });
+  });
+
+  it("does not emit the BRASIL aggregate alongside the disjoint regional candidate files", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([
+        {
+          name: "consulta_cand_2026_ES.csv",
+          contents: candidateCsv([["260001234567", "ANA CIDADÃ"]]),
+        },
+        {
+          name: "consulta_cand_2026_BR.csv",
+          contents: candidateCsv([["260009876543", "JOÃO PÚBLICO"]]),
+        },
+        {
+          name: "consulta_cand_2026_BRASIL.csv",
+          contents: candidateCsv([
+            ["260001234567", "ANA CIDADÃ"],
+            ["260009876543", "JOÃO PÚBLICO"],
+          ]),
+        },
+      ]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+
+    const rows = await collectRows(client);
+
+    expect(rows.map((row) => row.SQ_CANDIDATO)).toEqual([
+      "260001234567",
+      "260009876543",
+    ]);
   });
 
   it("streams deflated entries that use a ZIP data descriptor", async () => {
@@ -316,7 +351,7 @@ describe("TseOpenDataClient", () => {
 
     const valid = new TseOpenDataClient({
       fetch: fakeZipFetch([{
-        name: "receitas_candidatos_2026_ES.csv",
+        name: "receitas_candidatos_2026_BRASIL.csv",
         contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n2026;260001234567;10,00\r\n",
       }]),
       baseUrl: "https://cdn.tse.jus.br/",
@@ -329,22 +364,22 @@ describe("TseOpenDataClient", () => {
   it("requires the value column that corresponds to each expense subtype", async () => {
     const cases = [
       {
-        filename: "despesas_contratadas_candidatos_2026_ES.csv",
+        filename: "despesas_contratadas_candidatos_2026_BRASIL.csv",
         valueColumn: "VR_DESPESA_CONTRATADA",
         accepted: true,
       },
       {
-        filename: "despesas_contratadas_candidatos_2026_ES.csv",
-        valueColumn: "VR_PAGTO",
+        filename: "despesas_contratadas_candidatos_2026_BRASIL.csv",
+        valueColumn: "VR_PAGTO_DESPESA",
         accepted: false,
       },
       {
-        filename: "despesas_pagas_candidatos_2026_ES.csv",
-        valueColumn: "VR_PAGTO",
+        filename: "despesas_pagas_candidatos_2026_BRASIL.csv",
+        valueColumn: "VR_PAGTO_DESPESA",
         accepted: true,
       },
       {
-        filename: "despesas_pagas_candidatos_2026_ES.csv",
+        filename: "despesas_pagas_candidatos_2026_BRASIL.csv",
         valueColumn: "VR_DESPESA_CONTRATADA",
         accepted: false,
       },
@@ -354,7 +389,9 @@ describe("TseOpenDataClient", () => {
       const client = new TseOpenDataClient({
         fetch: fakeZipFetch([{
           name: fixture.filename,
-          contents: `ANO_ELEICAO;SQ_CANDIDATO;${fixture.valueColumn}\r\n2026;260001234567;10,00\r\n`,
+          contents: fixture.filename.startsWith("despesas_pagas_")
+            ? `AA_ELEICAO;SQ_PRESTADOR_CONTAS;${fixture.valueColumn}\r\n2026;260000000001;10,00\r\n`
+            : `ANO_ELEICAO;SQ_CANDIDATO;${fixture.valueColumn}\r\n2026;260001234567;10,00\r\n`,
         }]),
         baseUrl: "https://cdn.tse.jus.br/",
       });
@@ -372,20 +409,66 @@ describe("TseOpenDataClient", () => {
     }
   });
 
+  it("accepts the official paid-expense identity and value columns", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([{
+        name: "despesas_pagas_candidatos_2026_BRASIL.csv",
+        contents: "AA_ELEICAO;SQ_PRESTADOR_CONTAS;VR_PAGTO_DESPESA\r\n2026;260000000001;7,00\r\n",
+      }]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const rows = [];
+
+    for await (const row of client.streamRows("campaignAccounts")) rows.push(row);
+
+    expect(rows).toEqual([expect.objectContaining({
+      SQ_PRESTADOR_CONTAS: "260000000001",
+      VR_PAGTO_DESPESA: "7,00",
+    })]);
+  });
+
+  it("uses the newest official generation time across campaign subtypes", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([
+        {
+          name: "receitas_candidatos_2026_BRASIL.csv",
+          contents: "DT_GERACAO;HH_GERACAO;AA_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n04/09/2026;04:05:48;2026;260001234567;10,00\r\n",
+        },
+        {
+          name: "despesas_contratadas_candidatos_2026_BRASIL.csv",
+          contents: "DT_GERACAO;HH_GERACAO;AA_ELEICAO;SQ_CANDIDATO;VR_DESPESA_CONTRATADA\r\n04/09/2026;04:05:47;2026;260001234567;8,00\r\n",
+        },
+        {
+          name: "despesas_pagas_candidatos_2026_BRASIL.csv",
+          contents: "DT_GERACAO;HH_GERACAO;AA_ELEICAO;SQ_PRESTADOR_CONTAS;VR_PAGTO_DESPESA\r\n04/09/2026;04:05:40;2026;260000000001;7,00\r\n",
+        },
+      ]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const events = [];
+
+    for await (const event of client.streamResource("campaignAccounts")) events.push(event);
+
+    expect(events.at(-1)).toMatchObject({
+      type: "manifest",
+      sourceExtractedAt: new Date("2026-09-04T07:05:48.000Z"),
+    });
+  });
+
   it("exposes the controlled archive subtype and official provenance for campaign rows", async () => {
     const client = new TseOpenDataClient({
       fetch: fakeZipFetch([
         {
-          name: "receitas_candidatos_2026_ES.csv",
+          name: "receitas_candidatos_2026_BRASIL.csv",
           contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n2026;260001234567;10,00\r\n",
         },
         {
-          name: "despesas_contratadas_candidatos_2026_ES.csv",
+          name: "despesas_contratadas_candidatos_2026_BRASIL.csv",
           contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_DESPESA_CONTRATADA\r\n2026;260001234567;8,00\r\n",
         },
         {
-          name: "despesas_pagas_candidatos_2026_ES.csv",
-          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_PAGTO\r\n2026;260001234567;7,00\r\n",
+          name: "despesas_pagas_candidatos_2026_BRASIL.csv",
+          contents: "AA_ELEICAO;SQ_PRESTADOR_CONTAS;VR_PAGTO_DESPESA\r\n2026;260000000001;7,00\r\n",
         },
       ]),
       baseUrl: "https://cdn.tse.jus.br/",
@@ -397,7 +480,7 @@ describe("TseOpenDataClient", () => {
     expect(entries.map(({ entryKind, sourceArchiveUrl, row }) => ({
       entryKind,
       sourceArchiveUrl,
-      value: row.VR_RECEITA ?? row.VR_DESPESA_CONTRATADA ?? row.VR_PAGTO,
+      value: row.VR_RECEITA ?? row.VR_DESPESA_CONTRATADA ?? row.VR_PAGTO_DESPESA,
     }))).toEqual([
       {
         entryKind: "campaignReceipts",
@@ -417,20 +500,56 @@ describe("TseOpenDataClient", () => {
     ]);
   });
 
-  it("emits a completion manifest containing campaign subtypes with zero data rows", async () => {
+  it("uses only BRASIL campaign aggregates when regional copies are also present", async () => {
     const client = new TseOpenDataClient({
       fetch: fakeZipFetch([
         {
           name: "receitas_candidatos_2026_ES.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n2026;260001234567;10,00\r\n",
+        },
+        {
+          name: "receitas_candidatos_2026_BRASIL.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n2026;260001234567;10,00\r\n",
+        },
+        {
+          name: "despesas_contratadas_candidatos_2026_BRASIL.csv",
+          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_DESPESA_CONTRATADA\r\n2026;260001234567;8,00\r\n",
+        },
+        {
+          name: "despesas_pagas_candidatos_2026_BRASIL.csv",
+          contents: "AA_ELEICAO;SQ_PRESTADOR_CONTAS;VR_PAGTO_DESPESA\r\n2026;260000000001;7,00\r\n",
+        },
+      ]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const entries = [];
+
+    for await (const entry of client.streamRowEntries("campaignAccounts")) entries.push(entry);
+
+    expect(entries.map(({ entryKind, row }) => ({
+      entryKind,
+      value: row.VR_RECEITA ?? row.VR_DESPESA_CONTRATADA ?? row.VR_PAGTO_DESPESA,
+    }))).toEqual([
+      { entryKind: "campaignReceipts", value: "10,00" },
+      { entryKind: "campaignContractedExpenses", value: "8,00" },
+      { entryKind: "campaignPaidExpenses", value: "7,00" },
+    ]);
+  });
+
+  it("emits a completion manifest containing campaign subtypes with zero data rows", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([
+        {
+          name: "receitas_candidatos_2026_BRASIL.csv",
           contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_RECEITA\r\n",
         },
         {
-          name: "despesas_contratadas_candidatos_2026_ES.csv",
+          name: "despesas_contratadas_candidatos_2026_BRASIL.csv",
           contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_DESPESA_CONTRATADA\r\n",
         },
         {
-          name: "despesas_pagas_candidatos_2026_ES.csv",
-          contents: "ANO_ELEICAO;SQ_CANDIDATO;VR_PAGTO\r\n",
+          name: "despesas_pagas_candidatos_2026_BRASIL.csv",
+          contents: "AA_ELEICAO;SQ_PRESTADOR_CONTAS;VR_PAGTO_DESPESA\r\n",
         },
       ]),
       baseUrl: "https://cdn.tse.jus.br/",
@@ -512,6 +631,66 @@ describe("TseOpenDataClient", () => {
       mimeType: "image/jpeg",
       contents: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02]),
     }]);
+  });
+
+  it("boundedly ignores the official photo archive readme", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([
+        {
+          name: "260001234567.jpg",
+          contents: Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x01]),
+        },
+        { name: "leiame.pdf", contents: "%PDF-1.7\nuso das fotos" },
+      ]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const entries = [];
+
+    for await (const entry of client.streamRegionalMedia("photos", "BR")) {
+      entries.push(entry.originalFilename);
+      await consume(entry.content);
+    }
+
+    expect(entries).toEqual(["260001234567.jpg"]);
+  });
+
+  it.each(["governmentPlans", "certificates"] as const)(
+    "boundedly ignores the official %s archive readme",
+    async (kind) => {
+      const client = new TseOpenDataClient({
+        fetch: fakeZipFetch([
+          { name: "2026ES260001234567_01.pdf", contents: "%PDF-1.7\ndocumento" },
+          { name: "leiame.pdf", contents: "%PDF-1.7\nuso dos documentos" },
+        ]),
+        baseUrl: "https://cdn.tse.jus.br/",
+      });
+      const entries = [];
+
+      for await (const entry of client.streamRegionalMedia(kind, "ES")) {
+        entries.push(entry.originalFilename);
+        await consume(entry.content);
+      }
+
+      expect(entries).toEqual(["2026ES260001234567_01.pdf"]);
+    },
+  );
+
+  it("derives the certificate candidate from the anchored official prefix", async () => {
+    const client = new TseOpenDataClient({
+      fetch: fakeZipFetch([{
+        name: "BR/2026BR260001234567_000000000000. TRF1_1G.pdf.pdf",
+        contents: "%PDF-1.7\ncertidão",
+      }]),
+      baseUrl: "https://cdn.tse.jus.br/",
+    });
+    const entries = [];
+
+    for await (const entry of client.streamRegionalMedia("certificates", "BR")) {
+      entries.push(entry.candidateExternalId);
+      await consume(entry.content);
+    }
+
+    expect(entries).toEqual(["260001234567"]);
   });
 
   it("rejects an image whose magic bytes do not match its extension", async () => {
@@ -653,7 +832,7 @@ describe("parseCandidateExternalId", () => {
 
   it("rejects missing, shorter and ambiguous identifiers", () => {
     expect(() => parseCandidateExternalId("photo.jpg")).toThrow();
-    expect(() => parseCandidateExternalId("12345678901.jpg")).toThrow();
+    expect(() => parseCandidateExternalId("1234567890.jpg")).toThrow();
     expect(() => parseCandidateExternalId("260001234567_260009876543.jpg")).toThrow();
     expect(() => parseCandidateExternalId("260001234567_260001234567.jpg")).toThrow();
   });

@@ -140,6 +140,8 @@ const candidateRowAllowlist = [
   "SG_PARTIDO",
   "NR_PARTIDO",
   "NM_PARTIDO",
+  "SQ_COLIGACAO",
+  "CD_SITUACAO_CANDIDATURA",
   "DS_SITUACAO_CANDIDATURA",
   "DS_DETALHE_SITUACAO_CAND",
   "NM_FEDERACAO",
@@ -157,6 +159,7 @@ const coalitionRowAllowlist = [
   "SG_UE",
   "DS_CARGO",
   "SG_PARTIDO",
+  "SQ_COLIGACAO",
   "NM_COLIGACAO",
   "NM_FEDERACAO",
   "DT_GERACAO",
@@ -261,6 +264,7 @@ function coalitionKey(row: TseRow): string {
     normalizeKey(value(row, "SG_UE") ?? value(row, "SG_UF")),
     normalizeKey(value(row, "DS_CARGO")),
     normalizeKey(value(row, "SG_PARTIDO")),
+    normalizeKey(value(row, "SQ_COLIGACAO")),
   ].join("|");
 }
 
@@ -378,13 +382,16 @@ class OfficialSourceMetadata {
     if (
       prior
       && (prior.sourceArchiveUrl !== sourceArchiveUrl
-        || prior.sourceExtractedAt?.getTime() !== extractedAt.getTime())
+        || (resource !== "campaignAccounts"
+          && prior.sourceExtractedAt?.getTime() !== extractedAt.getTime()))
     ) {
       fail("INCONSISTENT_SOURCE_METADATA");
     }
     this.#byResource.set(resource, {
       sourceArchiveUrl,
-      sourceExtractedAt: extractedAt,
+      sourceExtractedAt: prior?.sourceExtractedAt && prior.sourceExtractedAt > extractedAt
+        ? prior.sourceExtractedAt
+        : extractedAt,
       completed: false,
     });
     return extractedAt;
@@ -553,6 +560,9 @@ async function performSync(
       photoCheckedAt: null,
     }));
     const candidateByExternalId = new Map(candidates.map((candidate) => [candidate.externalId, candidate]));
+    const warnings: string[] = [];
+    let orphanTabularEntries = 0;
+    let duplicateSocialLinks = 0;
 
     const assets: ElectoralSnapshot["assets"] = [];
     await consumeResource(client, "assets", resources, sourceMetadata, (entry, extractedAt) => {
@@ -566,15 +576,28 @@ async function performSync(
       });
     });
     const socialLinks: ElectoralSnapshot["socialLinks"] = [];
+    const socialLinkKeys = new Set<string>();
     await consumeResource(client, "social", resources, sourceMetadata, (entry, extractedAt) => {
       assertRowYear(entry.row, options.electionYear);
       const mapped = mapSocialRow(entry.row);
-      if (mapped) socialLinks.push({
-        ...mapped,
-        sourceArchiveUrl: entry.sourceArchiveUrl,
-        sourceExtractedAt: extractedAt,
-        checkedAt: startedAt,
-      });
+      if (mapped) {
+        if (!candidateByExternalId.has(mapped.candidateExternalId)) {
+          orphanTabularEntries += 1;
+        } else {
+          const key = JSON.stringify([mapped.candidateExternalId, mapped.url]);
+          if (socialLinkKeys.has(key)) {
+            duplicateSocialLinks += 1;
+            return;
+          }
+          socialLinkKeys.add(key);
+          socialLinks.push({
+            ...mapped,
+            sourceArchiveUrl: entry.sourceArchiveUrl,
+            sourceExtractedAt: extractedAt,
+            checkedAt: startedAt,
+          });
+        }
+      }
     });
     const campaignByCandidateKindCategory = new Map<string, ElectoralSnapshot["campaignEntries"][number]>();
     const aggregateCampaignEntry = (
@@ -590,6 +613,10 @@ async function performSync(
     };
     await consumeResource(client, "campaignAccounts", resources, sourceMetadata, (entry, extractedAt) => {
       assertRowYear(entry.row, options.electionYear);
+      if (entry.entryKind === "campaignPaidExpenses") {
+        moneyToCents(value(entry.row, "VR_PAGTO_DESPESA") ?? fail("MISSING_CAMPAIGN_VALUE"));
+        return;
+      }
       const externalId = candidateExternalId(entry.row);
       if (!candidateByExternalId.has(externalId)) fail("ORPHAN_CAMPAIGN_ENTRY");
       const provenance = {
@@ -605,20 +632,27 @@ async function performSync(
         });
       } else if (entry.entryKind === "campaignContractedExpenses") {
         aggregateCampaignEntry({ ...mapCampaignExpenseRow(entry.row), ...provenance });
-      } else {
-        moneyToCents(value(entry.row, "VR_PAGTO") ?? fail("MISSING_CAMPAIGN_VALUE"));
       }
     });
-    const campaignEntries = [...campaignByCandidateKindCategory.values()];
+    const campaignSourceExtractedAt = sourceMetadata.timestamp("campaignAccounts");
+    const campaignEntries = [...campaignByCandidateKindCategory.values()].map((entry) => ({
+      ...entry,
+      sourceExtractedAt: campaignSourceExtractedAt ?? entry.sourceExtractedAt,
+    }));
     const extractedAt = candidateSourceExtractedAt;
 
     const governmentPlans: ElectoralSnapshot["governmentPlans"] = [];
     const documents: ElectoralSnapshot["documents"] = [];
+    let orphanMediaEntries = 0;
     for (const kind of mediaKinds) {
       for (const region of TSE_REGIONS) {
         for await (const entry of client.streamRegionalMedia(kind, region)) {
           const candidate = candidateByExternalId.get(entry.candidateExternalId);
-          if (!candidate) fail("ORPHAN_MEDIA_ENTRY");
+          if (!candidate) {
+            for await (const _chunk of entry.content) void _chunk;
+            orphanMediaEntries += 1;
+            continue;
+          }
           const storageKey = await mediaStore.stage(runId, entry);
           resources[kind] += 1;
           if (kind === "photos") {
@@ -658,6 +692,9 @@ async function performSync(
         }
       }
     }
+    if (orphanTabularEntries > 0) warnings.push("ORPHAN_TABULAR_ENTRIES_SKIPPED");
+    if (duplicateSocialLinks > 0) warnings.push("DUPLICATE_SOCIAL_LINKS_SKIPPED");
+    if (orphanMediaEntries > 0) warnings.push("ORPHAN_MEDIA_ENTRIES_SKIPPED");
 
     const snapshot: ElectoralSnapshot = {
       syncRunId: runId,
@@ -676,7 +713,6 @@ async function performSync(
     await repository.persistSnapshot(snapshot);
     persisted = true;
 
-    const warnings: string[] = [];
     try {
       const lawmakers = await repository.listLawmakersForCandidateReconciliation();
       const suggestions = reconcileCandidateLawmakers(candidates, lawmakers);

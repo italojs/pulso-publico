@@ -52,6 +52,21 @@ describe("ElectoralMediaStore", () => {
     expect(Buffer.concat(chunks).toString()).toBe("jpeg-data");
   });
 
+  it("stages and opens media for an official 11-digit candidate sequence", async () => {
+    const { store } = await createStore();
+    const entry = {
+      ...mediaEntry("jpeg-data", "FAC_12345678901_div.jpg"),
+      candidateExternalId: "12345678901",
+    };
+
+    const storageKey = await store.stage("safe-run", entry);
+    await store.publish("safe-run");
+    const chunks: Buffer[] = [];
+    for await (const chunk of store.open(storageKey)) chunks.push(Buffer.from(chunk));
+
+    expect(Buffer.concat(chunks).toString()).toBe("jpeg-data");
+  });
+
   it("publishes a prepared empty generation and removes only a named published generation", async () => {
     const { root, store } = await createStore();
     const keepKey = await store.stage("keep-run", mediaEntry("keep"));

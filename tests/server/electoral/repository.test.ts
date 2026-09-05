@@ -140,6 +140,7 @@ function snapshot(
         ...CandidateAssetRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
+        sourceOrder: 1,
         category: "Apartamento",
         description: "Imóvel residencial",
         valueCents: 25_000_000n,
@@ -152,6 +153,7 @@ function snapshot(
         ...CandidateAssetRecord.parse({
         electionYear: 2026,
         candidateExternalId: primaryCandidateId,
+        sourceOrder: 2,
         category: "Veículo",
         description: null,
         valueCents: 0n,
@@ -307,6 +309,51 @@ describe("ElectoralRepository", () => {
       expenseCents: null,
     }]);
   });
+
+  it("persists an unavailable re-election declaration as null", async () => {
+    const candidateSnapshot = snapshot("run-unknown-reelection", [candidate(primaryCandidateId, {
+      seekingReelection: null,
+    })]);
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({ seekingReelection: electoralCandidates.seekingReelection })
+      .from(electoralCandidates)).toEqual([{ seekingReelection: null }]);
+  });
+
+  it("persists a negative asset adjustment from the official source", async () => {
+    const candidateSnapshot = snapshot("run-negative-asset");
+    candidateSnapshot.assets[0] = { ...candidateSnapshot.assets[0]!, valueCents: -38101n };
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({ valueCents: candidateAssets.valueCents }).from(candidateAssets))
+      .toContainEqual({ valueCents: -38101n });
+  });
+
+  it("persists otherwise identical assets when their official order differs", async () => {
+    const candidateSnapshot = snapshot("run-distinct-asset-order");
+    candidateSnapshot.assets.push({
+      ...candidateSnapshot.assets[0]!,
+      sourceOrder: 3,
+    });
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({ id: candidateAssets.id }).from(candidateAssets)).toHaveLength(3);
+  });
+
+  it("persists a child collection larger than one PostgreSQL bind-parameter budget", async () => {
+    const candidateSnapshot = snapshot("run-large-asset-collection");
+    candidateSnapshot.assets = Array.from({ length: 9_000 }, (_, index) => ({
+      ...candidateSnapshot.assets[0]!,
+      sourceOrder: index + 1,
+    }));
+
+    await repository.persistSnapshot(candidateSnapshot);
+
+    expect(await testDb.select({ id: candidateAssets.id }).from(candidateAssets)).toHaveLength(9_000);
+  }, 30_000);
 
   it("persists multiple certificates for one candidate when each official URL identifies its file", async () => {
     const candidateSnapshot = snapshot("run-two-certificates");

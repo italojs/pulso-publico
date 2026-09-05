@@ -67,10 +67,55 @@ describe("TSE electoral mapping", () => {
     expect(candidate).not.toHaveProperty("processNumber");
   });
 
+  it("preserves the official pre-classification status gap as unavailable", async () => {
+    const candidate = mapCandidateRow({
+      ...await readFixture("candidates.csv"),
+      CD_SITUACAO_CANDIDATURA: "-3",
+      DS_SITUACAO_CANDIDATURA: "#NULO#",
+    }, checkedAt);
+
+    expect(candidate.status).toBe("Não informado pelo TSE");
+  });
+
+  it.each(["#NE", "Não divulgável"])(
+    "preserves unavailable re-election value %s without inferring no",
+    async (officialValue) => {
+      const candidate = mapCandidateRow({
+        ...await readFixture("candidates.csv"),
+        ST_REELEICAO: officialValue,
+      }, checkedAt);
+
+      expect(candidate.seekingReelection).toBeNull();
+    },
+  );
+
+  it("maps the national BR constituency to the DivulgaCand BRASIL region", async () => {
+    const candidate = mapCandidateRow({
+      ...await readFixture("candidates.csv"),
+      SG_UF: "BR",
+      SG_UE: "BR",
+      NM_UE: "BRASIL",
+      SG_REGIAO: "#NULO#",
+    }, checkedAt);
+
+    expect(candidate).toMatchObject({ region: "BR", electoralUnit: "BRASIL" });
+    expect(candidate.officialUrl).toContain("/candidato/BRASIL/BR/");
+  });
+
   it("converts Brazilian currency to exact centavos without conflating zero and invalid input", () => {
     expect(moneyToCents("1.234,56")).toBe(123456n);
     expect(moneyToCents("0,00")).toBe(0n);
+    expect(moneyToCents("-381,01")).toBe(-38101n);
     expect(() => moneyToCents("1,234")).toThrow(TseContractError);
+  });
+
+  it("preserves a negative asset adjustment declared by the official source", async () => {
+    const asset = mapAssetRow({
+      ...await readFixture("candidate-assets.csv"),
+      VR_BEM_CANDIDATO: "-381,01",
+    });
+
+    expect(asset.valueCents).toBe(-38101n);
   });
 
   it("preserves an explicitly declared zero-value asset", async () => {
@@ -78,9 +123,19 @@ describe("TSE electoral mapping", () => {
 
     expect(asset).toMatchObject({
       candidateExternalId: "260001234567",
+      sourceOrder: 1,
       valueCents: 0n,
       category: "Outros",
     });
+  });
+
+  it("preserves the official order that distinguishes otherwise identical assets", async () => {
+    const row = await readFixture("candidate-assets.csv");
+
+    expect([
+      mapAssetRow({ ...row, NR_ORDEM_BEM_CANDIDATO: "1" }),
+      mapAssetRow({ ...row, NR_ORDEM_BEM_CANDIDATO: "2" }),
+    ].map((asset) => asset.sourceOrder)).toEqual([1, 2]);
   });
 
   it("maps receipt and expense entries with their distinct declared kinds", async () => {

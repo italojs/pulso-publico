@@ -15,7 +15,7 @@ import type { TseMediaEntry } from "#/integrations/tse/client";
 import { TseContractError } from "#/integrations/tse/mapper";
 
 const validRunId = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
-const validCandidateId = /^\d{12}$/;
+const validCandidateId = /^\d{11,12}$/;
 
 function storageError(code: string): TseContractError {
   return new TseContractError(code);

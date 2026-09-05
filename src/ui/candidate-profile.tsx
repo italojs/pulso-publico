@@ -57,7 +57,7 @@ export function CandidateProfile({
           <dl className="candidateDeclaredGrid">
             <div><dt>Cargo e turno</dt><dd>{candidateOfficeLabels[candidate.office]} · {candidate.round}º turno</dd></div>
             <div><dt>Coligação</dt><dd>{value(candidate.coalition)}</dd></div>
-            <div><dt>Busca reeleição</dt><dd>{candidate.seekingReelection ? "Sim" : "Não"}</dd></div>
+            <div><dt>Busca reeleição</dt><dd>{candidate.seekingReelection === null ? "Não informado pelo TSE" : candidate.seekingReelection ? "Sim" : "Não"}</dd></div>
             <div><dt>Idade na posse</dt><dd>{candidate.ageAtInauguration === null ? "Não informada pelo TSE" : `${candidate.ageAtInauguration} anos`}</dd></div>
             <div><dt>Escolaridade</dt><dd>{value(candidate.education)}</dd></div>
             <div><dt>Ocupação</dt><dd>{value(candidate.occupation)}</dd></div>

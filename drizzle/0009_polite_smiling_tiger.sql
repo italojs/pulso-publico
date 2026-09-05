@@ -1,0 +1,1 @@
+ALTER TABLE "candidate_assets" ADD COLUMN "source_order" integer;

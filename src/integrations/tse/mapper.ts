@@ -50,10 +50,12 @@ const nullSentinels = new Set([
   "#NE#",
   "#N/A",
   "#N/D",
+  "NÃO DIVULGÁVEL",
   "-1",
 ]);
 
 const geographicRegionByUf: Record<string, string> = {
+  BR: "BRASIL",
   AC: "NORTE",
   AL: "NORDESTE",
   AP: "NORTE",
@@ -151,9 +153,9 @@ function parseCandidateExternalId(row: TseRow): string {
   return required(row, "SQ_CANDIDATO", "MISSING_CANDIDATE_ID");
 }
 
-function parseBoolean(value: string | undefined): boolean {
+function parseOptionalBoolean(value: string | undefined): boolean | null {
   const normalized = blankToNull(value);
-  if (!normalized) return false;
+  if (!normalized) return null;
   const parsed = booleanByTseLabel[normalizeTseLabel(normalized)];
   if (parsed === undefined) throw new TseContractError("INVALID_BOOLEAN");
   return parsed;
@@ -200,9 +202,11 @@ function selectFirst(row: TseRow, columns: readonly string[]): string | undefine
 
 export function moneyToCents(value: string): bigint {
   const normalized = value.trim().replaceAll(".", "").replace(",", ".");
-  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new TseContractError("INVALID_MONEY");
-  const [whole, fraction = ""] = normalized.split(".");
-  return BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0"));
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(normalized);
+  if (!match) throw new TseContractError("INVALID_MONEY");
+  const [, sign, whole, fraction = ""] = match;
+  const cents = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0"));
+  return sign === "-" ? -cents : cents;
 }
 
 export function mapCandidateRow(row: TseRow, checkedAt: string | Date): ElectoralCandidate {
@@ -214,7 +218,11 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
   const officeLabel = normalizeTseLabel(required(row, "DS_CARGO", "MISSING_OFFICE"));
   const office = officeByTseLabel[officeLabel];
   if (!office) throw new TseContractError("UNKNOWN_OFFICE");
-  const status = required(row, "DS_SITUACAO_CANDIDATURA", "MISSING_STATUS");
+  const declaredStatus = blankToNull(row.DS_SITUACAO_CANDIDATURA);
+  const status = declaredStatus
+    ?? (blankToNull(row.CD_SITUACAO_CANDIDATURA) === "-3"
+      ? "Não informado pelo TSE"
+      : required(row, "DS_SITUACAO_CANDIDATURA", "MISSING_STATUS"));
   const electoralUnit = blankToNull(row.SG_UE) ?? blankToNull(row.NM_UE) ?? region;
   const geographicRegion = blankToNull(row.SG_REGIAO) ?? geographicRegionByUf[region];
   if (!geographicRegion) throw new TseContractError("MISSING_GEOGRAPHIC_REGION");
@@ -238,7 +246,7 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
     partyName: blankToNull(row.NM_PARTIDO) ?? required(row, "SG_PARTIDO", "MISSING_PARTY_ACRONYM"),
     federation: blankToNull(row.NM_FEDERACAO),
     coalition: blankToNull(row.NM_COLIGACAO),
-    seekingReelection: parseBoolean(row.ST_REELEICAO),
+    seekingReelection: parseOptionalBoolean(row.ST_REELEICAO),
     birthDate: parseOptionalDate(row.DT_NASCIMENTO),
     ageAtInauguration: blankToNull(row.NR_IDADE_DATA_POSSE) === null
       ? null
@@ -264,9 +272,15 @@ export function mapCandidateRow(row: TseRow, checkedAt: string | Date): Electora
 }
 
 export function mapAssetRow(row: TseRow): CandidateAsset {
+  const sourceOrder = parseNonnegativeInteger(
+    required(row, "NR_ORDEM_BEM_CANDIDATO", "MISSING_ASSET_ORDER"),
+    "INVALID_ASSET_ORDER",
+  );
+  if (sourceOrder < 1) throw new TseContractError("INVALID_ASSET_ORDER");
   return CandidateAssetRecord.parse({
     electionYear: parseElectionYear(row),
     candidateExternalId: parseCandidateExternalId(row),
+    sourceOrder,
     category: required(row, "DS_TIPO_BEM_CANDIDATO", "MISSING_ASSET_CATEGORY"),
     description: blankToNull(row.DS_BEM_CANDIDATO),
     valueCents: moneyToCents(required(row, "VR_BEM_CANDIDATO", "MISSING_ASSET_VALUE")),

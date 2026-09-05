@@ -764,6 +764,7 @@ describe("candidate catalog", () => {
     expect(css).toMatch(/\.candidateGrid\s*\{[^}]*grid-template-columns:\s*repeat\(2/);
     expect(css).toMatch(/@media \(max-width: 720px\) \{[\s\S]*?\.candidateGrid\s*\{[^}]*grid-template-columns:\s*1fr/);
     expect(css).toMatch(/@media \(max-width: 720px\) \{[\s\S]*?\.candidateAdvancedFilters\s*\{[^}]*width:\s*100vw/);
+    expect(css).toMatch(/@media \(max-width: 420px\) \{[\s\S]*?\.siteNav__account span\s*\{[^}]*width:\s*1px/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.candidateAdvancedFilters,\s*\.candidateAdvancedFilters::backdrop\s*\{[^}]*animation-duration/);
   });
 });

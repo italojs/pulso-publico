@@ -324,6 +324,16 @@ describe("candidate analytical profile", () => {
     expect(screen.getByText("Não existe histórico parlamentar confirmado para esta candidatura.")).toBeVisible();
     expect(screen.queryByText("R$ 0,00")).not.toBeInTheDocument();
   });
+
+  it("does not render an unavailable re-election declaration as no", () => {
+    render(<CandidateProfile candidate={{
+      ...detail,
+      seekingReelection: null,
+    }} />);
+
+    const label = screen.getByText("Busca reeleição");
+    expect(label.parentElement).toHaveTextContent("Não informado pelo TSE");
+  });
 });
 
 describe("candidate profile page", () => {

@@ -31,7 +31,7 @@ export const ElectoralCandidateRecord = z.object({
   partyName: z.string().min(1),
   federation: z.string().nullable(),
   coalition: z.string().nullable(),
-  seekingReelection: z.boolean(),
+  seekingReelection: z.boolean().nullable(),
   birthDate: z.iso.date().nullable(),
   ageAtInauguration: z.number().int().nonnegative().nullable(),
   gender: z.string().nullable(),
@@ -49,9 +49,10 @@ export const ElectoralCandidateRecord = z.object({
 export const CandidateAssetRecord = z.object({
   electionYear: z.number().int().min(2026),
   candidateExternalId: z.string().min(1),
+  sourceOrder: z.number().int().positive(),
   category: z.string().min(1),
   description: z.string().nullable(),
-  valueCents: z.bigint().nonnegative(),
+  valueCents: z.bigint(),
 }).strict();
 
 export const CampaignEntryKind = z.enum(["receipt", "expense"]);

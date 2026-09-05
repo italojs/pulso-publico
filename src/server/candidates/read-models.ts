@@ -244,7 +244,7 @@ export interface CandidateDetailPagination {
 }
 
 export interface PublicCandidateDetail extends PublicCandidateCard {
-  seekingReelection: boolean;
+  seekingReelection: boolean | null;
   birthDate: string | null;
   ageAtInauguration: number | null;
   gender: string | null;

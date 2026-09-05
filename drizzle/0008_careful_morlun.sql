@@ -1,0 +1,1 @@
+ALTER TABLE "electoral_candidates" ALTER COLUMN "seeking_reelection" DROP NOT NULL;

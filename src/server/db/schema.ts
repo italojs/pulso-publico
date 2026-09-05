@@ -434,7 +434,7 @@ export const electoralCandidates = pgTable("electoral_candidates", {
   partyName: text("party_name").notNull(),
   federation: text("federation"),
   coalition: text("coalition"),
-  seekingReelection: boolean("seeking_reelection").notNull(),
+  seekingReelection: boolean("seeking_reelection"),
   birthDate: date("birth_date"),
   ageAtInauguration: integer("age_at_inauguration"),
   gender: text("gender"),
@@ -476,6 +476,7 @@ export const electoralCandidates = pgTable("electoral_candidates", {
 export const candidateAssets = pgTable("candidate_assets", {
   id: uuid("id").defaultRandom().primaryKey(),
   candidateId: uuid("candidate_id").notNull().references(() => electoralCandidates.id, { onDelete: "cascade" }),
+  sourceOrder: integer("source_order"),
   category: text("category").notNull(),
   description: text("description"),
   valueCents: bigint("value_cents", { mode: "bigint" }).notNull(),

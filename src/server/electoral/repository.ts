@@ -117,6 +117,13 @@ interface CampaignAggregate {
 
 const validSyncRunId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const validErrorCode = /^[A-Z][A-Z0-9_]{0,63}$/;
+const postgresInsertBatchSize = 500;
+
+function* batches<T>(values: readonly T[]): Generator<readonly T[]> {
+  for (let offset = 0; offset < values.length; offset += postgresInsertBatchSize) {
+    yield values.slice(offset, offset + postgresInsertBatchSize);
+  }
+}
 
 function asDate(value: DateInput, field: string): Date {
   const result = value instanceof Date ? value : new Date(value);
@@ -309,8 +316,11 @@ function assertSnapshot(
     if (asset.electionYear !== snapshot.electionYear || !candidates.has(asset.candidateExternalId)) {
       throw new Error(`Asset references absent candidate ${asset.candidateExternalId}`);
     }
-    if (typeof asset.valueCents !== "bigint" || asset.valueCents < 0n) {
-      throw new Error("Asset money must be a non-negative bigint");
+    if (typeof asset.valueCents !== "bigint") {
+      throw new Error("Asset money must be a bigint");
+    }
+    if (!Number.isSafeInteger(asset.sourceOrder) || asset.sourceOrder < 1) {
+      throw new Error("Asset source order must be a positive integer");
     }
     assertResourceTimestamp(asset.sourceExtractedAt, provenance.assets.sourceExtractedAt, "asset");
     assertResourceArchiveUrl(
@@ -320,6 +330,7 @@ function assertSnapshot(
     );
     const key = JSON.stringify([
       asset.candidateExternalId,
+      asset.sourceOrder,
       asset.category,
       asset.description,
       asset.valueCents.toString(),
@@ -649,21 +660,19 @@ export class ElectoralRepository {
         candidateIds.set(candidate.externalId, stored.id);
       }
 
-      const electionCandidates = await tx.select({ id: electoralCandidates.id })
+      const electionCandidateIds = tx.select({ id: electoralCandidates.id })
         .from(electoralCandidates)
         .where(eq(electoralCandidates.electionYear, snapshot.electionYear));
-      const electionCandidateIds = electionCandidates.map(({ id }) => id);
-      if (electionCandidateIds.length > 0) {
-        await tx.delete(candidateAssets).where(inArray(candidateAssets.candidateId, electionCandidateIds));
-        await tx.delete(candidateCampaignTotals).where(inArray(candidateCampaignTotals.candidateId, electionCandidateIds));
-        await tx.delete(candidateSocialLinks).where(inArray(candidateSocialLinks.candidateId, electionCandidateIds));
-        await tx.delete(candidateGovernmentPlans).where(inArray(candidateGovernmentPlans.candidateId, electionCandidateIds));
-        await tx.delete(candidateDocuments).where(inArray(candidateDocuments.candidateId, electionCandidateIds));
-      }
+      await tx.delete(candidateAssets).where(inArray(candidateAssets.candidateId, electionCandidateIds));
+      await tx.delete(candidateCampaignTotals).where(inArray(candidateCampaignTotals.candidateId, electionCandidateIds));
+      await tx.delete(candidateSocialLinks).where(inArray(candidateSocialLinks.candidateId, electionCandidateIds));
+      await tx.delete(candidateGovernmentPlans).where(inArray(candidateGovernmentPlans.candidateId, electionCandidateIds));
+      await tx.delete(candidateDocuments).where(inArray(candidateDocuments.candidateId, electionCandidateIds));
 
-      if (snapshot.assets.length > 0) {
-        await tx.insert(candidateAssets).values(snapshot.assets.map((asset) => ({
+      for (const batch of batches(snapshot.assets)) {
+        await tx.insert(candidateAssets).values(batch.map((asset) => ({
           candidateId: candidateIds.get(asset.candidateExternalId)!,
+          sourceOrder: asset.sourceOrder,
           category: asset.category,
           description: asset.description,
           valueCents: asset.valueCents,
@@ -674,8 +683,8 @@ export class ElectoralRepository {
       }
 
       const campaign = aggregateCampaign(snapshot.campaignEntries, extractedAt, candidateByExternalId);
-      if (campaign.length > 0) {
-        await tx.insert(candidateCampaignTotals).values(campaign.map((total) => ({
+      for (const batch of batches(campaign)) {
+        await tx.insert(candidateCampaignTotals).values(batch.map((total) => ({
           candidateId: candidateIds.get(total.candidateExternalId)!,
           revenueCents: total.revenueCents,
           expenseCents: total.expenseCents,
@@ -688,8 +697,8 @@ export class ElectoralRepository {
         })));
       }
 
-      if (snapshot.socialLinks.length > 0) {
-        await tx.insert(candidateSocialLinks).values(snapshot.socialLinks.map((link) => ({
+      for (const batch of batches(snapshot.socialLinks)) {
+        await tx.insert(candidateSocialLinks).values(batch.map((link) => ({
           candidateId: candidateIds.get(link.candidateExternalId)!,
           label: link.label,
           url: link.url,
@@ -699,8 +708,8 @@ export class ElectoralRepository {
         })));
       }
 
-      if (snapshot.governmentPlans.length > 0) {
-        await tx.insert(candidateGovernmentPlans).values(snapshot.governmentPlans.map((plan) => ({
+      for (const batch of batches(snapshot.governmentPlans)) {
+        await tx.insert(candidateGovernmentPlans).values(batch.map((plan) => ({
           candidateId: candidateIds.get(plan.candidateExternalId)!,
           officialUrl: plan.officialUrl,
           storageKey: plan.storageKey,
@@ -712,8 +721,8 @@ export class ElectoralRepository {
         })));
       }
 
-      if (snapshot.documents.length > 0) {
-        await tx.insert(candidateDocuments).values(snapshot.documents.map((document) => ({
+      for (const batch of batches(snapshot.documents)) {
+        await tx.insert(candidateDocuments).values(batch.map((document) => ({
           candidateId: candidateIds.get(document.candidateExternalId)!,
           label: document.label,
           officialUrl: document.officialUrl,

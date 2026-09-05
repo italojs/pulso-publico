@@ -1029,6 +1029,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .candidateComparison__scope { padding: 18px; }
 }
 
+@media (max-width: 420px) {
+  .siteNav { gap: 6px; }
+  .siteNav__account span {
+    position: absolute !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    clip: rect(0 0 0 0) !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .candidateAdvancedFilters, .candidateAdvancedFilters::backdrop { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
   .advancedFilters, .advancedFilters::backdrop { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
