@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementada sobre a base `f6d63d3`, com a fatia inicial no commit `3b703e6` (`feat: synchronize TSE election data`) e a primeira rodada de correções de revisão no commit `f23e7cf` (`fix: enforce complete electoral sync contracts`). Nenhuma parte da Task 5 foi iniciada.
+Implementada sobre a base `f6d63d3`, com a fatia inicial no commit `3b703e6` (`feat: synchronize TSE election data`), a primeira rodada de correções no commit `f23e7cf` (`fix: enforce complete electoral sync contracts`) e a segunda rodada no commit `e75e282` (`fix: version electoral resources independently`). Nenhuma parte da Task 5 foi iniciada.
 
 ## Arquivos
 
@@ -85,7 +85,7 @@ O teste de integração do repositório para duas certidões com URLs oficiais d
 ### Correções e decisões
 
 - `TseOpenDataClient.streamResource` agora emite linhas tipadas e exatamente um manifesto após o consumo completo do ZIP. O manifesto registra a presença das entradas oficiais, não a quantidade de linhas; portanto um CSV válido apenas com cabeçalho ainda satisfaz o subtipo, enquanto a ausência de receitas, despesas contratadas ou despesas pagas falha com `MISSING_CAMPAIGN_SUBTYPE` antes da publicação.
-- Cada linha dos seis recursos tabulares precisa conter `DT_GERACAO` e `HH_GERACAO` válidos. A consistência é estrita dentro de cada recurso; como arquivos oficiais independentes podem ser gerados em instantes diferentes, o instante do snapshot é o máximo determinístico entre os seis recursos. Proveniências de bens, redes e contas conservam o instante do próprio recurso. Datas impossíveis, formato inválido, metadata ausente ou divergente falham com códigos estáveis.
+- Cada linha dos seis recursos tabulares precisa conter `DT_GERACAO` e `HH_GERACAO` válidos. A consistência é estrita dentro de cada recurso. Nesta rodada inicial o instante do snapshot foi definido como o máximo determinístico; a rodada 2 abaixo substitui essa decisão pelo instante específico de candidatos e persiste as seis versões independentemente.
 - A proteção contra snapshot antigo usa o instante oficial calculado, e não `startedAt`. O horário local continua somente como `checkedAt` e timestamps operacionais.
 - Propostas e certidões recebem uma identidade pública estável por entrada, preservando o host oficial do TSE e adicionando o nome do arquivo no fragmento da URL do arquivo oficial. Assim, duas certidões da mesma candidatura persistem separadamente sob a restrição `(candidate_id, official_url)`, sem alteração de schema.
 - O enriquecimento de coligação/federação preserva valores declarados equivalentes e falha com `CONFLICTING_COALITION_ENRICHMENT` quando encontra divergência. Divergências entre linhas da própria fonte de coligações continuam falhando com `CONFLICTING_COALITION_MATCH`.
@@ -107,3 +107,48 @@ Todos os comandos usaram Node `26.8.1` e, nos testes de integração, `TEST_DATA
 
 - A carga nacional real continua não executada nesta etapa; o contrato foi validado com arquivos ZIP e streams controlados, incluindo entradas sem linhas, duas certidões, metadata oficial e todas as regiões.
 - A identidade pública por fragmento depende do nome da entrada no ZIP permanecer estável para manter a mesma URL entre cargas, embora continue apontando para o arquivo oficial do TSE e não exija alteração de schema.
+
+## Rodada de revisão 2/5
+
+### Achados reproduzidos em RED
+
+Com Node 26 e o banco de teste configurado, foi executado:
+
+`npm test -- tests/integrations/tse/client.test.ts tests/jobs/sync-election.test.ts tests/server/electoral/repository.test.ts`
+
+O RED apresentou 8 falhas e 57 aprovações. As falhas demonstraram que:
+
+- o manifesto do cliente não carregava o instante oficial ou `null` para arquivos sem linhas;
+- o snapshot ainda escolhia o maior instante entre recursos;
+- uma prestação de contas completa, mas com os três subtipos vazios, era rejeitada;
+- não existia armazenamento das seis versões no run;
+- uma versão mais nova de candidatos podia esconder regressão de bens;
+- `null` atual podia substituir um timestamp financeiro conhecido;
+- a proveniência persistida dos blocos e a proveniência nula da mídia ainda não correspondiam ao contrato revisto.
+
+### Correções e decisões
+
+- Foi adicionada a coluna JSONB compacta `electoral_sync_runs.resource_provenance` pela migração `0007_smiling_mister_fear.sql`. O objeto contém exatamente candidatos, complementos, bens, coligações, redes sociais e prestação de contas, cada um com URL do arquivo oficial e timestamp ISO ou `null`.
+- O payload normalizado desse manifesto participa do fingerprint imutável. Uma repetição do mesmo `syncRunId` com apenas uma versão de recurso alterada é rejeitada como payload diferente.
+- Sob o lock transacional já existente por eleição, o repositório lê o manifesto do último run bem-sucedido e compara os seis recursos individualmente. Um timestamp conhecido atual precisa ser maior ou igual ao anterior. `null` é permitido na primeira publicação, mas não pode substituir um valor conhecido.
+- `snapshot.extractedAt` passou a ser exatamente o timestamp oficial do recurso de candidatos. Cada candidatura recebe esse mesmo valor; bens, redes sociais e contas recebem o timestamp do seu recurso. O repositório valida essas correspondências antes de abrir a transação.
+- Fotos, propostas e certidões não expõem `DT_GERACAO`/`HH_GERACAO` em suas entradas. O job agora persiste `sourceExtractedAt: null` para esses blocos e mantém `startedAt` apenas como horário local de checagem/início.
+- `TseOpenDataClient` emite no manifesto `sourceExtractedAt: Date | null`. Entradas com linhas produzem o timestamp oficial normalizado e divergências são rejeitadas; um CSV válido somente com cabeçalho produz `null` sem perder a confirmação de presença do subtipo.
+- Um arquivo de prestação de contas com receitas, despesas contratadas e despesas pagas presentes, todos vazios, publica snapshot sem totais financeiros e com a versão financeira nula.
+- O parser de `DT_GERACAO`/`HH_GERACAO` foi centralizado no mapper e continua usando `Temporal`/`America/Sao_Paulo`, rejeitando metadata ausente, parcial, impossível ou inconsistente com códigos estáveis.
+
+### GREEN e verificação da rodada
+
+Todos os comandos usaram `PATH=/Users/italojose/.local/share/fnm/node-versions/v26.8.1/installation/bin:$PATH`. Os testes de integração usaram `TEST_DATABASE_URL=postgres://italojose@127.0.0.1:5435/legislativo_codex_test`.
+
+- Testes focados finais: 4 arquivos, 74 testes aprovados, 0 falhas.
+- A migração Drizzle foi aplicada duas vezes consecutivas ao banco de teste; ambas as execuções terminaram com sucesso.
+- Suíte completa: 39 arquivos, 337 testes aprovados, 0 falhas.
+- `npm run typecheck`: aprovado, 0 erros.
+- `git diff --check`: aprovado.
+- Commit de código e migração: `e75e282` (`fix: version electoral resources independently`).
+
+### Riscos remanescentes após a rodada
+
+- Runs bem-sucedidos criados antes da migração permanecem com manifesto `{}` porque as seis versões históricas não podem ser reconstruídas com segurança a partir do antigo timestamp agregado. A primeira sincronização nova estabelece as seis versões confiáveis; a comparação independente vale integralmente a partir dela.
+- Um recurso oficial vazio não oferece timestamp embutido e, portanto, fica explicitamente desconhecido (`null`). Essa ausência é preservada no fingerprint e nunca pode apagar um timestamp anteriormente conhecido.
