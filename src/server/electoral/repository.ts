@@ -223,9 +223,7 @@ function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value
       .map(canonicalize)
-      .sort((left, right) =>
-        (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? "", "en-US")
-      );
+      .sort(compareCanonicalized);
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
@@ -236,6 +234,16 @@ function canonicalize(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function compareCanonicalized(left: unknown, right: unknown): number {
+  return (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? "", "en-US");
+}
+
+function canonicalOrder<T>(values: readonly T[]): T[] {
+  return [...values].sort((left, right) =>
+    compareCanonicalized(canonicalize(left), canonicalize(right))
+  );
 }
 
 function fingerprintSnapshot(snapshot: ElectoralSnapshot): string {
@@ -272,7 +280,7 @@ function aggregateCampaign(
     checkedAt: Date;
   }>();
 
-  for (const entry of entries) {
+  for (const entry of canonicalOrder(entries)) {
     let aggregate = aggregates.get(entry.candidateExternalId);
     if (!aggregate) {
       aggregate = {

@@ -251,6 +251,50 @@ describe("ElectoralRepository", () => {
     }]);
   });
 
+  it("normalizes campaign provenance before treating reordered entries as an equivalent retry", async () => {
+    const provenanceA = {
+      ...CampaignEntryRecord.parse({
+        electionYear: 2026,
+        candidateExternalId: primaryCandidateId,
+        kind: "receipt",
+        category: "Doações",
+        valueCents: 100n,
+      }),
+      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-a.zip",
+      sourceExtractedAt: "2026-09-05T09:00:00.000Z",
+      checkedAt: "2026-09-05T10:00:00.000Z",
+    };
+    const provenanceB = {
+      ...CampaignEntryRecord.parse({
+        electionYear: 2026,
+        candidateExternalId: primaryCandidateId,
+        kind: "receipt",
+        category: "Doações",
+        valueCents: 200n,
+      }),
+      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-b.zip",
+      sourceExtractedAt: "2026-09-05T10:00:00.000Z",
+      checkedAt: "2026-09-05T11:00:00.000Z",
+    };
+    const firstAttempt = snapshot("campaign-provenance-run");
+    firstAttempt.campaignEntries = [provenanceB, provenanceA];
+    const reorderedRetry = snapshot("campaign-provenance-run");
+    reorderedRetry.campaignEntries = [provenanceA, provenanceB];
+
+    await repository.persistSnapshot(firstAttempt);
+    await expect(repository.persistSnapshot(reorderedRetry)).resolves.toBeUndefined();
+
+    expect(await testDb.select({
+      sourceArchiveUrl: candidateCampaignTotals.sourceArchiveUrl,
+      sourceExtractedAt: candidateCampaignTotals.sourceExtractedAt,
+      checkedAt: candidateCampaignTotals.checkedAt,
+    }).from(candidateCampaignTotals)).toEqual([{
+      sourceArchiveUrl: "https://cdn.tse.jus.br/campaign-a.zip",
+      sourceExtractedAt: new Date("2026-09-05T09:00:00.000Z"),
+      checkedAt: new Date("2026-09-05T10:00:00.000Z"),
+    }]);
+  });
+
   it("serializes concurrent publications and rejects an older run after the newer run commits", async () => {
     const suffix = crypto.randomUUID().replaceAll("-", "");
     const triggerName = `test_electoral_gate_${suffix}`;
