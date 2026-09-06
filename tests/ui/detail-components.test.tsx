@@ -2,27 +2,83 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectTimeline } from "#/ui/project-timeline";
 import { VoteEventCard } from "#/ui/vote-event";
 
+afterEach(cleanup);
+
 describe("project detail components", () => {
-  it("shows every timeline fact as official and links its source", () => {
+  it("opens a plain-language timeline that marks only the latest movement as current", () => {
+    render(<ProjectTimeline items={[
+      {
+        externalId: "m1",
+        occurredAt: "2026-04-22T19:23:00.000Z",
+        sequence: 1,
+        house: "camara",
+        bodyName: "Mesa Diretora",
+        statusLabel: "Aguardando Parecer",
+        description: "Apresentação do PL n. 1928/2026.",
+        officialUrl: "https://example.com/m1",
+      },
+      {
+        externalId: "m2",
+        occurredAt: "2026-09-03T19:36:00.000Z",
+        sequence: 14,
+        house: "camara",
+        bodyName: "CSAUDE",
+        statusLabel: "Aguardando Parecer",
+        description: "Designado Relator, Dep. General Girão (PL-RN).",
+        officialUrl: "https://example.com/m2",
+      },
+    ]} />);
+
+    expect(screen.getByRole("tab", { name: "Visão simplificada" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Projeto apresentado")).toBeInTheDocument();
+    expect(screen.getByText("Relator definido")).toBeInTheDocument();
+    expect(screen.getByText("Concluída")).toBeInTheDocument();
+    expect(screen.getByText("Etapa atual")).toBeInTheDocument();
+    expect(screen.getByText(/agora, o relator precisa apresentar sua análise/i)).toBeInTheDocument();
+    expect(screen.getByText("Responsável: Comissão de Saúde")).toBeInTheDocument();
+    expect(screen.queryByText("Apresentação do PL n. 1928/2026.")).not.toBeInTheDocument();
+  });
+
+  it("reveals every official timeline fact and source in the detailed view", () => {
     render(<ProjectTimeline items={[{
       externalId: "m1",
       occurredAt: "2026-08-30T14:00:00.000Z",
       sequence: 1,
       house: "camara",
       bodyName: "Comissão de Trabalho",
-      statusLabel: "Em análise",
+      statusLabel: "Aguardando Parecer",
       description: "Designado relator na comissão.",
       officialUrl: "https://example.com/m1",
     }]} />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Visão detalhada" }));
+
+    expect(screen.getByRole("tab", { name: "Visão detalhada" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Designado relator na comissão.")).toBeInTheDocument();
+    expect(screen.getByText("Aguardando Parecer")).toBeInTheDocument();
     expect(screen.getByText("Registro oficial")).toHaveAttribute("href", "https://example.com/m1");
+  });
+
+  it("uses a neutral fallback when a movement cannot be simplified safely", () => {
+    render(<ProjectTimeline items={[{
+      externalId: "m1",
+      occurredAt: "2026-08-30T14:00:00.000Z",
+      sequence: 1,
+      house: "senado",
+      bodyName: null,
+      statusLabel: null,
+      description: "Procedimento oficial sem classificação conhecida.",
+      officialUrl: "https://example.com/m1",
+    }]} />);
+
+    expect(screen.getByText("Movimentação registrada")).toBeInTheDocument();
+    expect(screen.getByText(/fonte oficial registrou uma atualização/i)).toBeInTheDocument();
   });
 
   it("does not infer individual votes when a vote was secret", () => {
