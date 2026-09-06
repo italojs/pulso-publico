@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { resolve } from "node:path";
 
+const optionalSecret = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().min(1).optional(),
+);
+
 const environmentSchema = z.object({
   DATABASE_URL: z.url().startsWith("postgres"),
   CAMARA_BASE_URL: z.url().default("https://dadosabertos.camara.leg.br/api/v2"),
@@ -12,12 +17,12 @@ const environmentSchema = z.object({
   ELECTORAL_MEDIA_DIRECTORY: z.string().min(1).default(".data/electoral-assets"),
   ELECTION_YEAR: z.coerce.number().int().min(2026).max(9999).default(2026),
   GEO_PROVIDER: z.enum(["none", "cloudflare", "vercel"]).default("none"),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  OPENAI_MODEL: z.string().min(1).optional(),
+  OPENAI_API_KEY: optionalSecret,
+  OPENAI_MODEL: optionalSecret,
   OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
-  VAPID_SUBJECT: z.string().min(1).optional(),
-  VAPID_PUBLIC_KEY: z.string().min(1).optional(),
-  VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+  VAPID_SUBJECT: optionalSecret,
+  VAPID_PUBLIC_KEY: optionalSecret,
+  VAPID_PRIVATE_KEY: optionalSecret,
 });
 
 export function parseEnv(input: Readonly<Record<string, string | undefined>>) {

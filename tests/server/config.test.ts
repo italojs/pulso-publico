@@ -25,6 +25,23 @@ describe("parseEnv", () => {
     expect(value.ELECTORAL_MEDIA_DIRECTORY.endsWith("/.data/electoral-assets")).toBe(true);
   });
 
+  it("treats empty optional secrets from an env file as not configured", () => {
+    const value = parseEnv({
+      DATABASE_URL: "postgres://app:app@localhost:5432/legislativo",
+      OPENAI_API_KEY: "",
+      OPENAI_MODEL: "",
+      VAPID_SUBJECT: "",
+      VAPID_PUBLIC_KEY: "",
+      VAPID_PRIVATE_KEY: "",
+    });
+
+    expect(value.OPENAI_API_KEY).toBeUndefined();
+    expect(value.OPENAI_MODEL).toBeUndefined();
+    expect(value.VAPID_SUBJECT).toBeUndefined();
+    expect(value.VAPID_PUBLIC_KEY).toBeUndefined();
+    expect(value.VAPID_PRIVATE_KEY).toBeUndefined();
+  });
+
   it("rejects an electoral year before 2026 and an unknown geo provider", () => {
     const database = { DATABASE_URL: "postgres://app:app@localhost:5432/legislativo" };
     expect(() => parseEnv({ ...database, ELECTION_YEAR: "2024" })).toThrow(/ELECTION_YEAR/);
