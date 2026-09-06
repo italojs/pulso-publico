@@ -4,6 +4,19 @@ import type { AiSummaryRepository } from "#/ai/repository";
 
 export async function generateSummaryBatch(repository: AiSummaryRepository, provider: BillSummaryProvider, limit = 20) {
   const pending = await repository.listPending(Math.min(Math.max(limit, 1), 100));
+  return generateSelectedSummaries(repository, provider, pending);
+}
+
+export async function generateTopFeedSummaryBatch(repository: AiSummaryRepository, provider: BillSummaryProvider, limit = 100) {
+  const pending = await repository.listPendingTopFeed(Math.min(Math.max(limit, 1), 100));
+  return generateSelectedSummaries(repository, provider, pending);
+}
+
+async function generateSelectedSummaries(
+  repository: AiSummaryRepository,
+  provider: BillSummaryProvider,
+  pending: Awaited<ReturnType<AiSummaryRepository["listPending"]>>,
+) {
   let generated = 0;
   const errors: Array<{ billId: string; code: string }> = [];
   for (const item of pending) {

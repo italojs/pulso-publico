@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AiSummaryRepository } from "#/ai/repository";
-import { generateSummaryBatch } from "#/jobs/generate-summaries";
+import { generateSummaryBatch, generateTopFeedSummaryBatch } from "#/jobs/generate-summaries";
 import { aiSummaries, bills } from "#/server/db/schema";
 import { migrateTestDatabase, testDb, testSql, truncateLegislativeTables } from "../setup-database.ts";
 
@@ -42,5 +42,75 @@ describe("summary generation job", () => {
     await expect(generateSummaryBatch(repository, provider, 10)).resolves.toMatchObject({ generated: 1 });
     expect(provider.generate).toHaveBeenCalledTimes(2);
     expect(await testDb.select().from(aiSummaries)).toHaveLength(1);
+  });
+
+  it("generates only missing summaries inside the requested top-feed window", async () => {
+    const checkedAt = new Date("2026-09-03T12:00:00Z");
+    const inserted = await testDb.insert(bills).values([
+      {
+        source: "camara",
+        externalId: "older",
+        officialCode: "PL 1/2026",
+        officialTitle: "Projeto de Lei nº 1, de 2026",
+        officialSummary: "Projeto mais antigo fora do recorte.",
+        originHouse: "camara",
+        currentHouse: "camara",
+        statusLabel: "Em análise",
+        officialUrl: "https://example.com/older",
+        presentedAt: new Date("2026-01-01T12:00:00Z"),
+        checkedAt,
+      },
+      {
+        source: "camara",
+        externalId: "newest",
+        officialCode: "PL 3/2026",
+        officialTitle: "Projeto de Lei nº 3, de 2026",
+        officialSummary: "Projeto mais recente do recorte.",
+        originHouse: "camara",
+        currentHouse: "camara",
+        statusLabel: "Em análise",
+        officialUrl: "https://example.com/newest",
+        presentedAt: new Date("2026-03-01T12:00:00Z"),
+        checkedAt,
+      },
+      {
+        source: "senado",
+        externalId: "middle",
+        officialCode: "PL 2/2026",
+        officialTitle: "Projeto de Lei nº 2, de 2026",
+        officialSummary: "Segundo projeto dentro do recorte.",
+        originHouse: "senado",
+        currentHouse: "senado",
+        statusLabel: "Em análise",
+        officialUrl: "https://example.com/middle",
+        presentedAt: new Date("2026-02-01T12:00:00Z"),
+        checkedAt,
+      },
+    ]).returning();
+    const newest = inserted.find((bill) => bill.externalId === "newest");
+    if (!newest) throw new Error("newest bill not seeded");
+
+    const provider = {
+      model: "test-model",
+      generate: vi.fn().mockImplementation(async (input: { officialCode: string }) => ({
+        friendlyTitle: `Explicação simples para ${input.officialCode}`,
+        shortDescription: "Descrição simples, neutra e baseada somente nos dados oficiais.",
+      })),
+    };
+    const repository = new AiSummaryRepository(testDb);
+
+    await expect(generateTopFeedSummaryBatch(repository, provider, 1)).resolves.toMatchObject({
+      selected: 1,
+      generated: 1,
+    });
+    expect(provider.generate).toHaveBeenCalledWith(expect.objectContaining({ officialCode: "PL 3/2026" }));
+
+    await expect(generateTopFeedSummaryBatch(repository, provider, 1)).resolves.toMatchObject({
+      selected: 0,
+      generated: 0,
+    });
+    expect(await testDb.select().from(aiSummaries)).toEqual([
+      expect.objectContaining({ billId: newest.id }),
+    ]);
   });
 });

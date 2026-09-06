@@ -39,14 +39,14 @@ npm run build
 npm run sync
 npm run sync:election
 npm run reconcile -- --source=all
-npm run summaries -- 20
+npm run summaries -- 100
 npm run alerts:dispatch
 ```
 
 - `sync`: atualização incremental das duas casas e tentativa de entrega de push;
 - `sync:election`: retrato completo e atômico das candidaturas de 2026 a partir dos arquivos oficiais do TSE;
 - `reconcile`: reconciliação diária da janela oficial do dia anterior;
-- `summaries`: geração opcional em lote, ignorada com segurança sem chave;
+- `summaries`: gera e atualiza títulos e descrições simples somente para a janela superior do feed (100 projetos por padrão), ignorada com segurança sem chave;
 - `alerts:dispatch`: reenvio dos pushes pendentes, também inofensivo sem VAPID.
 
 Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a cada 30 minutos e `npm run reconcile -- --source=all` uma vez ao dia. A página oficial de estatísticas eleitorais informa quatro atualizações diárias para os conjuntos de 2026; programe `npm run sync:election` depois dessas janelas conforme a capacidade de rede e armazenamento. Os sincronizadores usam advisory lock no PostgreSQL para impedir execuções concorrentes.

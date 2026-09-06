@@ -2,7 +2,7 @@ import { loadEnvFile } from "node:process";
 
 try { loadEnvFile(".env"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 
-const [{ AiSummaryRepository }, { OpenAiSummaryProvider }, { generateSummaryBatch }, { env }, database] = await Promise.all([
+const [{ AiSummaryRepository }, { OpenAiSummaryProvider }, { generateTopFeedSummaryBatch }, { env }, database] = await Promise.all([
   import("#/ai/repository"),
   import("#/ai/openai-provider"),
   import("#/jobs/generate-summaries"),
@@ -21,6 +21,6 @@ const provider = new OpenAiSummaryProvider({
   model: env.OPENAI_MODEL,
   baseUrl: env.OPENAI_BASE_URL,
 });
-const result = await generateSummaryBatch(new AiSummaryRepository(database.db), provider, Number(process.argv[2] ?? 20));
+const result = await generateTopFeedSummaryBatch(new AiSummaryRepository(database.db), provider, Number(process.argv[2] ?? 100));
 console.log(JSON.stringify(result));
 await database.sql.end();
