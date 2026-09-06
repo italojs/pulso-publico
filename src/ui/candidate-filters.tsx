@@ -54,6 +54,7 @@ function safePreservedParams(filters: CandidateFilters, comparison?: CandidateCo
 
 export function CandidateFilters({ authenticated, comparison, filters, options, regionOrigin }: Readonly<CandidateFiltersProps>) {
   const router = useRouter();
+  const appliedFiltersKey = buildCandidateCatalogHref(filters, 1, comparison);
   const [query, setQuery] = useState(filters.query ?? "");
   const [offices, setOffices] = useState<CandidateOffice[]>(filters.offices ?? []);
   const [regions, setRegions] = useState<string[]>(filters.regions ?? []);
@@ -66,7 +67,7 @@ export function CandidateFilters({ authenticated, comparison, filters, options, 
     setRegions(filters.regions ?? []);
     setParties(filters.parties ?? []);
     setAllBrazil(filters.allBrazil === true);
-  }, [filters]);
+  }, [appliedFiltersKey]);
 
   const quickFilters: CandidateFilters = {
     ...filters,
@@ -103,7 +104,7 @@ export function CandidateFilters({ authenticated, comparison, filters, options, 
           <input
             id="candidate-search"
             maxLength={200}
-            name={query ? "q" : undefined}
+            name="q"
             onChange={(event) => setQuery(event.currentTarget.value)}
             placeholder="Nome civil, nome de urna ou número"
             type="search"
@@ -114,21 +115,21 @@ export function CandidateFilters({ authenticated, comparison, filters, options, 
         <fieldset className="quickFilters candidateQuickFilters">
           <legend className="srOnly">Filtros padrão</legend>
           <label>Cargo
-            <select name={offices.length ? "cargo" : undefined} onChange={(event) => setOffices(event.currentTarget.value ? [event.currentTarget.value as CandidateOffice] : [])} value={offices[0] ?? ""}>
+            <select name="cargo" onChange={(event) => setOffices(event.currentTarget.value ? [event.currentTarget.value as CandidateOffice] : [])} value={offices[0] ?? ""}>
               <option value="">Todos</option>
               {officeOptions(options.offices, offices).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             {offices.slice(1).map((value) => <input key={value} name="cargo" type="hidden" value={value} />)}
           </label>
           <label>UF
-            <select name={regions.length ? "uf" : undefined} onChange={(event) => changeRegion(event.currentTarget.value)} value={regions[0] ?? ""}>
+            <select name="uf" onChange={(event) => changeRegion(event.currentTarget.value)} value={regions[0] ?? ""}>
               <option value="">Brasil inteiro</option>
               {textOptions(options.regions, regions).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             {regions.slice(1).map((value) => <input key={value} name="uf" type="hidden" value={value} />)}
           </label>
           <label>Partido
-            <select name={parties.length ? "partido" : undefined} onChange={(event) => setParties(event.currentTarget.value ? [event.currentTarget.value] : [])} value={parties[0] ?? ""}>
+            <select name="partido" onChange={(event) => setParties(event.currentTarget.value ? [event.currentTarget.value] : [])} value={parties[0] ?? ""}>
               <option value="">Todos</option>
               {textOptions(options.parties, parties).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>

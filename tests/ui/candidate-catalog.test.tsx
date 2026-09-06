@@ -264,6 +264,48 @@ describe("candidate catalog", () => {
     expect(within(dialog).getByRole("checkbox", { name: "Trabalho" })).toBeChecked();
   });
 
+  it("keeps an unsubmitted draft when equivalent filter props receive a new identity", () => {
+    const view = renderFilters({ allBrazil: true });
+    const form = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
+
+    fireEvent.change(within(form).getByRole("searchbox", { name: "Buscar candidatos" }), {
+      target: { value: "HADDAD" },
+    });
+    fireEvent.change(within(form).getByRole("combobox", { name: "Cargo" }), {
+      target: { value: "deputado_federal" },
+    });
+    fireEvent.change(within(form).getByRole("combobox", { name: "Partido" }), {
+      target: { value: "ABC" },
+    });
+
+    view.rerender(
+      <CandidateFiltersPanel
+        authenticated
+        filters={{ allBrazil: true }}
+        options={options}
+      />,
+    );
+
+    expect(within(form).getByRole("searchbox", { name: "Buscar candidatos" })).toHaveValue("HADDAD");
+    expect(within(form).getByRole("combobox", { name: "Cargo" })).toHaveValue("deputado_federal");
+    expect(within(form).getByRole("combobox", { name: "Partido" })).toHaveValue("ABC");
+
+    fireEvent.submit(form);
+    expect(routerPush).toHaveBeenCalledWith(
+      "/candidatos?abrangencia=brasil&q=HADDAD&cargo=deputado_federal&partido=ABC",
+    );
+  });
+
+  it("keeps standard controls named so native GET submission applies their current values", () => {
+    renderFilters({ allBrazil: true });
+    const form = screen.getByRole("form", { name: "Filtros padrão de candidatos" });
+
+    expect(within(form).getByRole("searchbox", { name: "Buscar candidatos" })).toHaveAttribute("name", "q");
+    expect(within(form).getByRole("combobox", { name: "Cargo" })).toHaveAttribute("name", "cargo");
+    expect(within(form).getByRole("combobox", { name: "UF" })).toHaveAttribute("name", "uf");
+    expect(within(form).getByRole("combobox", { name: "Partido" })).toHaveAttribute("name", "partido");
+  });
+
   it("exposes every supported advanced group with explicit accessible labels", () => {
     renderFilters();
     const dialog = openAdvanced();

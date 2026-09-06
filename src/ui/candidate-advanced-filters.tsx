@@ -258,6 +258,7 @@ export interface CandidateAdvancedFiltersProps {
 
 export function CandidateAdvancedFilters({ authenticated, comparison, filters, options }: Readonly<CandidateAdvancedFiltersProps>) {
   const router = useRouter();
+  const appliedFiltersKey = buildCandidateCatalogHref(filters, 1, comparison);
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(() => candidateDraft(filters));
   const [moneyInputs, setMoneyInputs] = useState(() => moneyDraft(filters));
@@ -281,7 +282,7 @@ export function CandidateAdvancedFilters({ authenticated, comparison, filters, o
     setMoneyInputs(moneyDraft(filters));
     setLastValidCount(undefined);
     setPreviewState("idle");
-  }, [filters]);
+  }, [appliedFiltersKey]);
 
   const update = <K extends keyof CandidateFilters>(key: K, value: CandidateFilters[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
