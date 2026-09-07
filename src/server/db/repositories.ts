@@ -6,6 +6,7 @@ import { detectAlertCandidates } from "#/alerts/detect-events";
 import {
   classifySimplifiedStage,
   classifyVoteResult,
+  normalizeProposalType,
   parseProposalIdentity,
 } from "#/domain/bill-facets";
 
@@ -21,9 +22,11 @@ import type {
 } from "#/domain/legislative";
 import {
   billAuthors,
+  billHydrationState,
   bills,
   billTopics,
   followedBills,
+  historicalImportCheckpoints,
   individualVotes,
   lawmakers,
   movements,
@@ -377,6 +380,268 @@ export class LegislativeRepository {
       .where(eq(syncCheckpoints.source, source))
       .limit(1);
     return checkpoint?.value ?? null;
+  }
+
+  async getHistoricalCheckpoint(
+    source: LegislativeSourceName,
+    dataset: string,
+    year: number,
+  ) {
+    const [checkpoint] = await this.database
+      .select()
+      .from(historicalImportCheckpoints)
+      .where(and(
+        eq(historicalImportCheckpoints.source, source),
+        eq(historicalImportCheckpoints.dataset, dataset),
+        eq(historicalImportCheckpoints.year, year),
+      ))
+      .limit(1);
+    return checkpoint ?? null;
+  }
+
+  async startHistoricalCheckpoint(
+    source: LegislativeSourceName,
+    dataset: string,
+    year: number,
+    attemptedAt: Date,
+  ) {
+    await this.database
+      .insert(historicalImportCheckpoints)
+      .values({
+        source,
+        dataset,
+        year,
+        status: "running",
+        recordsRead: 0,
+        recordsPersisted: 0,
+        lastAttemptAt: attemptedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          historicalImportCheckpoints.source,
+          historicalImportCheckpoints.dataset,
+          historicalImportCheckpoints.year,
+        ],
+        set: {
+          status: "running",
+          recordsRead: 0,
+          recordsPersisted: 0,
+          lastAttemptAt: attemptedAt,
+          completedAt: null,
+          errorCode: null,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async completeHistoricalCheckpoint(
+    source: LegislativeSourceName,
+    dataset: string,
+    year: number,
+    recordsRead: number,
+    recordsPersisted: number,
+    completedAt: Date,
+  ) {
+    await this.database
+      .update(historicalImportCheckpoints)
+      .set({
+        status: "complete",
+        recordsRead,
+        recordsPersisted,
+        completedAt,
+        errorCode: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(historicalImportCheckpoints.source, source),
+        eq(historicalImportCheckpoints.dataset, dataset),
+        eq(historicalImportCheckpoints.year, year),
+      ));
+  }
+
+  async failHistoricalCheckpoint(
+    source: LegislativeSourceName,
+    dataset: string,
+    year: number,
+    recordsRead: number,
+    recordsPersisted: number,
+    errorCode: string,
+    failedAt: Date,
+  ) {
+    await this.database
+      .update(historicalImportCheckpoints)
+      .set({
+        status: "failed",
+        recordsRead,
+        recordsPersisted,
+        lastAttemptAt: failedAt,
+        completedAt: null,
+        errorCode: boundedErrorCode(errorCode),
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(historicalImportCheckpoints.source, source),
+        eq(historicalImportCheckpoints.dataset, dataset),
+        eq(historicalImportCheckpoints.year, year),
+      ));
+  }
+
+  async getBillIdentity(source: LegislativeSourceName, externalId: string) {
+    const [stored] = await this.database
+      .select({
+        id: bills.id,
+        source: bills.source,
+        externalId: bills.externalId,
+        proposalType: bills.proposalType,
+        proposalNumber: bills.proposalNumber,
+        proposalYear: bills.proposalYear,
+        congressionalKey: bills.congressionalKey,
+        originHouse: bills.originHouse,
+        currentHouse: bills.currentHouse,
+        checkedAt: bills.checkedAt,
+      })
+      .from(bills)
+      .where(and(eq(bills.source, source), eq(bills.externalId, externalId)))
+      .limit(1);
+    return stored ?? null;
+  }
+
+  async findBillByOfficialIdentity(
+    source: LegislativeSourceName,
+    proposalType: string,
+    proposalNumber: number,
+    proposalYear: number,
+  ) {
+    const normalizedType = normalizeProposalType(proposalType);
+    if (!normalizedType) return null;
+    const [stored] = await this.database
+      .select()
+      .from(bills)
+      .where(and(
+        eq(bills.source, source),
+        eq(bills.proposalType, normalizedType),
+        eq(bills.proposalNumber, proposalNumber),
+        eq(bills.proposalYear, proposalYear),
+      ))
+      .limit(1);
+    return stored ?? null;
+  }
+
+  async getHydrationState(source: LegislativeSourceName, externalId: string) {
+    const [stored] = await this.database
+      .select({
+        status: billHydrationState.status,
+        detailsCheckedAt: billHydrationState.detailsCheckedAt,
+        lastRequestedAt: billHydrationState.lastRequestedAt,
+        nextRetryAt: billHydrationState.nextRetryAt,
+        errorCode: billHydrationState.errorCode,
+        updatedAt: billHydrationState.updatedAt,
+      })
+      .from(billHydrationState)
+      .innerJoin(bills, eq(billHydrationState.billId, bills.id))
+      .where(and(eq(bills.source, source), eq(bills.externalId, externalId)))
+      .limit(1);
+    return stored ?? null;
+  }
+
+  private async billId(source: LegislativeSourceName, externalId: string) {
+    const [stored] = await this.database
+      .select({ id: bills.id })
+      .from(bills)
+      .where(and(eq(bills.source, source), eq(bills.externalId, externalId)))
+      .limit(1);
+    if (!stored) throw new Error("Bill hydration references an absent bill");
+    return stored.id;
+  }
+
+  async markHydrationRunning(
+    source: LegislativeSourceName,
+    externalId: string,
+    requestedAt: Date,
+  ) {
+    const billId = await this.billId(source, externalId);
+    await this.database
+      .insert(billHydrationState)
+      .values({ billId, status: "running", lastRequestedAt: requestedAt })
+      .onConflictDoUpdate({
+        target: billHydrationState.billId,
+        set: {
+          status: "running",
+          lastRequestedAt: requestedAt,
+          nextRetryAt: null,
+          errorCode: null,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async touchHydrationRequest(
+    source: LegislativeSourceName,
+    externalId: string,
+    requestedAt: Date,
+  ) {
+    const billId = await this.billId(source, externalId);
+    await this.database
+      .insert(billHydrationState)
+      .values({ billId, status: "pending", lastRequestedAt: requestedAt })
+      .onConflictDoUpdate({
+        target: billHydrationState.billId,
+        set: { lastRequestedAt: requestedAt, updatedAt: new Date() },
+      });
+  }
+
+  async markHydrationComplete(
+    source: LegislativeSourceName,
+    externalId: string,
+    checkedAt: Date,
+  ) {
+    const billId = await this.billId(source, externalId);
+    await this.database
+      .insert(billHydrationState)
+      .values({
+        billId,
+        status: "complete",
+        detailsCheckedAt: checkedAt,
+        lastRequestedAt: checkedAt,
+      })
+      .onConflictDoUpdate({
+        target: billHydrationState.billId,
+        set: {
+          status: "complete",
+          detailsCheckedAt: checkedAt,
+          nextRetryAt: null,
+          errorCode: null,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async markHydrationFailed(
+    source: LegislativeSourceName,
+    externalId: string,
+    failedAt: Date,
+    nextRetryAt: Date,
+    errorCode: string,
+  ) {
+    const billId = await this.billId(source, externalId);
+    await this.database
+      .insert(billHydrationState)
+      .values({
+        billId,
+        status: "failed",
+        lastRequestedAt: failedAt,
+        nextRetryAt,
+        errorCode: boundedErrorCode(errorCode),
+      })
+      .onConflictDoUpdate({
+        target: billHydrationState.billId,
+        set: {
+          status: "failed",
+          nextRetryAt,
+          errorCode: boundedErrorCode(errorCode),
+          updatedAt: new Date(),
+        },
+      });
   }
 
   async saveCheckpoint(source: LegislativeSourceName, value: Date): Promise<void> {

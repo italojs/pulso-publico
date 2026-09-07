@@ -12,6 +12,8 @@ import {
 import { LegislativeRepository } from "#/server/db/repositories";
 import {
   bills,
+  billHydrationState,
+  historicalImportCheckpoints,
   individualVotes,
   movements,
   sourceHealth,
@@ -225,5 +227,51 @@ describe("LegislativeRepository", () => {
       .from(sourceHealth)
       .where(eq(sourceHealth.source, "camara"));
     expect(healthy).toMatchObject({ consecutiveFailures: 0, lastErrorCode: null });
+  });
+
+  it("keeps historical import checkpoints independent from incremental sync", async () => {
+    const attemptedAt = new Date("2026-09-03T18:00:00.000Z");
+    await repository.startHistoricalCheckpoint("camara", "catalog", 2019, attemptedAt);
+    await repository.completeHistoricalCheckpoint(
+      "camara",
+      "catalog",
+      2019,
+      120,
+      118,
+      new Date("2026-09-03T18:01:00.000Z"),
+    );
+
+    expect(await repository.getCheckpoint("camara")).toBeNull();
+    expect(await repository.getHistoricalCheckpoint("camara", "catalog", 2019))
+      .toMatchObject({ status: "complete", recordsRead: 120, recordsPersisted: 118 });
+    expect(await testDb.select().from(historicalImportCheckpoints)).toHaveLength(1);
+  });
+
+  it("tracks hydration attempts and finds bills by exact official identity", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph({
+      officialCode: "PEC 221/2019",
+      proposalType: "PEC",
+      proposalNumber: 221,
+      proposalYear: 2019,
+    }));
+    const requestedAt = new Date("2026-09-03T18:00:00.000Z");
+
+    await repository.markHydrationRunning("camara", bill.externalId, requestedAt);
+    expect(await repository.getHydrationState("camara", bill.externalId))
+      .toMatchObject({ status: "running", lastRequestedAt: requestedAt });
+
+    await repository.markHydrationComplete(
+      "camara",
+      bill.externalId,
+      new Date("2026-09-03T18:01:00.000Z"),
+    );
+    expect(await repository.getHydrationState("camara", bill.externalId))
+      .toMatchObject({ status: "complete", errorCode: null });
+    expect(await repository.findBillByOfficialIdentity("camara", "pec", 221, 2019))
+      .toMatchObject({ externalId: bill.externalId, proposalType: "PEC" });
+    expect(await repository.findBillByOfficialIdentity("camara", "PEC", 8, 2025))
+      .toBeNull();
+    expect(await testDb.select().from(billHydrationState)).toHaveLength(1);
   });
 });
