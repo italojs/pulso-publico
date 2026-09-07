@@ -201,7 +201,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .projectCard h2 a { text-decoration: none; }
 .projectCard h2 a:hover { color: var(--green-dark); }
 .projectCard__code { display: block; margin-bottom: 5px; color: var(--green); font-family: var(--utility); font-size: 12px; letter-spacing: .04em; }
-.projectCard__summary { display: -webkit-box; overflow: hidden; margin: 0 0 18px; color: var(--ink-soft); -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.projectCard__summary { margin: 0 0 18px; color: var(--ink-soft); }
 .projectCard__facts { display: grid; margin: 0; grid-template-columns: .75fr 1fr 1.25fr; gap: 12px; }
 .projectCard__facts div { min-width: 0; }
 .projectCard__facts dt { color: var(--ink-soft); font-size: 12px; font-weight: 700; text-transform: uppercase; }
