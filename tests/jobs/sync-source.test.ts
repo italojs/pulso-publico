@@ -19,6 +19,7 @@ import {
   type VoteEvent,
 } from "#/domain/legislative";
 import {
+  loadBillGraph,
   syncSource,
   type SyncRepository,
 } from "#/jobs/sync-source";
@@ -113,6 +114,7 @@ class FakeAdapter implements LegislativeSourceAdapter {
   lawmakerDetailCalls: string[] = [];
   failListing = false;
   individualVoteValue: IndividualVote = individualVote;
+  voteEventValue: VoteEvent = voteEvent;
   hydratedExternalIds: string[] = [];
 
   constructor(source: LegislativeSourceName = "camara") {
@@ -146,7 +148,7 @@ class FakeAdapter implements LegislativeSourceAdapter {
   }
 
   async listBillVoteEvents(): Promise<VoteEvent[]> {
-    return [voteEvent];
+    return [this.voteEventValue];
   }
 
   async listIndividualVotes(): Promise<IndividualVote[]> {
@@ -300,6 +302,16 @@ class FakeRepository implements SyncRepository {
 
 describe("syncSource", () => {
   const now = new Date("2026-09-03T18:00:00.000Z");
+
+  it("discovers published individual votes even when the event description was not classified as nominal", async () => {
+    const adapter = new FakeAdapter();
+    adapter.voteEventValue = { ...voteEvent, isNominal: false };
+
+    const graph = await loadBillGraph(adapter, bill.externalId);
+
+    expect(adapter.individualCalls).toBe(1);
+    expect(graph.individualVotes).toEqual([individualVote]);
+  });
 
   it("uses the Câmara bulk bootstrap from January 1 of the fixed start year", async () => {
     const adapter = new FakeAdapter();

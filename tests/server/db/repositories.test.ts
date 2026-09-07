@@ -15,6 +15,7 @@ import {
   billHydrationState,
   historicalImportCheckpoints,
   individualVotes,
+  lawmakers,
   movements,
   sourceHealth,
   voteEvents,
@@ -135,6 +136,32 @@ describe("LegislativeRepository", () => {
     expect(
       await testDb.select({ id: individualVotes.id }).from(individualVotes),
     ).toHaveLength(1);
+  });
+
+  it("imports archived votes only for known events without deactivating a current lawmaker", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph({ ...graph(), individualVotes: [] });
+
+    const persisted = await repository.upsertArchivedIndividualVotes([
+      {
+        vote: individualVote,
+        lawmaker: { ...lawmaker, name: "Nome no arquivo histórico", active: false },
+      },
+      {
+        vote: {
+          ...individualVote,
+          externalId: "unknown-vote:220579",
+          voteEventExternalId: "unknown-vote",
+          lawmakerExternalId: "220579",
+        },
+        lawmaker: { ...lawmaker, externalId: "220579", active: false },
+      },
+    ]);
+
+    expect(persisted).toBe(1);
+    expect(await testDb.select().from(individualVotes)).toHaveLength(1);
+    expect(await testDb.select({ active: lawmakers.active }).from(lawmakers))
+      .toEqual([{ active: true }]);
   });
 
   it("persists derived bill and vote filter facets", async () => {

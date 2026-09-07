@@ -10,6 +10,7 @@ import type {
   LegislativeBulkBootstrap,
   LegislativeCatalogBootstrap,
   LegislativeSourceAdapter,
+  LegislativeVoteArchiveBootstrap,
   Movement,
   SyncPage,
   VoteEvent,
@@ -17,6 +18,7 @@ import type {
 import {
   streamCamaraBillArchive,
   streamCamaraCatalogArchive,
+  streamCamaraIndividualVoteArchive,
 } from "#/integrations/camara/bootstrap";
 import {
   mapCamaraAuthor,
@@ -78,7 +80,7 @@ function dateInSaoPaulo(value: Date) {
     .toString();
 }
 
-export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkBootstrap, LegislativeCatalogBootstrap {
+export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkBootstrap, LegislativeCatalogBootstrap, LegislativeVoteArchiveBootstrap {
   readonly source = "camara" as const;
   private readonly baseUrl: URL;
   private readonly archiveBaseUrl: string | undefined;
@@ -104,6 +106,14 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
 
   streamInitialCatalog(since: Date, until: Date) {
     return streamCamaraCatalogArchive(since, until, {
+      archiveBaseUrl: this.archiveBaseUrl,
+      fetcher: this.archiveFetcher,
+      checkedAt: this.now(),
+    });
+  }
+
+  streamHistoricalIndividualVotes(since: Date, until: Date) {
+    return streamCamaraIndividualVoteArchive(since, until, {
       archiveBaseUrl: this.archiveBaseUrl,
       fetcher: this.archiveFetcher,
       checkedAt: this.now(),

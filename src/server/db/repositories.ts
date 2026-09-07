@@ -11,6 +11,7 @@ import {
 } from "#/domain/bill-facets";
 
 import type {
+  ArchivedIndividualVote,
   Bill,
   BillAuthor,
   BillTopic,
@@ -341,6 +342,95 @@ export class LegislativeRepository {
             set: { ...values, updatedAt: new Date() },
           });
       }
+    });
+  }
+
+  async upsertArchivedIndividualVotes(
+    items: readonly ArchivedIndividualVote[],
+  ): Promise<number> {
+    if (items.length === 0) return 0;
+    for (const item of items) {
+      if (
+        item.vote.source !== "camara"
+        || item.lawmaker.source !== "camara"
+        || item.vote.lawmakerExternalId !== item.lawmaker.externalId
+      ) {
+        throw new Error("Archived vote contains inconsistent Câmara identities");
+      }
+    }
+
+    return this.database.transaction(async (transaction) => {
+      const voteExternalIds = [...new Set(
+        items.map((item) => item.vote.voteEventExternalId),
+      )];
+      const storedVotes = await transaction
+        .select({ id: voteEvents.id, externalId: voteEvents.externalId })
+        .from(voteEvents)
+        .where(and(
+          eq(voteEvents.source, "camara"),
+          inArray(voteEvents.externalId, voteExternalIds),
+        ));
+      const voteIds = new Map(storedVotes.map((item) => [item.externalId, item.id]));
+      const eligible = items.filter((item) => voteIds.has(item.vote.voteEventExternalId));
+      if (eligible.length === 0) return 0;
+
+      const archivedLawmakers = [
+        ...new Map(eligible.map((item) => [item.lawmaker.externalId, item.lawmaker])).values(),
+      ];
+      await transaction
+        .insert(lawmakers)
+        .values(archivedLawmakers.map((lawmaker) => ({
+          ...lawmakerValues(lawmaker),
+          active: false,
+        })))
+        .onConflictDoNothing({ target: [lawmakers.source, lawmakers.externalId] });
+
+      const lawmakerExternalIds = archivedLawmakers.map((item) => item.externalId);
+      const storedLawmakers = await transaction
+        .select({ id: lawmakers.id, externalId: lawmakers.externalId })
+        .from(lawmakers)
+        .where(and(
+          eq(lawmakers.source, "camara"),
+          inArray(lawmakers.externalId, lawmakerExternalIds),
+        ));
+      const lawmakerIds = new Map(
+        storedLawmakers.map((item) => [item.externalId, item.id]),
+      );
+      const uniqueEligible = [
+        ...new Map(eligible.map((item) => [item.vote.externalId, item])).values(),
+      ];
+      const values = uniqueEligible.map(({ vote }) => {
+        const voteEventId = voteIds.get(vote.voteEventExternalId);
+        const lawmakerId = lawmakerIds.get(vote.lawmakerExternalId);
+        if (!voteEventId || !lawmakerId) {
+          throw new Error("Archived vote references an unresolved official identity");
+        }
+        return {
+          source: vote.source,
+          externalId: vote.externalId,
+          voteEventId,
+          lawmakerId,
+          choice: vote.choice,
+          rawChoice: vote.rawChoice,
+          officialUrl: vote.officialUrl,
+          checkedAt: date(vote.checkedAt),
+        };
+      });
+      const stored = await transaction
+        .insert(individualVotes)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [individualVotes.source, individualVotes.externalId],
+          set: {
+            choice: sql`excluded.choice`,
+            rawChoice: sql`excluded.raw_choice`,
+            officialUrl: sql`excluded.official_url`,
+            checkedAt: sql`excluded.checked_at`,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: individualVotes.id });
+      return stored.length;
     });
   }
 

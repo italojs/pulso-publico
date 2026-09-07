@@ -5,6 +5,7 @@ import { parse } from "csv-parse";
 import { z } from "zod";
 
 import type {
+  ArchivedIndividualVote,
   Bill,
   BillAuthor,
   BillTopic,
@@ -13,6 +14,8 @@ import type {
 import {
   mapCamaraAuthor,
   mapCamaraBill,
+  mapCamaraIndividualVote,
+  mapCamaraLawmaker,
   mapCamaraTopic,
 } from "#/integrations/camara/mapper";
 import {
@@ -33,8 +36,21 @@ const rowSchema = z.record(z.string(), z.string());
 const defaultArchiveBaseUrl =
   "https://dadosabertos.camara.leg.br/arquivos/proposicoes/csv/";
 
-function relatedArchiveBase(baseUrl: URL, dataset: "proposicoesAutores" | "proposicoesTemas") {
+function relatedArchiveBase(
+  baseUrl: URL,
+  dataset: "proposicoesAutores" | "proposicoesTemas" | "votacoesVotos",
+) {
   return new URL(`../../${dataset}/csv/`, baseUrl);
+}
+
+function localDateTimeInstant(value: string) {
+  const normalized = value.trim().replace(" ", "T");
+  if (/(?:Z|[+-]\d{2}:\d{2})$/u.test(normalized)) {
+    return Temporal.Instant.from(normalized);
+  }
+  return Temporal.PlainDateTime.from(normalized)
+    .toZonedDateTime("America/Sao_Paulo")
+    .toInstant();
 }
 
 function optionalText(value: string | undefined) {
@@ -268,6 +284,77 @@ export async function* streamCamaraCatalogArchive(
         authors: relations.authors.get(bill.externalId) ?? [],
         topics: relations.topics.get(bill.externalId) ?? [],
       };
+    }
+  }
+}
+
+export async function* streamCamaraIndividualVoteArchive(
+  since: Date,
+  until: Date,
+  options: CamaraArchiveOptions = {},
+): AsyncIterable<ArchivedIndividualVote> {
+  if (since.getTime() > until.getTime()) {
+    throw new RangeError("Archive interval must start before it ends");
+  }
+
+  const fetcher = options.fetcher ?? retryingFetch;
+  const checkedAt = options.checkedAt ?? new Date();
+  const proposalBaseUrl = new URL(options.archiveBaseUrl ?? defaultArchiveBaseUrl);
+  const voteBaseUrl = relatedArchiveBase(proposalBaseUrl, "votacoesVotos");
+  const sinceInstant = Temporal.Instant.from(since.toISOString());
+  const untilInstant = Temporal.Instant.from(until.toISOString());
+
+  for (let year = localYear(since); year <= localYear(until); year += 1) {
+    const url = new URL(`votacoesVotos-${year}.csv`, voteBaseUrl);
+    try {
+      const archive = await downloadAnnualArchive(fetcher, url);
+      const records = Readable.from([archive]).pipe(parse({
+        bom: true,
+        columns: true,
+        delimiter: ";",
+        skip_empty_lines: true,
+      }));
+
+      for await (const raw of records) {
+        const row = rowSchema.parse(raw);
+        const voteEventExternalId = optionalText(row.idVotacao);
+        const votedAt = optionalText(row.dataHoraVoto);
+        const lawmakerExternalId = optionalText(row.deputado_id);
+        const lawmakerName = optionalText(row.deputado_nome);
+        if (!voteEventExternalId || !votedAt || !lawmakerExternalId || !lawmakerName) continue;
+        const voteInstant = localDateTimeInstant(votedAt);
+        if (
+          Temporal.Instant.compare(voteInstant, sinceInstant) < 0
+          || Temporal.Instant.compare(voteInstant, untilInstant) > 0
+        ) continue;
+
+        const deputy = {
+          id: lawmakerExternalId,
+          uri: optionalText(row.deputado_uri)
+            ?? `https://dadosabertos.camara.leg.br/api/v2/deputados/${lawmakerExternalId}`,
+          nome: lawmakerName,
+          siglaPartido: optionalText(row.deputado_siglaPartido),
+          siglaUf: optionalText(row.deputado_siglaUf),
+          urlFoto: optionalText(row.deputado_urlFoto),
+        };
+        yield {
+          vote: mapCamaraIndividualVote({
+            tipoVoto: optionalText(row.voto),
+            dataRegistroVoto: votedAt,
+            deputado_: deputy,
+          }, voteEventExternalId, checkedAt),
+          lawmaker: { ...mapCamaraLawmaker(deputy, checkedAt), active: false },
+        };
+      }
+    } catch (error) {
+      if (error instanceof OfficialSourceError) throw error;
+      throw new OfficialSourceError(
+        "Official Câmara individual vote archive did not match the expected contract",
+        url.href,
+        null,
+        false,
+        { cause: error },
+      );
     }
   }
 }

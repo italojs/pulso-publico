@@ -145,3 +145,15 @@ export interface LegislativeCatalogItem {
 export interface LegislativeCatalogBootstrap {
   streamInitialCatalog(since: Date, until: Date): AsyncIterable<LegislativeCatalogItem>;
 }
+
+export interface ArchivedIndividualVote {
+  vote: IndividualVote;
+  lawmaker: Lawmaker;
+}
+
+export interface LegislativeVoteArchiveBootstrap {
+  streamHistoricalIndividualVotes(
+    since: Date,
+    until: Date,
+  ): AsyncIterable<ArchivedIndividualVote>;
+}

@@ -5,11 +5,53 @@ import { describe, expect, it } from "vitest";
 import {
   streamCamaraBillArchive,
   streamCamaraCatalogArchive,
+  streamCamaraIndividualVoteArchive,
 } from "#/integrations/camara/bootstrap";
 
 const fixtureUrl = new URL("../../fixtures/camara/proposicoes.csv", import.meta.url);
 
 describe("streamCamaraBillArchive", () => {
+  it("streams official individual votes only inside the requested interval", async () => {
+    const votes = [
+      "idVotacao;uriVotacao;dataHoraVoto;voto;deputado_id;deputado_uri;deputado_nome;deputado_siglaPartido;deputado_uriPartido;deputado_siglaUf;deputado_idLegislatura;deputado_urlFoto",
+      "2233802-401;https://dadosabertos.camara.leg.br/api/v2/votacoes/2233802-401;2026-05-27T17:12:57;Não;73692;https://dadosabertos.camara.leg.br/api/v2/deputados/73692;Osmar Terra;PL;;RS;57;https://www.camara.leg.br/internet/deputado/bandep/73692.jpg",
+      "2233802-438;https://dadosabertos.camara.leg.br/api/v2/votacoes/2233802-438;2026-06-01T10:00:00;Sim;178993;https://dadosabertos.camara.leg.br/api/v2/deputados/178993;Carlos Henrique Gaguim;UNIÃO;;TO;57;https://www.camara.leg.br/internet/deputado/bandep/178993.jpg",
+    ].join("\n");
+    const requested: string[] = [];
+    const records = [];
+
+    for await (const record of streamCamaraIndividualVoteArchive(
+      new Date("2026-05-27T00:00:00.000Z"),
+      new Date("2026-05-28T02:59:59.999Z"),
+      {
+        archiveBaseUrl: "https://camara.test/arquivos/proposicoes/csv/",
+        fetcher: async (url) => {
+          requested.push(url.pathname);
+          return new Response(votes);
+        },
+        checkedAt: new Date("2026-09-07T03:00:00.000Z"),
+      },
+    )) records.push(record);
+
+    expect(requested).toEqual(["/arquivos/votacoesVotos/csv/votacoesVotos-2026.csv"]);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      vote: {
+        externalId: "2233802-401:73692",
+        voteEventExternalId: "2233802-401",
+        choice: "nao",
+        rawChoice: "Não",
+      },
+      lawmaker: {
+        externalId: "73692",
+        name: "Osmar Terra",
+        party: "PL",
+        region: "RS",
+        active: false,
+      },
+    });
+  });
+
   it("joins annual official authors and topics into the historical catalog", async () => {
     const proposals = [
       "id;uri;siglaTipo;numero;ano;codTipo;descricaoTipo;ementa;dataApresentacao;ultimoStatus_descricaoSituacao",

@@ -26,11 +26,7 @@ export function VoteEventCard({ event }: Readonly<{ event: PublicVoteEvent }>) {
       <p className="voteEvent__date"><time dateTime={event.occurredAt}>{formatDateTime(event.occurredAt)}</time></p>
       {event.isSecret ? (
         <p className="dataNotice">Esta votação foi secreta. A fonte oficial não divulga votos individuais.</p>
-      ) : !event.isNominal ? (
-        <p className="dataNotice">A votação não foi nominal; não há votos individuais para exibir.</p>
-      ) : event.individualVotes.length === 0 ? (
-        <p className="dataNotice">Os votos individuais não estão disponíveis na fonte consultada.</p>
-      ) : (
+      ) : event.individualVotes.length > 0 ? (
         <details className="voteList">
           <summary>Ver {event.individualVotes.length.toLocaleString("pt-BR")} votos individuais</summary>
           <div className="tableScroll">
@@ -46,6 +42,10 @@ export function VoteEventCard({ event }: Readonly<{ event: PublicVoteEvent }>) {
             </table>
           </div>
         </details>
+      ) : event.isNominal ? (
+        <p className="dataNotice">Os votos individuais não estão disponíveis na fonte consultada.</p>
+      ) : (
+        <p className="dataNotice">A fonte oficial não registrou votos individuais para esta votação. Isso costuma ocorrer em votações simbólicas.</p>
       )}
       <a className="officialLink" href={event.officialUrl} rel="noreferrer" target="_blank">Conferir votação na fonte <ExternalIcon /></a>
     </article>

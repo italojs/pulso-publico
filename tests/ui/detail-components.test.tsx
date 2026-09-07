@@ -328,14 +328,14 @@ describe("project detail components", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("renders nominal public votes with their raw official choice", () => {
+  it("renders published votes even when the description was not classified as nominal", () => {
     const view = render(<VoteEventCard event={{
       externalId: "v2",
       occurredAt: "2026-08-31T18:00:00.000Z",
       house: "camara",
       description: "Votação do parecer",
       result: "Aprovado",
-      isNominal: true,
+      isNominal: false,
       isSecret: false,
       officialUrl: "https://example.com/v2",
       individualVotes: [{
@@ -353,5 +353,22 @@ describe("project detail components", () => {
     expect(screen.getByText("Ana Cidadã")).toBeInTheDocument();
     expect(screen.getByText("Sim")).toBeInTheDocument();
     expect(view.container.querySelector("article")).toHaveAttribute("id", "votacao-camara-v2");
+  });
+
+  it("explains public events without individual records without claiming an unsupported vote type", () => {
+    render(<VoteEventCard event={{
+      externalId: "v3",
+      occurredAt: "2026-08-31T18:00:00.000Z",
+      house: "camara",
+      description: "Aprovada a redação final",
+      result: "Aprovado",
+      isNominal: false,
+      isSecret: false,
+      officialUrl: "https://example.com/v3",
+      individualVotes: [],
+    }} />);
+
+    expect(screen.getByText(/fonte oficial não registrou votos individuais/i)).toBeInTheDocument();
+    expect(screen.getByText(/costuma ocorrer em votações simbólicas/i)).toBeInTheDocument();
   });
 });

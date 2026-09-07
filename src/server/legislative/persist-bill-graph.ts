@@ -14,6 +14,29 @@ export interface BillGraphRepository {
   ): Promise<string[]>;
 }
 
+const INDIVIDUAL_VOTE_BATCH_SIZE = 8;
+
+async function listPublishedIndividualVotes(
+  adapter: LegislativeSourceAdapter,
+  voteEvents: Awaited<ReturnType<LegislativeSourceAdapter["listBillVoteEvents"]>>,
+) {
+  const publicEvents = voteEvents.filter((voteEvent) => !voteEvent.isSecret);
+  const individualVotes = [];
+
+  for (let index = 0; index < publicEvents.length; index += INDIVIDUAL_VOTE_BATCH_SIZE) {
+    const batch = publicEvents.slice(index, index + INDIVIDUAL_VOTE_BATCH_SIZE);
+    individualVotes.push(
+      ...(
+        await Promise.all(
+          batch.map((voteEvent) => adapter.listIndividualVotes(voteEvent.externalId)),
+        )
+      ).flat(),
+    );
+  }
+
+  return individualVotes;
+}
+
 export async function loadBillGraph(
   adapter: LegislativeSourceAdapter,
   billExternalId: string,
@@ -29,13 +52,7 @@ export async function loadBillGraph(
     throw new Error(`Adapter ${adapter.source} returned a bill from ${bill.source}`);
   }
 
-  const individualVotes = (
-    await Promise.all(
-      voteEvents
-        .filter((voteEvent) => voteEvent.isNominal && !voteEvent.isSecret)
-        .map((voteEvent) => adapter.listIndividualVotes(voteEvent.externalId)),
-    )
-  ).flat();
+  const individualVotes = await listPublishedIndividualVotes(adapter, voteEvents);
   return { bill, authors, topics, movements, voteEvents, individualVotes };
 }
 
