@@ -14,6 +14,30 @@ function jsonResponse(value: unknown) {
 }
 
 describe("SenadoAdapter", () => {
+  it("carries the official catalog author into the historical stream", async () => {
+    const adapter = new SenadoAdapter({
+      baseUrl: "https://senado.test/dadosabertos",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async (url) => jsonResponse(
+        url.searchParams.get("dataInicioApresentacao") === "2025-12-01"
+          ? processesFixture
+          : [],
+      ),
+    });
+    const items = [];
+
+    for await (const item of adapter.streamInitialCatalog(
+      new Date("2025-01-01T03:00:00.000Z"),
+      new Date("2026-01-01T02:59:59.999Z"),
+    )) items.push(item);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.authors[0]).toMatchObject({
+      officialName: "Câmara dos Deputados",
+      lawmakerExternalId: null,
+    });
+  });
+
   it("finds only the exact unsuffixed official identity across the proposal year", async () => {
     const requestedUrls: URL[] = [];
     const adapter = new SenadoAdapter({

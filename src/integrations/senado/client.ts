@@ -7,6 +7,7 @@ import type {
   BillTopic,
   IndividualVote,
   Lawmaker,
+  LegislativeCatalogBootstrap,
   LegislativeSourceAdapter,
   Movement,
   SyncPage,
@@ -15,6 +16,7 @@ import type {
 import {
   mapSenadoAuthor,
   mapSenadoBill,
+  mapSenadoCatalogAuthor,
   mapSenadoIndividualVote,
   mapSenadoLawmaker,
   mapSenadoLawmakerDetail,
@@ -108,12 +110,14 @@ function wasUpdatedInside(raw: unknown, since: Date, until: Date) {
     && Temporal.Instant.compare(updatedAt, end) <= 0;
 }
 
-export class SenadoAdapter implements LegislativeSourceAdapter {
+export class SenadoAdapter implements LegislativeSourceAdapter, LegislativeCatalogBootstrap {
   readonly source = "senado" as const;
   private readonly baseUrl: URL;
   private readonly fetcher: Fetcher;
   private readonly now: () => Date;
   private readonly inFlightProcesses = new Map<string, Promise<unknown>>();
+  private readonly capturedCatalogAuthors = new Map<string, BillAuthor[]>();
+  private captureCatalogRelations = false;
 
   constructor(options: SenadoAdapterOptions = {}) {
     this.baseUrl = new URL(`${(options.baseUrl ?? env.SENADO_BASE_URL).replace(/\/$/, "")}/`);
@@ -197,6 +201,32 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
       return mapSenadoBill(raw, this.now());
     } catch (error) {
       throw this.contractError(url, error);
+    }
+  }
+
+  async *streamInitialCatalog(since: Date, until: Date) {
+    let cursor: string | undefined;
+    const seenCursors = new Set<string>();
+    this.captureCatalogRelations = true;
+    try {
+      do {
+        const page = await this.listBillsChangedSince(since, cursor, until);
+        for (const bill of page.items) {
+          const authors = this.capturedCatalogAuthors.get(bill.externalId) ?? [];
+          this.capturedCatalogAuthors.delete(bill.externalId);
+          yield { bill, authors, topics: [] };
+        }
+        cursor = page.nextCursor ?? undefined;
+        if (cursor) {
+          if (seenCursors.has(cursor)) {
+            throw this.contractError(this.baseUrl, new Error("Senate catalog repeated a cursor"));
+          }
+          seenCursors.add(cursor);
+        }
+      } while (cursor);
+    } finally {
+      this.captureCatalogRelations = false;
+      this.capturedCatalogAuthors.clear();
     }
   }
 
@@ -413,7 +443,14 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
 
   private mapBills(url: URL, values: unknown[]) {
     try {
-      return values.map((process) => mapSenadoBill(process, this.now()));
+      return values.map((process) => {
+        const bill = mapSenadoBill(process, this.now());
+        if (this.captureCatalogRelations) {
+          const author = mapSenadoCatalogAuthor(process, bill.externalId, this.now());
+          this.capturedCatalogAuthors.set(bill.externalId, author ? [author] : []);
+        }
+        return bill;
+      });
     } catch (error) {
       throw this.contractError(url, error);
     }

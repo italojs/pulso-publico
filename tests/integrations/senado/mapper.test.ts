@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import processFixture from "../../fixtures/senado/processo.json" with { type: "json" };
+import processesFixture from "../../fixtures/senado/processos.json" with { type: "json" };
 import senatorFixture from "../../fixtures/senado/senadores.json" with { type: "json" };
 import voteFixture from "../../fixtures/senado/votacoes.json" with { type: "json" };
 import {
   mapSenadoAuthor,
   mapSenadoBill,
+  mapSenadoCatalogAuthor,
   mapSenadoIndividualVote,
   mapSenadoLawmaker,
   mapSenadoLawmakerDetail,
@@ -17,6 +19,16 @@ import {
 const checkedAt = new Date("2026-09-03T18:00:00.000Z");
 
 describe("Senado mapper", () => {
+  it("preserves catalog authorship without inventing a parliamentarian identity", () => {
+    const author = mapSenadoCatalogAuthor(processesFixture[0], "8972241", checkedAt);
+
+    expect(author).toMatchObject({
+      officialName: "Câmara dos Deputados",
+      lawmakerExternalId: null,
+      isPrimary: true,
+    });
+  });
+
   it("normalizes a process while preserving official identity", () => {
     const bill = mapSenadoBill(processFixture, checkedAt);
 

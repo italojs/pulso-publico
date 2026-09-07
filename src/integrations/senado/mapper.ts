@@ -48,6 +48,10 @@ const rawProcessSchema = z.object({
   siglaSituacaoAtual: z.string().nullish(),
 });
 
+const rawCatalogAuthorSchema = z.object({
+  autoria: z.string().nullish(),
+});
+
 const rawAuthorSchema = z.object({
   autor: z.string().min(1),
   siglaTipo: z.string().min(1),
@@ -270,6 +274,22 @@ export function mapSenadoAuthor(
       : `https://legis.senado.leg.br/atividade/materias/-/materia/${billId}`,
     checkedAt: checkedAtIso(checkedAt),
   });
+}
+
+export function mapSenadoCatalogAuthor(
+  raw: unknown,
+  billId: string,
+  checkedAt: Date,
+): BillAuthor | null {
+  const value = rawCatalogAuthorSchema.parse(raw);
+  const name = blankToNull(value.autoria);
+  if (!name) return null;
+  return mapSenadoAuthor({
+    autor: name,
+    siglaTipo: "AUTORIA",
+    descricaoTipo: "Autoria informada pelo Senado",
+    ordem: 1,
+  }, billId, checkedAt);
 }
 
 export function mapSenadoTopic(
