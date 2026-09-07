@@ -186,6 +186,103 @@ describe("project detail components", () => {
     expect(senateMovements[1]).toHaveTextContent("Projeto recebido pelo órgão responsável");
   });
 
+  it("places an official vote marker at its chronological position in both timeline views", () => {
+    render(<ProjectTimeline
+      items={[
+        {
+          source: "camara",
+          externalId: "movement-older",
+          occurredAt: "2026-09-03T16:00:00.000Z",
+          sequence: 1,
+          house: "camara",
+          bodyName: "PLEN",
+          statusLabel: "Em discussão",
+          description: "Discussão iniciada.",
+          officialUrl: "https://example.com/movement-older",
+        },
+        {
+          source: "camara",
+          externalId: "movement-newer",
+          occurredAt: "2026-09-03T18:00:00.000Z",
+          sequence: 2,
+          house: "camara",
+          bodyName: "PLEN",
+          statusLabel: "Encaminhado",
+          description: "Projeto encaminhado após a votação.",
+          officialUrl: "https://example.com/movement-newer",
+        },
+      ]}
+      voteEvents={[{
+        externalId: "vote-1",
+        occurredAt: "2026-09-03T17:00:00.000Z",
+        house: "camara",
+        description: "Aprovada a Subemenda Substitutiva. Sim: 10; Não: 2; Abstenção: 1.",
+        result: "aprovada",
+        isNominal: true,
+        isSecret: false,
+        officialUrl: "https://example.com/vote-1",
+        individualVotes: [],
+      }]}
+    />);
+
+    const timelineItems = within(screen.getByRole("region", { name: "Tramitação na Câmara" }))
+      .getAllByRole("listitem");
+    expect(timelineItems[0]?.querySelector("time")).toHaveAttribute("datetime", "2026-09-03T18:00:00.000Z");
+    expect(timelineItems[1]).toHaveTextContent("Votação do texto do projeto");
+    expect(timelineItems[1]).toHaveTextContent("10 sim · 2 não · 1 abstenção");
+    expect(timelineItems[1]).toHaveTextContent("Data informada pela fonte");
+    expect(within(timelineItems[1]!).getByRole("link", { name: "Ver votação completa" }))
+      .toHaveAttribute("href", "#votacao-camara-vote-1");
+    expect(timelineItems[2]?.querySelector("time")).toHaveAttribute("datetime", "2026-09-03T16:00:00.000Z");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Visão detalhada" }));
+    expect(screen.getByText("Aprovada a Subemenda Substitutiva. Sim: 10; Não: 2; Abstenção: 1."))
+      .toBeInTheDocument();
+  });
+
+  it("groups only votes recorded by the source at the exact same moment", () => {
+    render(<ProjectTimeline
+      items={[{
+        source: "camara",
+        externalId: "movement-1",
+        occurredAt: "2026-09-03T16:00:00.000Z",
+        sequence: 1,
+        house: "camara",
+        bodyName: "PLEN",
+        statusLabel: "Em votação",
+        description: "Sessão deliberativa.",
+        officialUrl: "https://example.com/movement-1",
+      }]}
+      voteEvents={[
+        {
+          externalId: "vote-a",
+          occurredAt: "2026-09-03T17:00:00.000Z",
+          house: "camara",
+          description: "Votação do requerimento A.",
+          result: "aprovada",
+          isNominal: false,
+          isSecret: false,
+          officialUrl: "https://example.com/vote-a",
+          individualVotes: [],
+        },
+        {
+          externalId: "vote-b",
+          occurredAt: "2026-09-03T17:00:00.000Z",
+          house: "camara",
+          description: "Votação do requerimento B.",
+          result: "rejeitada",
+          isNominal: false,
+          isSecret: false,
+          officialUrl: "https://example.com/vote-b",
+          individualVotes: [],
+        },
+      ]}
+    />);
+
+    expect(screen.getByText("2 votações registradas neste momento")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Ver votação completa" })).toHaveLength(2);
+  });
+
   it("uses a neutral fallback when a movement cannot be simplified safely", () => {
     render(<ProjectTimeline items={[{
       source: "senado",
@@ -222,7 +319,7 @@ describe("project detail components", () => {
   });
 
   it("renders nominal public votes with their raw official choice", () => {
-    render(<VoteEventCard event={{
+    const view = render(<VoteEventCard event={{
       externalId: "v2",
       occurredAt: "2026-08-31T18:00:00.000Z",
       house: "camara",
@@ -245,5 +342,6 @@ describe("project detail components", () => {
     expect(screen.getByRole("table", { name: "Votos individuais" })).toBeInTheDocument();
     expect(screen.getByText("Ana Cidadã")).toBeInTheDocument();
     expect(screen.getByText("Sim")).toBeInTheDocument();
+    expect(view.container.querySelector("article")).toHaveAttribute("id", "votacao-camara-v2");
   });
 });

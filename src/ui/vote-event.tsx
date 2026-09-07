@@ -11,9 +11,14 @@ const choiceLabels: Record<PublicVoteEvent["individualVotes"][number]["choice"],
   indisponivel: "Não informado",
 };
 
+export function voteEventAnchorId(event: Pick<PublicVoteEvent, "house" | "externalId">) {
+  const safeExternalId = event.externalId.replace(/[^a-zA-Z0-9_-]+/g, "-");
+  return `votacao-${event.house}-${safeExternalId}`;
+}
+
 export function VoteEventCard({ event }: Readonly<{ event: PublicVoteEvent }>) {
   return (
-    <article className="voteEvent">
+    <article className="voteEvent" id={voteEventAnchorId(event)}>
       <header>
         <div><span className="eyebrow">{houseLabel(event.house)} · dado oficial</span><h3>{event.description}</h3></div>
         <div className="voteEvent__result"><span>Resultado</span><strong>{event.result ?? "Não informado"}</strong></div>
