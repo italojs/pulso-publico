@@ -675,14 +675,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .timeline__officialStatus { margin-bottom: 10px; }
 .timeline__officialStatus > span { display: block; color: var(--ink-soft); font-size: 11px; font-weight: 750; text-transform: uppercase; }
 .timeline__officialStatus strong { margin: 2px 0 0; }
-.timeline__participants { padding-top: 15px; margin-top: 16px; border-top: 1px solid #e1e7e4; }
-.timeline__participants > b, .timeline__responsible > b { display: block; color: var(--ink-soft); font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
-.timeline__participants ul { display: grid; padding: 0; margin: 9px 0 0; gap: 8px; list-style: none; }
-.timeline__participants li { display: grid; padding-left: 12px; border-left: 3px solid #b8d9cc; gap: 1px; }
-.timeline__participants li strong { margin: 0; font-size: 15px; }
-.timeline__participants li span { color: var(--ink-soft); font-size: 12px; }
-.timeline__participants > p { margin-top: 7px; color: var(--ink-soft); font-size: 13px; }
-.timeline__participants > a { display: inline-flex; margin-top: 9px; color: var(--green-dark); font-size: 13px; font-weight: 750; }
+.timeline__responsible > b { display: block; color: var(--ink-soft); font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
 .timeline__responsible { display: grid; margin-top: 13px; gap: 2px; }
 .timeline__responsible > span { font-size: 14px; font-weight: 700; }
 .timeline__meta { display: flex; margin-top: 12px; justify-content: space-between; gap: 16px; color: var(--ink-soft); font-size: 12px; }

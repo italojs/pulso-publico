@@ -43,11 +43,9 @@ describe("project detail components", () => {
     expect(screen.getByText(/agora, o relator precisa apresentar sua análise/i)).toBeInTheDocument();
     expect(screen.getAllByText("Órgão responsável")).toHaveLength(2);
     expect(screen.getByText("Comissão de Saúde")).toBeInTheDocument();
-    expect(screen.getAllByText("Quem participou")).toHaveLength(2);
-    expect(screen.getByText("Messias Donato")).toBeInTheDocument();
-    expect(screen.getByText("Autoria do projeto · UNIÃO · ES")).toBeInTheDocument();
-    expect(screen.getByText("General Girão")).toBeInTheDocument();
-    expect(screen.getByText("Relatoria · PL · RN")).toBeInTheDocument();
+    expect(screen.queryByText("Quem participou")).not.toBeInTheDocument();
+    expect(screen.queryByText("Autoria do projeto · UNIÃO · ES")).not.toBeInTheDocument();
+    expect(screen.queryByText("Relatoria · PL · RN")).not.toBeInTheDocument();
     expect(screen.queryByText(/Apresentação do PL n\. 1928\/2026/)).not.toBeInTheDocument();
   });
 
@@ -68,8 +66,8 @@ describe("project detail components", () => {
     expect(screen.getByRole("tab", { name: "Visão detalhada" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Designado Relator, Dep. General Girão (PL-RN).")).toBeInTheDocument();
     expect(screen.getByText("Aguardando Parecer")).toBeInTheDocument();
-    expect(screen.getByText("General Girão")).toBeInTheDocument();
-    expect(screen.getByText("Relatoria · PL · RN")).toBeInTheDocument();
+    expect(screen.queryByText("Quem participou")).not.toBeInTheDocument();
+    expect(screen.queryByText("Relatoria · PL · RN")).not.toBeInTheDocument();
     expect(screen.getByText("Registro oficial")).toHaveAttribute("href", "https://example.com/m1");
   });
 
@@ -87,22 +85,7 @@ describe("project detail components", () => {
 
     expect(screen.getByText("Movimentação registrada")).toBeInTheDocument();
     expect(screen.getByText(/fonte oficial registrou uma atualização/i)).toBeInTheDocument();
-    expect(screen.getByText("Nenhuma pessoa foi mencionada individualmente neste registro.")).toBeInTheDocument();
-  });
-
-  it("points vote movements to the dedicated individual-votes section", () => {
-    render(<ProjectTimeline items={[{
-      externalId: "m1",
-      occurredAt: "2026-08-30T14:00:00.000Z",
-      sequence: 1,
-      house: "camara",
-      bodyName: "Plenário",
-      statusLabel: "Votação concluída",
-      description: "Votação nominal do projeto.",
-      officialUrl: "https://example.com/m1",
-    }]} />);
-
-    expect(screen.getByRole("link", { name: "Ver votos individuais" })).toHaveAttribute("href", "#votacoes");
+    expect(screen.queryByText("Nenhuma pessoa foi mencionada individualmente neste registro.")).not.toBeInTheDocument();
   });
 
   it("does not infer individual votes when a vote was secret", () => {
