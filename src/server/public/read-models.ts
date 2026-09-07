@@ -74,6 +74,7 @@ export interface PublicVoteEvent {
 export interface PublicBillDetail extends PublicBillCard {
   timeline: PublicTimelineItem[];
   voteEvents: PublicVoteEvent[];
+  historyLoadStatus: "pending" | "complete" | "failed";
 }
 
 export interface PublicLawmakerIdentity {

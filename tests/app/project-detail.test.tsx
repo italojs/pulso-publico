@@ -9,12 +9,16 @@ import type { PublicBillDetail } from "#/server/public/read-models";
 
 const mocks = vi.hoisted(() => ({
   getPublicBill: vi.fn(),
+  prepareProjectHistory: vi.fn(),
   notFound: vi.fn((): never => { throw new Error("NEXT_NOT_FOUND"); }),
 }));
 
 vi.mock("next/navigation.js", () => ({ notFound: mocks.notFound }));
 vi.mock("#/server/db/client", () => ({ db: { kind: "project-detail-test-db" } }));
 vi.mock("#/server/public/queries", () => ({ getPublicBill: mocks.getPublicBill }));
+vi.mock("#/server/legislative/prepare-project-history", () => ({
+  prepareProjectHistory: mocks.prepareProjectHistory,
+}));
 vi.mock("#/ui/follow-button", () => ({ FollowButton: () => null }));
 vi.mock("#/ui/project-timeline", () => ({ ProjectTimeline: () => null }));
 
@@ -60,12 +64,14 @@ const project = {
       individualVotes: [],
     },
   ],
+  historyLoadStatus: "complete",
 } satisfies PublicBillDetail;
 
 describe("project detail route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPublicBill.mockResolvedValue(project);
+    mocks.prepareProjectHistory.mockResolvedValue(undefined);
   });
 
   afterEach(cleanup);
@@ -81,5 +87,38 @@ describe("project detail route", () => {
     ]);
     expect(within(houseSections[0]!).getByText("Votação final no Senado")).toBeInTheDocument();
     expect(within(houseSections[1]!).getByText("Votação do texto na Câmara")).toBeInTheDocument();
+  });
+
+  it("prepares official history before reading the project", async () => {
+    render(await ProjectPage({ params: Promise.resolve({ source: "senado", externalId: "9105948" }) }));
+
+    expect(mocks.prepareProjectHistory).toHaveBeenCalledWith("senado", "9105948");
+    expect(mocks.prepareProjectHistory.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.getPublicBill.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not claim there are no votes while history is still pending", async () => {
+    mocks.getPublicBill.mockResolvedValue({
+      ...project,
+      voteEvents: [],
+      historyLoadStatus: "pending",
+    });
+
+    render(await ProjectPage({ params: Promise.resolve({ source: "senado", externalId: "9105948" }) }));
+
+    expect(screen.getByText("O histórico detalhado ainda não foi carregado.")).toBeInTheDocument();
+    expect(screen.queryByText(/não publicou votações/)).not.toBeInTheDocument();
+  });
+
+  it("states confirmed absence only after hydration completes", async () => {
+    mocks.getPublicBill.mockResolvedValue({
+      ...project,
+      voteEvents: [],
+      historyLoadStatus: "complete",
+    });
+
+    render(await ProjectPage({ params: Promise.resolve({ source: "senado", externalId: "9105948" }) }));
+
+    expect(screen.getByText("A fonte oficial não publicou votações para esta matéria.")).toBeInTheDocument();
   });
 });

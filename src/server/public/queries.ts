@@ -6,6 +6,7 @@ import type { LegislativeSourceName } from "#/domain/legislative";
 import {
   aiSummaries,
   billAuthors,
+  billHydrationState,
   bills,
   billTopics,
   followedBills,
@@ -447,6 +448,12 @@ export async function getPublicBill(
       ),
   ]);
 
+  const [hydration] = await database
+    .select({ status: billHydrationState.status })
+    .from(billHydrationState)
+    .where(eq(billHydrationState.billId, stored.id))
+    .limit(1);
+
   const eventIds = voteRows.map((vote) => vote.id);
   const individualRows = eventIds.length === 0
     ? []
@@ -469,6 +476,11 @@ export async function getPublicBill(
 
   return {
     ...card,
+    historyLoadStatus: hydration?.status === "complete"
+      ? "complete"
+      : hydration?.status === "failed"
+        ? "failed"
+        : "pending",
     timeline: timelineRows.map((item) => ({
       source: item.source,
       externalId: item.externalId,

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation.js";
 
 import type { LegislativeSourceName } from "#/domain/legislative";
 import { db } from "#/server/db/client";
+import { prepareProjectHistory } from "#/server/legislative/prepare-project-history";
 import { getPublicBill } from "#/server/public/queries";
 import type { PublicVoteEvent } from "#/server/public/read-models";
 import { formatDateTime, houseLabel } from "#/ui/format";
@@ -42,6 +43,7 @@ function voteGroups(events: PublicVoteEvent[]) {
 export default async function ProjectPage({ params }: Readonly<{ params: Promise<{ source: string; externalId: string }> }>) {
   const { source, externalId } = await params;
   if (!validSource(source)) notFound();
+  await prepareProjectHistory(source, externalId);
   const project = await getPublicBill(db, source, externalId);
   if (!project) notFound();
   const groupedVotes = voteGroups(project.voteEvents);
@@ -68,7 +70,7 @@ export default async function ProjectPage({ params }: Readonly<{ params: Promise
         </aside>
         <div className="detailMain">
           <section className="detailSection"><header className="sectionHeader"><span className="eyebrow">Separado por casa legislativa</span><h2>Linha do tempo</h2><p>{project.timeline.length} movimentações · {project.voteEvents.length} votações</p></header><ProjectTimeline items={project.timeline} voteEvents={project.voteEvents} /></section>
-          <section className="detailSection" id="votacoes"><header className="sectionHeader"><span className="eyebrow">Separadas por casa legislativa</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteHouseGroups">{groupedVotes.map((group) => <section aria-label={voteHouseTitle(group.house)} className={`voteHouse voteHouse--${group.house}`} key={group.house}><header><span>{houseLabel(group.house)}</span><h3>{voteHouseTitle(group.house)}</h3><p>{group.events.length} {group.events.length === 1 ? "votação" : "votações"}</p></header><div className="voteStack">{group.events.map((event) => <VoteEventCard event={event} key={`${event.house}-${event.externalId}`} />)}</div></section>)}</div> : <p className="sectionEmpty">Ainda não há votações associadas a esta matéria nas fontes consultadas.</p>}</section>
+          <section className="detailSection" id="votacoes"><header className="sectionHeader"><span className="eyebrow">Separadas por casa legislativa</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteHouseGroups">{groupedVotes.map((group) => <section aria-label={voteHouseTitle(group.house)} className={`voteHouse voteHouse--${group.house}`} key={group.house}><header><span>{houseLabel(group.house)}</span><h3>{voteHouseTitle(group.house)}</h3><p>{group.events.length} {group.events.length === 1 ? "votação" : "votações"}</p></header><div className="voteStack">{group.events.map((event) => <VoteEventCard event={event} key={`${event.house}-${event.externalId}`} />)}</div></section>)}</div> : <p className="sectionEmpty">{project.historyLoadStatus === "complete" ? "A fonte oficial não publicou votações para esta matéria." : project.historyLoadStatus === "failed" ? "Não foi possível atualizar o histórico completo agora. Os dados já armazenados continuam disponíveis." : "O histórico detalhado ainda não foi carregado."}</p>}</section>
         </div>
       </div>
     </main>
