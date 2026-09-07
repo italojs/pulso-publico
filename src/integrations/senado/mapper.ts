@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { createHash } from "node:crypto";
+
 import {
   BillAuthorRecord,
   BillRecord,
@@ -145,12 +147,15 @@ function localDateTimeToIso(value: string) {
 }
 
 function stableName(value: string) {
-  return value
+  const normalized = value
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  if (normalized.length <= 120) return normalized;
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 16);
+  return `${normalized.slice(0, 96)}-${digest}`;
 }
 
 function secureUrl(value: string | null | undefined) {
@@ -276,20 +281,27 @@ export function mapSenadoAuthor(
   });
 }
 
-export function mapSenadoCatalogAuthor(
+export function mapSenadoCatalogAuthors(
   raw: unknown,
   billId: string,
   checkedAt: Date,
-): BillAuthor | null {
+): BillAuthor[] {
   const value = rawCatalogAuthorSchema.parse(raw);
   const name = blankToNull(value.autoria);
-  if (!name) return null;
-  return mapSenadoAuthor({
-    autor: name,
-    siglaTipo: "AUTORIA",
-    descricaoTipo: "Autoria informada pelo Senado",
-    ordem: 1,
-  }, billId, checkedAt);
+  if (!name) return [];
+  const names = name.split(
+    /,\s*(?=(?:Deputad[oa]|Senador(?:a)?|Câmara dos Deputados)\b)/u,
+  );
+  return names.map((officialName, index) => {
+    const party = officialName.match(/\(([^/()]+)\/[A-Z]{2}\)$/u)?.[1]?.trim() ?? null;
+    const mapped = mapSenadoAuthor({
+      autor: officialName,
+      siglaTipo: "AUTORIA",
+      descricaoTipo: "Autoria informada pelo Senado",
+      ordem: index + 1,
+    }, billId, checkedAt);
+    return { ...mapped, party };
+  });
 }
 
 export function mapSenadoTopic(

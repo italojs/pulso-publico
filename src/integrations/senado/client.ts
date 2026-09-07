@@ -16,7 +16,7 @@ import type {
 import {
   mapSenadoAuthor,
   mapSenadoBill,
-  mapSenadoCatalogAuthor,
+  mapSenadoCatalogAuthors,
   mapSenadoIndividualVote,
   mapSenadoLawmaker,
   mapSenadoLawmakerDetail,
@@ -446,8 +446,10 @@ export class SenadoAdapter implements LegislativeSourceAdapter, LegislativeCatal
       return values.map((process) => {
         const bill = mapSenadoBill(process, this.now());
         if (this.captureCatalogRelations) {
-          const author = mapSenadoCatalogAuthor(process, bill.externalId, this.now());
-          this.capturedCatalogAuthors.set(bill.externalId, author ? [author] : []);
+          this.capturedCatalogAuthors.set(
+            bill.externalId,
+            mapSenadoCatalogAuthors(process, bill.externalId, this.now()),
+          );
         }
         return bill;
       });

@@ -7,7 +7,7 @@ import voteFixture from "../../fixtures/senado/votacoes.json" with { type: "json
 import {
   mapSenadoAuthor,
   mapSenadoBill,
-  mapSenadoCatalogAuthor,
+  mapSenadoCatalogAuthors,
   mapSenadoIndividualVote,
   mapSenadoLawmaker,
   mapSenadoLawmakerDetail,
@@ -20,13 +20,23 @@ const checkedAt = new Date("2026-09-03T18:00:00.000Z");
 
 describe("Senado mapper", () => {
   it("preserves catalog authorship without inventing a parliamentarian identity", () => {
-    const author = mapSenadoCatalogAuthor(processesFixture[0], "8972241", checkedAt);
+    const [author] = mapSenadoCatalogAuthors(processesFixture[0], "8972241", checkedAt);
 
     expect(author).toMatchObject({
       officialName: "Câmara dos Deputados",
       lawmakerExternalId: null,
       isPrimary: true,
     });
+  });
+
+  it("separates an official aggregate author list into bounded filterable entries", () => {
+    const authors = mapSenadoCatalogAuthors({
+      autoria: "Deputado Federal Ana Exemplo (PL/SP), Senador Bruno Exemplo (PSD/RJ)",
+    }, "8435447", checkedAt);
+
+    expect(authors).toHaveLength(2);
+    expect(authors.map((author) => author.party)).toEqual(["PL", "PSD"]);
+    expect(authors.every((author) => author.externalId.length < 200)).toBe(true);
   });
 
   it("normalizes a process while preserving official identity", () => {
