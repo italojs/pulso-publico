@@ -690,6 +690,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .timeline__meta { display: flex; margin-top: 12px; justify-content: space-between; gap: 16px; color: var(--ink-soft); font-size: 12px; }
 .timeline__meta a, .officialLink { display: inline-flex; align-items: center; gap: 5px; color: var(--green-dark); font-weight: 700; }
 .timeline__meta svg, .officialLink svg, .projectHero__actions svg { width: 15px; height: 15px; }
+.voteHouseGroups { display: grid; gap: 32px; }
+.voteHouse { padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: #f8faf9; }
+.voteHouse--camara { border-top: 4px solid var(--green); }
+.voteHouse--senado { border-top: 4px solid #315c8c; }
+.voteHouse--congresso { border-top: 4px solid var(--yellow); }
+.voteHouse > header { display: grid; padding-bottom: 20px; grid-template-columns: 1fr auto; align-items: end; gap: 3px 20px; }
+.voteHouse > header > span { grid-column: 1 / -1; color: var(--ink-soft); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.voteHouse > header h3 { margin: 0; font-family: var(--display); font-size: clamp(28px, 4vw, 38px); line-height: 1; }
+.voteHouse > header p { margin: 0; color: var(--ink-soft); font-size: 12px; }
 .voteStack { display: grid; gap: 18px; }
 .voteEvent { padding: 24px; border: 1px solid var(--line); border-radius: var(--radius-md); background: white; }
 .voteEvent > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; }
@@ -1005,6 +1014,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .timeline__meta { flex-direction: column; }
   .voteEvent > header { grid-template-columns: 1fr; }
   .voteEvent__result { padding: 10px 0 0; border-top: 2px solid var(--green); border-left: 0; }
+  .voteHouse { padding-inline: 16px; }
+  .voteHouse > header { grid-template-columns: 1fr; }
   .lawmakerHero { grid-template-columns: 94px minmax(0, 1fr); gap: 18px; }
   .lawmakerHero__photo { font-size: 52px; }
   .lawmakerHero h1 { font-size: 45px; }

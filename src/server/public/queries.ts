@@ -439,8 +439,12 @@ export async function getPublicBill(
     database
       .select()
       .from(voteEvents)
-      .where(eq(voteEvents.billId, stored.id))
-      .orderBy(desc(voteEvents.occurredAt)),
+      .where(inArray(voteEvents.billId, relatedBillIds))
+      .orderBy(
+        desc(voteEvents.occurredAt),
+        desc(sql<boolean>`${voteEvents.source} = ${source}`),
+        desc(voteEvents.externalId),
+      ),
   ]);
 
   const eventIds = voteRows.map((vote) => vote.id);

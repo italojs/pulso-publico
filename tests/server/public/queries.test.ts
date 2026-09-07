@@ -718,6 +718,36 @@ describe("public legislative queries", () => {
         checkedAt,
       },
     ]);
+    await testDb.insert(voteEvents).values([
+      {
+        source: "camara",
+        externalId: "vote-601-camara",
+        billId: cameraVersion.id,
+        occurredAt: new Date("2026-08-30T13:00:00.000Z"),
+        house: "camara",
+        description: "Votação nominal na Câmara dos Deputados.",
+        result: "Aprovado",
+        resultCategory: "approved",
+        isNominal: true,
+        isSecret: false,
+        officialUrl: cameraVersion.officialUrl,
+        checkedAt,
+      },
+      {
+        source: "camara",
+        externalId: "vote-601-unrelated",
+        billId: unrelatedSameCode.id,
+        occurredAt: new Date("2026-09-01T13:00:00.000Z"),
+        house: "camara",
+        description: "Votação de outra matéria com a mesma numeração.",
+        result: "Aprovado",
+        resultCategory: "approved",
+        isNominal: true,
+        isSecret: false,
+        officialUrl: unrelatedSameCode.officialUrl,
+        checkedAt,
+      },
+    ]);
 
     const project = await getPublicBill(testDb, "senado", "601");
 
@@ -726,6 +756,10 @@ describe("public legislative queries", () => {
       ["senado", "Incluído na pauta do Plenário."],
       ["camara", "Último registro da Câmara antes da análise no Senado."],
       ["senado", "Aberta a deliberação do projeto."],
+    ]);
+    expect(project?.voteEvents.map((event) => [event.house, event.description])).toEqual([
+      ["camara", "Votação nominal na Câmara dos Deputados."],
+      ["camara", "Votação nominal do projeto"],
     ]);
   });
 
