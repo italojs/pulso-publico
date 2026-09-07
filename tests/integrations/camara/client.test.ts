@@ -12,6 +12,38 @@ function jsonResponse(value: unknown) {
 }
 
 describe("CamaraAdapter", () => {
+  it("finds a proposition by exact official type, number and year", async () => {
+    const requestedUrls: URL[] = [];
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      fetcher: async (url) => {
+        requestedUrls.push(url);
+        return jsonResponse({
+          dados: [{
+            ...billListFixture.dados[0],
+            id: 2233802,
+            siglaTipo: "PEC",
+            numero: 221,
+            ano: 2019,
+            dataApresentacao: "2019-10-15T19:12",
+          }],
+          links: [],
+        });
+      },
+    });
+
+    const bills = await adapter.findBillsByOfficialIdentity({
+      proposalType: "pec",
+      proposalNumber: 221,
+      proposalYear: 2019,
+    });
+
+    expect(bills.map((bill) => bill.externalId)).toEqual(["2233802"]);
+    expect(requestedUrls[0]?.searchParams.get("siglaTipo")).toBe("PEC");
+    expect(requestedUrls[0]?.searchParams.get("numero")).toBe("221");
+    expect(requestedUrls[0]?.searchParams.get("ano")).toBe("2019");
+  });
+
   it("uses official pagination links before advancing the bounded day window", async () => {
     const requestedUrls: string[] = [];
     const pageTwoUrl =

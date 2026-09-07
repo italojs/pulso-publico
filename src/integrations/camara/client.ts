@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { normalizeProposalType } from "#/domain/bill-facets";
 import type {
   Bill,
   BillAuthor,
@@ -175,6 +176,30 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
     } catch (error) {
       throw this.contractError(url, error);
     }
+  }
+
+  async findBillsByOfficialIdentity(identity: {
+    proposalType: string;
+    proposalNumber: number;
+    proposalYear: number;
+  }): Promise<Bill[]> {
+    const proposalType = normalizeProposalType(identity.proposalType);
+    if (!proposalType) return [];
+    const url = this.url("proposicoes", {
+      siglaTipo: proposalType,
+      numero: String(identity.proposalNumber),
+      ano: String(identity.proposalYear),
+      itens: "100",
+      ordem: "ASC",
+      ordenarPor: "id",
+    });
+    const values = await this.fetchAllCollectionItems(url);
+    return this.mapCollection(url, values, (raw) => mapCamaraBill(raw, this.now()))
+      .filter((bill) =>
+        bill.proposalType === proposalType
+        && bill.proposalNumber === identity.proposalNumber
+        && bill.proposalYear === identity.proposalYear
+      );
   }
 
   async listBillAuthors(billExternalId: string): Promise<BillAuthor[]> {

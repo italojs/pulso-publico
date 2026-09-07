@@ -125,6 +125,11 @@ export interface LegislativeSourceAdapter {
   listIndividualVotes(voteEventExternalId: string): Promise<IndividualVote[]>;
   listActiveLawmakers(cursor?: string): Promise<SyncPage<Lawmaker>>;
   getLawmaker(lawmakerExternalId: string): Promise<Lawmaker>;
+  findBillsByOfficialIdentity?(identity: {
+    proposalType: string;
+    proposalNumber: number;
+    proposalYear: number;
+  }): Promise<Bill[]>;
 }
 
 export interface LegislativeBulkBootstrap {
