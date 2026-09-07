@@ -227,6 +227,39 @@ const voteCount = sql<number>`(
   where "vote_events"."bill_id" = "bills"."id"
 )`.as("vote_count");
 
+function normalizedAuthorName(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLowerCase();
+}
+
+function authorDetailScore(author: PublicAuthor) {
+  return (author.lawmakerExternalId ? 8 : 0)
+    + (author.party ? 4 : 0)
+    + (author.kind !== "Autoria informada pelo Senado" ? 2 : 0);
+}
+
+export function deduplicatePublicAuthors(authors: PublicAuthor[]) {
+  const unique = new Map<string, PublicAuthor>();
+  for (const author of authors) {
+    const key = `${author.source}:${normalizedAuthorName(author.name)}`;
+    const previous = unique.get(key);
+    if (!previous) {
+      unique.set(key, author);
+      continue;
+    }
+    const preferred = authorDetailScore(author) > authorDetailScore(previous)
+      ? author
+      : previous;
+    const fallback = preferred === author ? previous : author;
+    unique.set(key, {
+      ...fallback,
+      ...preferred,
+      party: preferred.party ?? fallback.party,
+      primary: preferred.primary || fallback.primary,
+    });
+  }
+  return [...unique.values()];
+}
+
 async function enrichBillRows(
   database: Database,
   rows: Array<{
@@ -298,7 +331,7 @@ async function enrichBillRows(
     checkedAt: iso(row.checkedAt),
     latestActivityAt: row.latestActivityAt ? iso(row.latestActivityAt) : null,
     topics: (topicsByBill.get(row.id) ?? []).map((item) => item.label),
-    authors: (authorsByBill.get(row.id) ?? []).map(
+    authors: deduplicatePublicAuthors((authorsByBill.get(row.id) ?? []).map(
       (item): PublicAuthor => ({
         source: item.source,
         name: item.name,
@@ -308,7 +341,7 @@ async function enrichBillRows(
         lawmakerExternalId: item.lawmakerExternalId,
         officialUrl: item.officialUrl,
       }),
-    ),
+    )),
     friendlyTitle: summariesByBill.get(row.id)?.friendlyTitle ?? null,
     shortDescription: summariesByBill.get(row.id)?.shortDescription ?? null,
   }));
