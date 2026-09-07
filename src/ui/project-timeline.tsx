@@ -42,6 +42,7 @@ const FRIENDLY_BODY_NAMES: Readonly<Record<string, string>> = {
   CCP: "Coordenação de Comissões Permanentes",
   CSAUDE: "Comissão de Saúde",
   MESA: "Mesa Diretora",
+  PLEN: "Plenário da Câmara dos Deputados",
 };
 
 function friendlyBodyName(bodyName: string) {
@@ -50,7 +51,7 @@ function friendlyBodyName(bodyName: string) {
     return FRIENDLY_BODY_NAMES[officialCode];
   }
   if (/^[A-Z0-9_-]{2,16}$/.test(officialCode)) {
-    return officialCode.startsWith("C") ? "Comissão responsável" : "Órgão responsável";
+    return `Nome não disponível · código oficial ${officialCode}`;
   }
   return bodyName;
 }

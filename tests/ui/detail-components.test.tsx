@@ -74,6 +74,40 @@ describe("project detail components", () => {
     expect(screen.getByText("Registro oficial")).toHaveAttribute("href", "https://example.com/m1");
   });
 
+  it("expands a known official body code instead of repeating a generic label", () => {
+    render(<ProjectTimeline items={[{
+      source: "camara",
+      externalId: "m-plen",
+      occurredAt: "2026-09-03T20:12:00.000Z",
+      sequence: 1,
+      house: "camara",
+      bodyName: "PLEN",
+      statusLabel: "Em votação",
+      description: "Votação em turno único.",
+      officialUrl: "https://example.com/m-plen",
+    }]} />);
+
+    expect(screen.getByText("Plenário da Câmara dos Deputados")).toBeInTheDocument();
+    expect(screen.getAllByText("Órgão responsável")).toHaveLength(1);
+  });
+
+  it("preserves an unknown official body code instead of hiding it behind a generic name", () => {
+    render(<ProjectTimeline items={[{
+      source: "camara",
+      externalId: "m-unknown-body",
+      occurredAt: "2026-09-03T20:12:00.000Z",
+      sequence: 1,
+      house: "camara",
+      bodyName: "ORG123",
+      statusLabel: "Em análise",
+      description: "Movimentação oficial.",
+      officialUrl: "https://example.com/m-unknown-body",
+    }]} />);
+
+    expect(screen.getByText("Nome não disponível · código oficial ORG123")).toBeInTheDocument();
+    expect(screen.getAllByText("Órgão responsável")).toHaveLength(1);
+  });
+
   it("separates Câmara and Senado movements into clearly labeled sections", () => {
     render(<ProjectTimeline items={[
       {
