@@ -274,4 +274,44 @@ describe("LegislativeRepository", () => {
       .toBeNull();
     expect(await testDb.select().from(billHydrationState)).toHaveLength(1);
   });
+
+  it("records a recent visit without renewing the running-state lease", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph());
+    await repository.markHydrationRunning("camara", bill.externalId, new Date("2026-09-03T18:00:00.000Z"));
+    const staleAt = new Date("2026-09-03T17:00:00.000Z");
+    await testDb.update(billHydrationState).set({ updatedAt: staleAt });
+
+    await repository.touchHydrationRequest(
+      "camara",
+      bill.externalId,
+      new Date("2026-09-03T20:00:00.000Z"),
+    );
+
+    const [state] = await testDb.select().from(billHydrationState);
+    expect(state?.lastRequestedAt).toEqual(new Date("2026-09-03T20:00:00.000Z"));
+    expect(state?.updatedAt).toEqual(staleAt);
+  });
+
+  it("keeps an ambiguous local official identity unresolved", async () => {
+    const identity = {
+      proposalType: "PEC",
+      proposalNumber: 221,
+      proposalYear: 2019,
+      congressionalKey: "pec:221:2019",
+    } as const;
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph(identity));
+    await repository.upsertBillGraph({
+      bill: { ...bill, ...identity, externalId: "duplicate-pec-221" },
+      authors: [],
+      topics: [],
+      movements: [],
+      voteEvents: [],
+      individualVotes: [],
+    });
+
+    await expect(repository.findBillByOfficialIdentity("camara", "PEC", 221, 2019))
+      .resolves.toBeNull();
+  });
 });

@@ -159,7 +159,10 @@ function processIdentity(value: z.infer<typeof rawProcessSchema>) {
     /^([^\s]+)\s+(\d+[A-Z]*)\/(\d{4})(?:\s+.+)?$/iu,
   );
   const sigla = blankToNull(value.sigla) ?? match?.[1] ?? null;
-  const officialNumber = identifierOrNull(value.numero) ?? match?.[2] ?? null;
+  // The public identification is authoritative because Senate records can expose
+  // a numeric `numero` while retaining a meaningful alphabetic suffix (for
+  // example, "RQS 11A/2019"). Dropping it would collide with RQS 11/2019.
+  const officialNumber = match?.[2] ?? identifierOrNull(value.numero) ?? null;
   const ano = value.ano ?? (match?.[3] ? Number(match[3]) : null);
   const numericNumber = officialNumber?.match(/^\d+/u)?.[0];
   if (!sigla || !officialNumber || !numericNumber || !ano) {

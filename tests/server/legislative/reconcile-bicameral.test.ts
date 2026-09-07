@@ -69,6 +69,14 @@ describe("ensureBicameralPartner", () => {
     expect(deps.hydrate).toHaveBeenCalledWith("camara", "2233802");
   });
 
+  it("does not link a numeric identity to a suffix-bearing congressional key", async () => {
+    const deps = dependencies([{ ...partner, congressionalKey: "pec:221a:2019" }]);
+
+    await expect(ensureBicameralPartner(current, deps)).resolves.toBeNull();
+    expect(deps.repository.upsertBillGraph).not.toHaveBeenCalled();
+    expect(deps.hydrate).not.toHaveBeenCalled();
+  });
+
   it("does not persist an ambiguous official result", async () => {
     const deps = dependencies([partner, { ...partner, externalId: "another" }]);
 

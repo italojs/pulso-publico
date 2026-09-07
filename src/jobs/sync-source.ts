@@ -6,9 +6,15 @@ import type {
   LegislativeSourceName,
 } from "#/domain/legislative";
 import type { BillGraph } from "#/server/db/repositories";
-import { OfficialSourceError } from "#/server/http/retrying-fetch";
+import type { AdvisoryLockResult } from "#/server/db/advisory-lock";
+import { sourceErrorCode } from "#/server/http/source-error-code";
+import { hydrateProject, type HydrationRepository } from "#/server/legislative/hydrate-project";
+import {
+  loadBillGraph,
+  persistHydratedBillGraph,
+} from "#/server/legislative/persist-bill-graph";
 
-export interface SyncRepository {
+export interface SyncRepository extends HydrationRepository {
   upsertBillGraph(graph: BillGraph): Promise<void>;
   upsertLawmakers(items: Lawmaker[]): Promise<void>;
   findMissingLawmakerExternalIds(
@@ -16,6 +22,10 @@ export interface SyncRepository {
     externalIds: readonly string[],
   ): Promise<string[]>;
   listTrackedBillExternalIds(source: LegislativeSourceName): Promise<string[]>;
+  listRecentlyRequestedBillExternalIds(
+    source: LegislativeSourceName,
+    since: Date,
+  ): Promise<string[]>;
   getCheckpoint(source: LegislativeSourceName): Promise<Date | null>;
   saveCheckpoint(source: LegislativeSourceName, value: Date): Promise<void>;
   markSourceSuccess(source: LegislativeSourceName, checkedAt: Date): Promise<void>;
@@ -109,74 +119,7 @@ export async function syncLawmakers(
   return count;
 }
 
-export async function loadBillGraph(
-  adapter: LegislativeSourceAdapter,
-  billExternalId: string,
-): Promise<BillGraph> {
-  const [bill, authors, topics, movements, voteEvents] = await Promise.all([
-    adapter.getBill(billExternalId),
-    adapter.listBillAuthors(billExternalId),
-    adapter.listBillTopics(billExternalId),
-    adapter.listBillMovements(billExternalId),
-    adapter.listBillVoteEvents(billExternalId),
-  ]);
-  assertSource(bill, adapter.source);
-
-  const individualVotes = (
-    await Promise.all(
-      voteEvents
-        .filter((voteEvent) => voteEvent.isNominal && !voteEvent.isSecret)
-        .map((voteEvent) => adapter.listIndividualVotes(voteEvent.externalId)),
-    )
-  ).flat();
-  return { bill, authors, topics, movements, voteEvents, individualVotes };
-}
-
-async function hydrateBillGraph(
-  adapter: LegislativeSourceAdapter,
-  repository: Pick<
-    SyncRepository,
-    "findMissingLawmakerExternalIds" | "upsertBillGraph" | "upsertLawmakers"
-  >,
-  billExternalId: string,
-): Promise<BillGraph> {
-  const graph = await loadBillGraph(adapter, billExternalId);
-  const referencedLawmakerIds = [
-    ...graph.authors.flatMap((author) =>
-      author.lawmakerExternalId ? [author.lawmakerExternalId] : []
-    ),
-    ...graph.individualVotes.map((vote) => vote.lawmakerExternalId),
-  ];
-  const missingLawmakerIds = await repository.findMissingLawmakerExternalIds(
-    adapter.source,
-    referencedLawmakerIds,
-  );
-  if (missingLawmakerIds.length > 0) {
-    const lawmakers: Lawmaker[] = [];
-    for (let index = 0; index < missingLawmakerIds.length; index += 8) {
-      const batch = missingLawmakerIds.slice(index, index + 8);
-      lawmakers.push(
-        ...await Promise.all(
-          batch.map((externalId) => adapter.getLawmaker(externalId)),
-        ),
-      );
-    }
-    for (const [index, lawmaker] of lawmakers.entries()) {
-      const expectedExternalId = missingLawmakerIds[index];
-      if (
-        lawmaker.source !== adapter.source
-        || lawmaker.externalId !== expectedExternalId
-      ) {
-        throw new Error(`Adapter ${adapter.source} returned an unexpected lawmaker`);
-      }
-    }
-    await repository.upsertLawmakers(lawmakers);
-  }
-  await repository.upsertBillGraph(graph);
-  return graph;
-}
-
-export { hydrateBillGraph as persistHydratedBillGraph };
+export { loadBillGraph, persistHydratedBillGraph };
 
 export async function hydrateBill(
   adapter: LegislativeSourceAdapter,
@@ -184,11 +127,15 @@ export async function hydrateBill(
   billExternalId: string,
   _now: Date,
 ): Promise<void> {
-  await hydrateBillGraph(adapter, repository, billExternalId);
+  await persistHydratedBillGraph(adapter, repository, billExternalId);
 }
 
 function addGraphToReport(report: SyncReport, graph: BillGraph) {
   report.bills += 1;
+  addGraphDetailsToReport(report, graph);
+}
+
+function addGraphDetailsToReport(report: SyncReport, graph: BillGraph) {
   report.authors += graph.authors.length;
   report.topics += graph.topics.length;
   report.movements += graph.movements.length;
@@ -196,19 +143,19 @@ function addGraphToReport(report: SyncReport, graph: BillGraph) {
   report.individualVotes += graph.individualVotes.length;
 }
 
-export function sourceErrorCode(error: unknown) {
-  if (error instanceof OfficialSourceError) {
-    if (error.status !== null) return `HTTP_${error.status}`;
-    return error.retryable ? "UPSTREAM_UNAVAILABLE" : "CONTRACT_MISMATCH";
-  }
-  return "UNKNOWN";
-}
+export { sourceErrorCode };
 
 export async function syncSource(
   adapter: LegislativeSourceAdapter,
   repository: SyncRepository,
   now: Date,
-  options: { historyStartYear: number },
+  options: {
+    historyStartYear: number;
+    withHydrationLock?<T>(
+      name: string,
+      operation: () => Promise<T>,
+    ): Promise<AdvisoryLockResult<T>>;
+  },
 ): Promise<SyncReport> {
   const report = createReport(adapter.source, now);
 
@@ -235,7 +182,7 @@ export async function syncSource(
           .subtract({ minutes: 5 })
           .epochMilliseconds,
       );
-      await syncHydratedPages(adapter, repository, since, report);
+      await syncHydratedPages(adapter, repository, since, now, report, options.withHydrationLock);
     }
 
     await repository.saveCheckpoint(adapter.source, now);
@@ -281,24 +228,55 @@ async function syncHydratedPages(
   adapter: LegislativeSourceAdapter,
   repository: SyncRepository,
   since: Date,
+  now: Date,
   report: SyncReport,
+  withHydrationLock: (<T>(
+    name: string,
+    operation: () => Promise<T>,
+  ) => Promise<AdvisoryLockResult<T>>) | undefined,
 ) {
+  const lock = withHydrationLock ?? (async <T>(
+    _name: string,
+    operation: () => Promise<T>,
+  ): Promise<AdvisoryLockResult<T>> => ({ acquired: true, value: await operation() }));
   let cursor: string | undefined;
   const seenCursors = new Set<string>();
   const hydratedBillIds = new Set<string>();
+  const reportedBillIds = new Set<string>();
 
   const hydrateOnce = async (billExternalId: string) => {
     if (hydratedBillIds.has(billExternalId)) return;
-    const graph = await hydrateBillGraph(adapter, repository, billExternalId);
     hydratedBillIds.add(billExternalId);
-    addGraphToReport(report, graph);
+    let graph: BillGraph | null = null;
+    const result = await hydrateProject({
+      source: adapter.source,
+      externalId: billExternalId,
+      adapter,
+      repository,
+      withLock: lock,
+      persist: async () => {
+        graph = await persistHydratedBillGraph(adapter, repository, billExternalId);
+      },
+      now,
+    });
+    if (graph && (result.status === "complete" || result.status === "cached")) {
+      if (reportedBillIds.has(billExternalId)) {
+        addGraphDetailsToReport(report, graph);
+      } else {
+        addGraphToReport(report, graph);
+        reportedBillIds.add(billExternalId);
+      }
+    }
   };
 
   do {
     const page = await adapter.listBillsChangedSince(since, cursor);
     for (const changedBill of page.items) {
       assertSource(changedBill, adapter.source);
-      await hydrateOnce(changedBill.externalId);
+      const graph = summaryGraph(changedBill);
+      await repository.upsertBillGraph(graph);
+      addGraphToReport(report, graph);
+      reportedBillIds.add(changedBill.externalId);
     }
     cursor = page.nextCursor ?? undefined;
     if (cursor) {
@@ -308,7 +286,12 @@ async function syncHydratedPages(
   } while (cursor);
 
   const trackedBillIds = await repository.listTrackedBillExternalIds(adapter.source);
-  for (const billExternalId of trackedBillIds) {
+  const recentCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
+  const recentlyRequestedIds = await repository.listRecentlyRequestedBillExternalIds(
+    adapter.source,
+    recentCutoff,
+  );
+  for (const billExternalId of new Set([...trackedBillIds, ...recentlyRequestedIds])) {
     await hydrateOnce(billExternalId);
   }
 }

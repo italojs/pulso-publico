@@ -43,10 +43,20 @@ function voteGroups(events: PublicVoteEvent[]) {
 export default async function ProjectPage({ params }: Readonly<{ params: Promise<{ source: string; externalId: string }> }>) {
   const { source, externalId } = await params;
   if (!validSource(source)) notFound();
-  await prepareProjectHistory(source, externalId);
+  const preparation = await prepareProjectHistory(source, externalId);
   const project = await getPublicBill(db, source, externalId);
   if (!project) notFound();
   const groupedVotes = voteGroups(project.voteEvents);
+  const historyLoadStatus = preparation.status === "failed"
+    ? "failed"
+    : preparation.status === "busy" || preparation.status === "partial"
+      ? "pending"
+      : project.historyLoadStatus;
+  const historyNotice = historyLoadStatus === "failed"
+    ? "Não foi possível atualizar o histórico completo agora. Os dados já armazenados continuam disponíveis."
+    : historyLoadStatus === "pending"
+      ? "A atualização do histórico completo ainda está pendente. Os dados já armazenados continuam disponíveis."
+      : null;
 
   return (
     <main id="conteudo" className="detailPage">
@@ -69,8 +79,8 @@ export default async function ProjectPage({ params }: Readonly<{ params: Promise
           <section className="trustNote"><strong>Como ler esta página</strong><p>Datas, situação, autoria e votos vêm dos registros oficiais. O Pulso Público não avalia nem recomenda posições políticas.</p></section>
         </aside>
         <div className="detailMain">
-          <section className="detailSection"><header className="sectionHeader"><span className="eyebrow">Separado por casa legislativa</span><h2>Linha do tempo</h2><p>{project.timeline.length} movimentações · {project.voteEvents.length} votações</p></header><ProjectTimeline items={project.timeline} voteEvents={project.voteEvents} /></section>
-          <section className="detailSection" id="votacoes"><header className="sectionHeader"><span className="eyebrow">Separadas por casa legislativa</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteHouseGroups">{groupedVotes.map((group) => <section aria-label={voteHouseTitle(group.house)} className={`voteHouse voteHouse--${group.house}`} key={group.house}><header><span>{houseLabel(group.house)}</span><h3>{voteHouseTitle(group.house)}</h3><p>{group.events.length} {group.events.length === 1 ? "votação" : "votações"}</p></header><div className="voteStack">{group.events.map((event) => <VoteEventCard event={event} key={`${event.house}-${event.externalId}`} />)}</div></section>)}</div> : <p className="sectionEmpty">{project.historyLoadStatus === "complete" ? "A fonte oficial não publicou votações para esta matéria." : project.historyLoadStatus === "failed" ? "Não foi possível atualizar o histórico completo agora. Os dados já armazenados continuam disponíveis." : "O histórico detalhado ainda não foi carregado."}</p>}</section>
+          <section className="detailSection"><header className="sectionHeader"><span className="eyebrow">Separado por casa legislativa</span><h2>Linha do tempo</h2><p>{project.timeline.length} movimentações · {project.voteEvents.length} votações</p></header>{historyNotice ? <p className="dataNotice">{historyNotice}</p> : null}<ProjectTimeline historyLoadStatus={historyLoadStatus} items={project.timeline} voteEvents={project.voteEvents} /></section>
+          <section className="detailSection" id="votacoes"><header className="sectionHeader"><span className="eyebrow">Separadas por casa legislativa</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteHouseGroups">{groupedVotes.map((group) => <section aria-label={voteHouseTitle(group.house)} className={`voteHouse voteHouse--${group.house}`} key={group.house}><header><span>{houseLabel(group.house)}</span><h3>{voteHouseTitle(group.house)}</h3><p>{group.events.length} {group.events.length === 1 ? "votação" : "votações"}</p></header><div className="voteStack">{group.events.map((event) => <VoteEventCard event={event} key={`${event.house}-${event.externalId}`} />)}</div></section>)}</div> : <p className="sectionEmpty">{historyLoadStatus === "complete" ? "A fonte oficial não publicou votações para esta matéria." : historyLoadStatus === "failed" ? "Não foi possível atualizar o histórico completo agora. Os dados já armazenados continuam disponíveis." : "O histórico detalhado ainda não foi carregado."}</p>}</section>
         </div>
       </div>
     </main>

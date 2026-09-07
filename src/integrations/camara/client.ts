@@ -8,12 +8,16 @@ import type {
   IndividualVote,
   Lawmaker,
   LegislativeBulkBootstrap,
+  LegislativeCatalogBootstrap,
   LegislativeSourceAdapter,
   Movement,
   SyncPage,
   VoteEvent,
 } from "#/domain/legislative";
-import { streamCamaraBillArchive } from "#/integrations/camara/bootstrap";
+import {
+  streamCamaraBillArchive,
+  streamCamaraCatalogArchive,
+} from "#/integrations/camara/bootstrap";
 import {
   mapCamaraAuthor,
   mapCamaraBill,
@@ -74,7 +78,7 @@ function dateInSaoPaulo(value: Date) {
     .toString();
 }
 
-export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkBootstrap {
+export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkBootstrap, LegislativeCatalogBootstrap {
   readonly source = "camara" as const;
   private readonly baseUrl: URL;
   private readonly archiveBaseUrl: string | undefined;
@@ -92,6 +96,14 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
 
   streamInitialBills(since: Date, until: Date): AsyncIterable<Bill> {
     return streamCamaraBillArchive(since, until, {
+      archiveBaseUrl: this.archiveBaseUrl,
+      fetcher: this.archiveFetcher,
+      checkedAt: this.now(),
+    });
+  }
+
+  streamInitialCatalog(since: Date, until: Date) {
+    return streamCamaraCatalogArchive(since, until, {
       archiveBaseUrl: this.archiveBaseUrl,
       fetcher: this.archiveFetcher,
       checkedAt: this.now(),
@@ -199,6 +211,7 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
         bill.proposalType === proposalType
         && bill.proposalNumber === identity.proposalNumber
         && bill.proposalYear === identity.proposalYear
+        && bill.congressionalKey === `${proposalType.toLowerCase()}:${identity.proposalNumber}:${identity.proposalYear}`
       );
   }
 

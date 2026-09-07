@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { LegislativeSourceAdapter } from "#/domain/legislative";
+import { OfficialSourceError } from "#/server/http/retrying-fetch";
 import {
   hydrateProject,
   type HydrationState,
@@ -78,17 +79,32 @@ describe("hydrateProject", () => {
       adapter,
       repository: repo,
       withLock: acquiredLock,
-      persist: vi.fn(async () => { throw new Error("raw upstream response"); }),
+      persist: vi.fn(async () => { throw new OfficialSourceError("unavailable", "https://example.test", 503, true); }),
       now,
-    })).resolves.toEqual({ status: "failed", errorCode: "UNKNOWN" });
+    })).resolves.toEqual({ status: "failed", errorCode: "HTTP_503" });
     expect(repo.markHydrationFailed).toHaveBeenCalledWith(
       "camara",
       "2233802",
       now,
       new Date("2026-09-06T20:05:00.000Z"),
-      "UNKNOWN",
+      "HTTP_503",
     );
     expect(repo.markHydrationComplete).not.toHaveBeenCalled();
+  });
+
+  it("surfaces programming and database errors instead of masking them as upstream failures", async () => {
+    const repo = repository();
+
+    await expect(hydrateProject({
+      source: "camara",
+      externalId: "2233802",
+      adapter,
+      repository: repo,
+      withLock: acquiredLock,
+      persist: vi.fn(async () => { throw new Error("database invariant failed"); }),
+      now,
+    })).rejects.toThrow("database invariant failed");
+    expect(repo.markHydrationFailed).not.toHaveBeenCalled();
   });
 
   it("does not duplicate upstream work while another request owns the lock", async () => {
@@ -105,5 +121,33 @@ describe("hydrateProject", () => {
       now,
     })).resolves.toEqual({ status: "busy" });
     expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("reuses data completed by another request before its lock is acquired", async () => {
+    const repo = repository();
+    repo.getHydrationState
+      .mockResolvedValueOnce({
+        status: "pending",
+        detailsCheckedAt: null,
+        updatedAt: new Date("2026-09-06T19:59:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        status: "complete",
+        detailsCheckedAt: new Date("2026-09-06T19:59:30.000Z"),
+        updatedAt: new Date("2026-09-06T19:59:30.000Z"),
+      });
+    const persist = vi.fn();
+
+    await expect(hydrateProject({
+      source: "camara",
+      externalId: "2233802",
+      adapter,
+      repository: repo,
+      withLock: acquiredLock,
+      persist,
+      now,
+    })).resolves.toEqual({ status: "cached" });
+    expect(persist).not.toHaveBeenCalled();
+    expect(repo.markHydrationRunning).not.toHaveBeenCalled();
   });
 });

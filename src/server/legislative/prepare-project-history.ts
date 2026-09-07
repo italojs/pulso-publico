@@ -6,6 +6,7 @@ import { db, sql } from "#/server/db/client";
 import { LegislativeRepository } from "#/server/db/repositories";
 import { hydrateProject } from "#/server/legislative/hydrate-project";
 import { ensureBicameralPartner } from "#/server/legislative/reconcile-bicameral";
+import { OfficialSourceError } from "#/server/http/retrying-fetch";
 
 const repository = new LegislativeRepository(db);
 const adapters = {
@@ -31,13 +32,21 @@ export async function prepareProjectHistory(
   if (!identity) return { status: "missing" as const };
 
   const hydration = await hydrateOne(source, externalId);
+  const needsPartner = (identity.source === "senado" && identity.originHouse === "camara")
+    || (identity.source === "camara" && identity.currentHouse === "senado");
   try {
-    await ensureBicameralPartner(identity, {
+    const partner = await ensureBicameralPartner(identity, {
       repository,
       adapters,
       hydrate: hydrateOne,
     });
-  } catch {
+    if (needsPartner && !partner) return { status: "partial" as const };
+    if (partner) {
+      const partnerState = await repository.getHydrationState(partner.source, partner.externalId);
+      if (partnerState?.status !== "complete") return { status: "partial" as const };
+    }
+  } catch (error) {
+    if (!(error instanceof OfficialSourceError)) throw error;
     return hydration.status === "complete" || hydration.status === "cached"
       ? { status: "partial" as const }
       : hydration;

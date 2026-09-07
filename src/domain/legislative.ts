@@ -135,3 +135,13 @@ export interface LegislativeSourceAdapter {
 export interface LegislativeBulkBootstrap {
   streamInitialBills(since: Date, until: Date): AsyncIterable<Bill>;
 }
+
+export interface LegislativeCatalogItem {
+  bill: Bill;
+  authors: BillAuthor[];
+  topics: BillTopic[];
+}
+
+export interface LegislativeCatalogBootstrap {
+  streamInitialCatalog(since: Date, until: Date): AsyncIterable<LegislativeCatalogItem>;
+}

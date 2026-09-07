@@ -20,7 +20,11 @@ vi.mock("#/server/legislative/prepare-project-history", () => ({
   prepareProjectHistory: mocks.prepareProjectHistory,
 }));
 vi.mock("#/ui/follow-button", () => ({ FollowButton: () => null }));
-vi.mock("#/ui/project-timeline", () => ({ ProjectTimeline: () => null }));
+vi.mock("#/ui/project-timeline", () => ({
+  ProjectTimeline: ({ historyLoadStatus }: { historyLoadStatus: string }) => (
+    <span data-testid="timeline-load-status">{historyLoadStatus}</span>
+  ),
+}));
 
 import ProjectPage from "../../app/projetos/[source]/[externalId]/page.tsx";
 
@@ -71,7 +75,7 @@ describe("project detail route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPublicBill.mockResolvedValue(project);
-    mocks.prepareProjectHistory.mockResolvedValue(undefined);
+    mocks.prepareProjectHistory.mockResolvedValue({ status: "complete" });
   });
 
   afterEach(cleanup);
@@ -108,6 +112,16 @@ describe("project detail route", () => {
 
     expect(screen.getByText("O histórico detalhado ainda não foi carregado.")).toBeInTheDocument();
     expect(screen.queryByText(/não publicou votações/)).not.toBeInTheDocument();
+  });
+
+  it("keeps stored history visible and warns when the bicameral refresh is partial", async () => {
+    mocks.prepareProjectHistory.mockResolvedValue({ status: "partial" });
+
+    render(await ProjectPage({ params: Promise.resolve({ source: "senado", externalId: "9105948" }) }));
+
+    expect(screen.getByText(/atualização do histórico completo ainda está pendente/i)).toBeInTheDocument();
+    expect(screen.getByText("Votação final no Senado")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-load-status")).toHaveTextContent("pending");
   });
 
   it("states confirmed absence only after hydration completes", async () => {

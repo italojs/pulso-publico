@@ -1,10 +1,11 @@
 import type {
   Bill,
   LegislativeBulkBootstrap,
+  LegislativeCatalogBootstrap,
   LegislativeSourceAdapter,
   LegislativeSourceName,
 } from "#/domain/legislative";
-import { sourceErrorCode } from "#/jobs/sync-source";
+import { sourceErrorCode } from "#/server/http/source-error-code";
 import type { BillGraph } from "#/server/db/repositories";
 
 type HistoricalCheckpoint = { status: "running" | "complete" | "failed" };
@@ -66,6 +67,13 @@ function isBulkAdapter(
     && typeof adapter.streamInitialBills === "function";
 }
 
+function isCatalogAdapter(
+  adapter: LegislativeSourceAdapter,
+): adapter is LegislativeSourceAdapter & LegislativeCatalogBootstrap {
+  return "streamInitialCatalog" in adapter
+    && typeof adapter.streamInitialCatalog === "function";
+}
+
 function summaryGraph(bill: Bill): BillGraph {
   return {
     bill,
@@ -98,6 +106,20 @@ async function importYear(
     await repository.upsertBillGraph(summaryGraph(bill));
     persisted += 1;
   };
+
+  if (isCatalogAdapter(adapter)) {
+    for await (const item of adapter.streamInitialCatalog(since, until)) {
+      read += 1;
+      await repository.upsertBillGraph({
+        ...item,
+        movements: [],
+        voteEvents: [],
+        individualVotes: [],
+      });
+      persisted += 1;
+    }
+    return { read, persisted };
+  }
 
   if (isBulkAdapter(adapter)) {
     for await (const bill of adapter.streamInitialBills(since, until)) {

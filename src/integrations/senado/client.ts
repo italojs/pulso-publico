@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { normalizeProposalType } from "#/domain/bill-facets";
 import type {
   Bill,
   BillAuthor,
@@ -197,6 +198,48 @@ export class SenadoAdapter implements LegislativeSourceAdapter {
     } catch (error) {
       throw this.contractError(url, error);
     }
+  }
+
+  async findBillsByOfficialIdentity(identity: {
+    proposalType: string;
+    proposalNumber: number;
+    proposalYear: number;
+  }): Promise<Bill[]> {
+    const proposalType = normalizeProposalType(identity.proposalType);
+    if (!proposalType) return [];
+    const start = Temporal.PlainDate.from(`${identity.proposalYear}-01-01`)
+      .toZonedDateTime("America/Sao_Paulo")
+      .toInstant();
+    const end = Temporal.PlainDate.from(`${identity.proposalYear + 1}-01-01`)
+      .toZonedDateTime("America/Sao_Paulo")
+      .toInstant()
+      .subtract({ milliseconds: 1 });
+    const expectedKey = `${proposalType.toLowerCase()}:${identity.proposalNumber}:${identity.proposalYear}`;
+    const matches: Bill[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    do {
+      const page = await this.listBillsChangedSince(
+        new Date(start.epochMilliseconds),
+        cursor,
+        new Date(end.epochMilliseconds),
+      );
+      matches.push(...page.items.filter((bill) =>
+        bill.proposalType === proposalType
+        && bill.proposalNumber === identity.proposalNumber
+        && bill.proposalYear === identity.proposalYear
+        && bill.congressionalKey === expectedKey
+      ));
+      if (!page.nextCursor) break;
+      if (seenCursors.has(page.nextCursor)) {
+        throw this.contractError(this.baseUrl, new Error("Senate identity lookup repeated a cursor"));
+      }
+      seenCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    return matches;
   }
 
   async listBillAuthors(billExternalId: string): Promise<BillAuthor[]> {

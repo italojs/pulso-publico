@@ -23,7 +23,11 @@ interface BicameralRepository {
     proposalType: string,
     proposalNumber: number,
     proposalYear: number,
-  ): Promise<{ source: LegislativeSourceName; externalId: string } | null>;
+  ): Promise<{
+    source: LegislativeSourceName;
+    externalId: string;
+    congressionalKey?: string | null;
+  } | null>;
   upsertBillGraph(graph: BillGraph): Promise<void>;
 }
 
@@ -74,6 +78,7 @@ export async function ensureBicameralPartner(
     bill.proposalYear,
   );
   if (local) {
+    if (local.congressionalKey !== bill.congressionalKey) return null;
     await dependencies.hydrate(local.source, local.externalId);
     return local;
   }
@@ -94,6 +99,7 @@ export async function ensureBicameralPartner(
     || partner.proposalType !== bill.proposalType
     || partner.proposalNumber !== bill.proposalNumber
     || partner.proposalYear !== bill.proposalYear
+    || partner.congressionalKey !== bill.congressionalKey
   ) {
     return null;
   }

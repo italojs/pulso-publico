@@ -11,6 +11,16 @@ import { VoteEventCard } from "#/ui/vote-event";
 afterEach(cleanup);
 
 describe("project detail components", () => {
+  it.each([
+    ["pending", "O histórico detalhado ainda não foi carregado."],
+    ["failed", "Não foi possível atualizar o histórico completo agora."],
+    ["complete", "A fonte oficial não publicou movimentações para esta matéria."],
+  ] as const)("explains an empty %s timeline accurately", (historyLoadStatus, copy) => {
+    render(<ProjectTimeline historyLoadStatus={historyLoadStatus} items={[]} />);
+
+    expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
   it("opens a plain-language timeline that marks only the latest movement as current", () => {
     render(<ProjectTimeline items={[
       {

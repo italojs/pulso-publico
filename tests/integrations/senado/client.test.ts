@@ -14,6 +14,52 @@ function jsonResponse(value: unknown) {
 }
 
 describe("SenadoAdapter", () => {
+  it("finds only the exact unsuffixed official identity across the proposal year", async () => {
+    const requestedUrls: URL[] = [];
+    const adapter = new SenadoAdapter({
+      baseUrl: "https://senado.test/dadosabertos",
+      now: () => new Date("2026-09-03T18:00:00.000Z"),
+      fetcher: async (url) => {
+        requestedUrls.push(url);
+        if (url.searchParams.get("dataInicioApresentacao") !== "2019-02-01") {
+          return jsonResponse([]);
+        }
+        return jsonResponse([
+          {
+            ...processesFixture[0],
+            id: 11,
+            codigoMateria: 11,
+            identificacao: "PL 11/2019",
+            sigla: "PL",
+            numero: 11,
+            ano: 2019,
+            dataApresentacao: "2019-02-10",
+          },
+          {
+            ...processesFixture[0],
+            id: 12,
+            codigoMateria: 12,
+            identificacao: "PL 11A/2019",
+            sigla: "PL",
+            numero: 11,
+            ano: 2019,
+            dataApresentacao: "2019-02-11",
+          },
+        ]);
+      },
+    });
+
+    const matches = await adapter.findBillsByOfficialIdentity({
+      proposalType: "PL",
+      proposalNumber: 11,
+      proposalYear: 2019,
+    });
+
+    expect(matches.map((bill) => bill.officialCode)).toEqual(["PL 11/2019"]);
+    expect(requestedUrls[0]?.searchParams.get("dataInicioApresentacao")).toBe("2019-01-01");
+    expect(requestedUrls.at(-1)?.searchParams.get("dataFimApresentacao")).toBe("2019-12-31");
+  });
+
   it("uses the official recent-update filter for an incremental sync", async () => {
     const requestedUrls: URL[] = [];
     const adapter = new SenadoAdapter({

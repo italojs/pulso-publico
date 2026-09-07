@@ -56,6 +56,11 @@ try {
       for (const source of sources) {
         const report = await syncSource(adapters[source], repository, new Date(), {
           historyStartYear: env.LEGISLATIVE_HISTORY_START_YEAR,
+          withHydrationLock: (name, operation) => withAdvisoryLock(
+            databaseModule.sql,
+            name,
+            operation,
+          ),
         });
         console.log(JSON.stringify(report));
         failed ||= report.failed;

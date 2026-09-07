@@ -2,11 +2,54 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
-import { streamCamaraBillArchive } from "#/integrations/camara/bootstrap";
+import {
+  streamCamaraBillArchive,
+  streamCamaraCatalogArchive,
+} from "#/integrations/camara/bootstrap";
 
 const fixtureUrl = new URL("../../fixtures/camara/proposicoes.csv", import.meta.url);
 
 describe("streamCamaraBillArchive", () => {
+  it("joins annual official authors and topics into the historical catalog", async () => {
+    const proposals = [
+      "id;uri;siglaTipo;numero;ano;codTipo;descricaoTipo;ementa;dataApresentacao;ultimoStatus_descricaoSituacao",
+      "2210208;https://dadosabertos.camara.leg.br/api/v2/proposicoes/2210208;PL;10;2019;139;Projeto de Lei;Ementa oficial;2019-02-10;Apresentado",
+    ].join("\n");
+    const authors = [
+      "idProposicao;uriProposicao;idDeputadoAutor;uriAutor;codTipoAutor;tipoAutor;nomeAutor;siglaPartidoAutor;uriPartidoAutor;siglaUFAutor;ordemAssinatura;proponente",
+      "2210208;https://dadosabertos.camara.leg.br/api/v2/proposicoes/2210208;100;https://dadosabertos.camara.leg.br/api/v2/deputados/100;10000;Deputado;Ana Cidadã;ABC;;PE;1;1",
+    ].join("\n");
+    const topics = [
+      "uriProposicao;siglaTipo;numero;ano;codTema;tema;relevancia",
+      "https://dadosabertos.camara.leg.br/api/v2/proposicoes/2210208;PL;10;2019;58;Trabalho e Emprego;0",
+    ].join("\n");
+    const requested: string[] = [];
+    const items = [];
+
+    for await (const item of streamCamaraCatalogArchive(
+      new Date("2019-01-01T02:00:00.000Z"),
+      new Date("2020-01-01T02:59:59.999Z"),
+      {
+        archiveBaseUrl: "https://camara.test/arquivos/proposicoes/csv/",
+        fetcher: async (url) => {
+          requested.push(url.pathname);
+          if (url.pathname.includes("proposicoesAutores")) return new Response(authors);
+          if (url.pathname.includes("proposicoesTemas")) return new Response(topics);
+          return new Response(proposals);
+        },
+        checkedAt: new Date("2026-09-03T18:00:00.000Z"),
+      },
+    )) items.push(item);
+
+    expect(requested).toEqual(expect.arrayContaining([
+      "/arquivos/proposicoes/csv/proposicoes-2019.csv",
+      "/arquivos/proposicoesAutores/csv/proposicoesAutores-2019.csv",
+      "/arquivos/proposicoesTemas/csv/proposicoesTemas-2019.csv",
+    ]));
+    expect(items[0]?.authors[0]).toMatchObject({ officialName: "Ana Cidadã", party: "ABC" });
+    expect(items[0]?.topics[0]).toMatchObject({ code: "58", label: "Trabalho e Emprego" });
+  });
+
   it("streams UTF-8 CSV records inside the exact rolling interval", async () => {
     const fixture = await readFile(fixtureUrl);
     const bills = [];

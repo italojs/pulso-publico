@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { AlertRepository } from "#/alerts/alert-repository";
@@ -373,6 +373,21 @@ export class LegislativeRepository {
     return stored.map((item) => item.externalId);
   }
 
+  async listRecentlyRequestedBillExternalIds(
+    source: LegislativeSourceName,
+    since: Date,
+  ): Promise<string[]> {
+    const stored = await this.database
+      .selectDistinct({ externalId: bills.externalId })
+      .from(billHydrationState)
+      .innerJoin(bills, eq(billHydrationState.billId, bills.id))
+      .where(and(
+        eq(bills.source, source),
+        gte(billHydrationState.lastRequestedAt, since),
+      ));
+    return stored.map((item) => item.externalId);
+  }
+
   async getCheckpoint(source: LegislativeSourceName): Promise<Date | null> {
     const [checkpoint] = await this.database
       .select({ value: syncCheckpoints.checkpointAt })
@@ -514,7 +529,7 @@ export class LegislativeRepository {
   ) {
     const normalizedType = normalizeProposalType(proposalType);
     if (!normalizedType) return null;
-    const [stored] = await this.database
+    const stored = await this.database
       .select()
       .from(bills)
       .where(and(
@@ -523,8 +538,8 @@ export class LegislativeRepository {
         eq(bills.proposalNumber, proposalNumber),
         eq(bills.proposalYear, proposalYear),
       ))
-      .limit(1);
-    return stored ?? null;
+      .limit(2);
+    return stored.length === 1 ? stored[0]! : null;
   }
 
   async getHydrationState(source: LegislativeSourceName, externalId: string) {
@@ -586,7 +601,7 @@ export class LegislativeRepository {
       .values({ billId, status: "pending", lastRequestedAt: requestedAt })
       .onConflictDoUpdate({
         target: billHydrationState.billId,
-        set: { lastRequestedAt: requestedAt, updatedAt: new Date() },
+        set: { lastRequestedAt: requestedAt },
       });
   }
 

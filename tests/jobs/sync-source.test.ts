@@ -197,6 +197,13 @@ class FakeRepository implements SyncRepository {
   successAt: Date | null = null;
   failure: { checkedAt: Date; code: string } | null = null;
   trackedBillExternalIds: string[] = [];
+  recentlyRequestedBillExternalIds: string[] = [];
+  hydrationStates = new Map<string, {
+    status: "pending" | "running" | "complete" | "failed";
+    detailsCheckedAt: Date | null;
+    nextRetryAt?: Date | null;
+    updatedAt: Date;
+  }>();
 
   async upsertBillGraph(graph: BillGraph) {
     this.graphs.push(graph);
@@ -220,6 +227,54 @@ class FakeRepository implements SyncRepository {
 
   async listTrackedBillExternalIds() {
     return this.trackedBillExternalIds;
+  }
+
+  async listRecentlyRequestedBillExternalIds() {
+    return this.recentlyRequestedBillExternalIds;
+  }
+
+  async getHydrationState(_source: LegislativeSourceName, externalId: string) {
+    return this.hydrationStates.get(externalId) ?? null;
+  }
+
+  async touchHydrationRequest(_source: LegislativeSourceName, externalId: string, requestedAt: Date) {
+    if (!this.hydrationStates.has(externalId)) {
+      this.hydrationStates.set(externalId, {
+        status: "pending",
+        detailsCheckedAt: null,
+        updatedAt: requestedAt,
+      });
+    }
+  }
+
+  async markHydrationRunning(_source: LegislativeSourceName, externalId: string, requestedAt: Date) {
+    this.hydrationStates.set(externalId, {
+      status: "running",
+      detailsCheckedAt: null,
+      updatedAt: requestedAt,
+    });
+  }
+
+  async markHydrationComplete(_source: LegislativeSourceName, externalId: string, checkedAt: Date) {
+    this.hydrationStates.set(externalId, {
+      status: "complete",
+      detailsCheckedAt: checkedAt,
+      updatedAt: checkedAt,
+    });
+  }
+
+  async markHydrationFailed(
+    _source: LegislativeSourceName,
+    externalId: string,
+    failedAt: Date,
+    nextRetryAt: Date,
+  ) {
+    this.hydrationStates.set(externalId, {
+      status: "failed",
+      detailsCheckedAt: null,
+      nextRetryAt,
+      updatedAt: failedAt,
+    });
   }
 
   async getCheckpoint() {
@@ -284,6 +339,7 @@ describe("syncSource", () => {
     const adapter = new FakeAdapter();
     const repository = new FakeRepository();
     repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
+    repository.recentlyRequestedBillExternalIds = [bill.externalId];
 
     const report = await syncSource(adapter, repository, now, {
       historyStartYear: 2019,
@@ -292,7 +348,7 @@ describe("syncSource", () => {
     expect(adapter.receivedSince?.toISOString()).toBe("2026-09-03T17:25:00.000Z");
     expect(adapter.movementCalls).toBe(1);
     expect(adapter.individualCalls).toBe(1);
-    expect(repository.graphs[0]).toMatchObject({
+    expect(repository.graphs[1]).toMatchObject({
       authors: [author],
       movements: [movement],
       voteEvents: [voteEvent],
@@ -322,6 +378,19 @@ describe("syncSource", () => {
     expect(report).toMatchObject({ bills: 2, failed: false });
   });
 
+  it("refreshes a recently requested old bill without hydrating every changed catalog item", async () => {
+    const adapter = new FakeAdapter();
+    const repository = new FakeRepository();
+    repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
+    repository.recentlyRequestedBillExternalIds = ["recent-old-bill"];
+
+    await syncSource(adapter, repository, now, { historyStartYear: 2019 });
+
+    expect(adapter.hydratedExternalIds).toEqual(["recent-old-bill"]);
+    expect(repository.hydrationStates.get("recent-old-bill")?.status).toBe("complete");
+    expect(adapter.movementCalls).toBe(1);
+  });
+
   it("loads historical lawmakers referenced by nominal votes before persistence", async () => {
     const adapter = new FakeAdapter();
     adapter.individualVoteValue = {
@@ -331,6 +400,7 @@ describe("syncSource", () => {
     };
     const repository = new FakeRepository();
     repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
+    repository.recentlyRequestedBillExternalIds = [bill.externalId];
 
     const report = await syncSource(adapter, repository, now, {
       historyStartYear: 2019,

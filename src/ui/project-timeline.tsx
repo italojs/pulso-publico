@@ -421,14 +421,20 @@ function TimelineContent({ detailed, items, voteEvents }: Readonly<{
   );
 }
 
-export function ProjectTimeline({ items, voteEvents = [] }: Readonly<{
+export function ProjectTimeline({ historyLoadStatus = "complete", items, voteEvents = [] }: Readonly<{
+  historyLoadStatus?: "pending" | "complete" | "failed";
   items: PublicTimelineItem[];
   voteEvents?: PublicVoteEvent[];
 }>) {
   const [view, setView] = useState<TimelineView>("simple");
 
   if (items.length === 0 && voteEvents.length === 0) {
-    return <p className="sectionEmpty">A fonte oficial ainda não publicou movimentações detalhadas para esta matéria.</p>;
+    const message = historyLoadStatus === "complete"
+      ? "A fonte oficial não publicou movimentações para esta matéria."
+      : historyLoadStatus === "failed"
+        ? "Não foi possível atualizar o histórico completo agora."
+        : "O histórico detalhado ainda não foi carregado.";
+    return <p className="sectionEmpty">{message}</p>;
   }
 
   return (

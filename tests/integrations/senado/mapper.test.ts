@@ -83,6 +83,8 @@ describe("Senado mapper", () => {
         id: 7715241,
         codigoMateria: 135142,
         identificacao: "RQS 11A/2019",
+        numero: 11,
+        ano: 2019,
         casaIdentificadora: "SF",
         dataApresentacao: "2019-02-11",
         ementa: "Requerimento oficial com sufixo alfabético.",

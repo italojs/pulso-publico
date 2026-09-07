@@ -4,8 +4,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parse } from "csv-parse";
 import { z } from "zod";
 
-import type { Bill } from "#/domain/legislative";
-import { mapCamaraBill } from "#/integrations/camara/mapper";
+import type {
+  Bill,
+  BillAuthor,
+  BillTopic,
+  LegislativeCatalogItem,
+} from "#/domain/legislative";
+import {
+  mapCamaraAuthor,
+  mapCamaraBill,
+  mapCamaraTopic,
+} from "#/integrations/camara/mapper";
 import {
   OfficialSourceError,
   retryingFetch,
@@ -23,6 +32,10 @@ export interface CamaraArchiveOptions {
 const rowSchema = z.record(z.string(), z.string());
 const defaultArchiveBaseUrl =
   "https://dadosabertos.camara.leg.br/arquivos/proposicoes/csv/";
+
+function relatedArchiveBase(baseUrl: URL, dataset: "proposicoesAutores" | "proposicoesTemas") {
+  return new URL(`../../${dataset}/csv/`, baseUrl);
+}
 
 function optionalText(value: string | undefined) {
   const normalized = value?.trim();
@@ -108,6 +121,77 @@ async function downloadAnnualArchive(fetcher: ArchiveFetcher, url: URL) {
   throw new Error("unreachable archive download state");
 }
 
+async function parseArchiveRows(archive: Buffer) {
+  const rows: Array<Record<string, string>> = [];
+  const records = Readable.from([archive]).pipe(parse({
+    bom: true,
+    columns: true,
+    delimiter: ";",
+    skip_empty_lines: true,
+  }));
+  for await (const raw of records) rows.push(rowSchema.parse(raw));
+  return rows;
+}
+
+function propositionIdFromUri(value: string | undefined) {
+  return optionalText(value)?.match(/\/proposicoes\/(\d+)\/?$/u)?.[1] ?? null;
+}
+
+async function catalogRelationsForYear(
+  year: number,
+  options: CamaraArchiveOptions,
+  baseUrl: URL,
+) {
+  const fetcher = options.fetcher ?? retryingFetch;
+  const checkedAt = options.checkedAt ?? new Date();
+  const [authorRows, topicRows] = await Promise.all([
+    downloadAnnualArchive(
+      fetcher,
+      new URL(`proposicoesAutores-${year}.csv`, relatedArchiveBase(baseUrl, "proposicoesAutores")),
+    ).then(parseArchiveRows),
+    downloadAnnualArchive(
+      fetcher,
+      new URL(`proposicoesTemas-${year}.csv`, relatedArchiveBase(baseUrl, "proposicoesTemas")),
+    ).then(parseArchiveRows),
+  ]);
+  const authors = new Map<string, BillAuthor[]>();
+  const topics = new Map<string, BillTopic[]>();
+
+  for (const row of authorRows) {
+    const billExternalId = optionalText(row.idProposicao)
+      ?? propositionIdFromUri(row.uriProposicao);
+    const name = optionalText(row.nomeAutor);
+    const type = optionalText(row.tipoAutor);
+    if (!billExternalId || !name || !type) continue;
+    const mapped = mapCamaraAuthor({
+      uri: optionalText(row.uriAutor),
+      nome: name,
+      codTipo: optionalText(row.codTipoAutor),
+      tipo: type,
+      ordemAssinatura: optionalInteger(row.ordemAssinatura),
+      proponente: optionalInteger(row.proponente),
+    }, billExternalId, checkedAt);
+    const current = authors.get(billExternalId) ?? [];
+    current.push({ ...mapped, party: optionalText(row.siglaPartidoAutor) });
+    authors.set(billExternalId, current);
+  }
+
+  for (const row of topicRows) {
+    const billExternalId = propositionIdFromUri(row.uriProposicao);
+    const label = optionalText(row.tema);
+    if (!billExternalId || !label) continue;
+    const mapped = mapCamaraTopic({
+      codTema: optionalText(row.codTema),
+      tema: label,
+    }, billExternalId, checkedAt);
+    const current = topics.get(billExternalId) ?? [];
+    current.push(mapped);
+    topics.set(billExternalId, current);
+  }
+
+  return { authors, topics };
+}
+
 export async function* streamCamaraBillArchive(
   since: Date,
   until: Date,
@@ -153,6 +237,37 @@ export async function* streamCamaraBillArchive(
         false,
         { cause: error },
       );
+    }
+  }
+}
+
+export async function* streamCamaraCatalogArchive(
+  since: Date,
+  until: Date,
+  options: CamaraArchiveOptions = {},
+): AsyncIterable<LegislativeCatalogItem> {
+  if (since.getTime() > until.getTime()) {
+    throw new RangeError("Archive interval must start before it ends");
+  }
+  const baseUrl = new URL(options.archiveBaseUrl ?? defaultArchiveBaseUrl);
+
+  for (let year = localYear(since); year <= localYear(until); year += 1) {
+    const relations = await catalogRelationsForYear(year, options, baseUrl);
+    const yearStart = Temporal.PlainDate.from(`${year}-01-01`)
+      .toZonedDateTime("America/Sao_Paulo")
+      .toInstant();
+    const nextYear = Temporal.PlainDate.from(`${year + 1}-01-01`)
+      .toZonedDateTime("America/Sao_Paulo")
+      .toInstant();
+    const boundedSince = new Date(Math.max(since.getTime(), yearStart.epochMilliseconds));
+    const boundedUntil = new Date(Math.min(until.getTime(), nextYear.epochMilliseconds - 1));
+
+    for await (const bill of streamCamaraBillArchive(boundedSince, boundedUntil, options)) {
+      yield {
+        bill,
+        authors: relations.authors.get(bill.externalId) ?? [],
+        topics: relations.topics.get(bill.externalId) ?? [],
+      };
     }
   }
 }

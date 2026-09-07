@@ -448,11 +448,16 @@ export async function getPublicBill(
       ),
   ]);
 
-  const [hydration] = await database
+  const hydrationStates = await database
     .select({ status: billHydrationState.status })
     .from(billHydrationState)
-    .where(eq(billHydrationState.billId, stored.id))
-    .limit(1);
+    .where(inArray(billHydrationState.billId, relatedBillIds));
+  const historyLoadStatus = hydrationStates.some((state) => state.status === "failed")
+    ? "failed" as const
+    : hydrationStates.length === relatedBillIds.length
+      && hydrationStates.every((state) => state.status === "complete")
+      ? "complete" as const
+      : "pending" as const;
 
   const eventIds = voteRows.map((vote) => vote.id);
   const individualRows = eventIds.length === 0
@@ -476,11 +481,7 @@ export async function getPublicBill(
 
   return {
     ...card,
-    historyLoadStatus: hydration?.status === "complete"
-      ? "complete"
-      : hydration?.status === "failed"
-        ? "failed"
-        : "pending",
+    historyLoadStatus,
     timeline: timelineRows.map((item) => ({
       source: item.source,
       externalId: item.externalId,

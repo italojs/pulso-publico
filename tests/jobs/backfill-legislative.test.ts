@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Bill, LegislativeSourceAdapter } from "#/domain/legislative";
+import {
+  BillAuthorRecord,
+  BillTopicRecord,
+  type Bill,
+  type LegislativeSourceAdapter,
+} from "#/domain/legislative";
 import { backfillLegislative } from "#/jobs/backfill-legislative";
 
 function bill(year: number): Bill {
@@ -25,6 +30,59 @@ function bill(year: number): Bill {
 }
 
 describe("backfillLegislative", () => {
+  it("persists catalog authors and topics when the official archive provides them", async () => {
+    const catalogBill = bill(2019);
+    const catalogAuthor = BillAuthorRecord.parse({
+      source: "camara",
+      externalId: "2019:1:100",
+      billExternalId: "2019",
+      lawmakerExternalId: "100",
+      officialName: "Ana Cidadã",
+      party: "ABC",
+      authorKind: "Deputado(a)",
+      isPrimary: true,
+      officialUrl: "https://example.test/deputados/100",
+      checkedAt: "2026-09-06T20:00:00.000Z",
+    });
+    const catalogTopic = BillTopicRecord.parse({
+      source: "camara",
+      externalId: "2019:40",
+      billExternalId: "2019",
+      code: "40",
+      label: "Trabalho e Emprego",
+      officialUrl: "https://example.test/2019/temas",
+      checkedAt: "2026-09-06T20:00:00.000Z",
+    });
+    const adapter = {
+      source: "camara",
+      async *streamInitialCatalog() {
+        yield { bill: catalogBill, authors: [catalogAuthor], topics: [catalogTopic] };
+      },
+    } as unknown as LegislativeSourceAdapter;
+    const repository = {
+      getHistoricalCheckpoint: vi.fn(async () => null),
+      startHistoricalCheckpoint: vi.fn(),
+      completeHistoricalCheckpoint: vi.fn(),
+      failHistoricalCheckpoint: vi.fn(),
+      upsertBillGraph: vi.fn(),
+    };
+
+    await backfillLegislative(
+      { camara: adapter },
+      repository,
+      { fromYear: 2019, throughYear: 2019, sources: ["camara"] },
+    );
+
+    expect(repository.upsertBillGraph).toHaveBeenCalledWith({
+      bill: catalogBill,
+      authors: [catalogAuthor],
+      topics: [catalogTopic],
+      movements: [],
+      voteEvents: [],
+      individualVotes: [],
+    });
+  });
+
   it("imports calendar years in ascending order and records resumable checkpoints", async () => {
     const years: number[] = [];
     const adapter = {

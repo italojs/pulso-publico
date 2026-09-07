@@ -2,12 +2,13 @@ import type {
   LegislativeSourceAdapter,
   LegislativeSourceName,
 } from "#/domain/legislative";
+import type { AdvisoryLockResult } from "#/server/db/advisory-lock";
+import { OfficialSourceError } from "#/server/http/retrying-fetch";
+import { sourceErrorCode } from "#/server/http/source-error-code";
 import {
   persistHydratedBillGraph,
-  sourceErrorCode,
-  type SyncRepository,
-} from "#/jobs/sync-source";
-import type { AdvisoryLockResult } from "#/server/db/advisory-lock";
+  type BillGraphRepository,
+} from "#/server/legislative/persist-bill-graph";
 
 export type HydrationState = {
   status: "pending" | "running" | "complete" | "failed";
@@ -106,6 +107,21 @@ export async function hydrateProject({
   }
 
   const locked = await withLock(`bill-hydration:${source}:${externalId}`, async () => {
+    const lockedState = await repository.getHydrationState(source, externalId);
+    if (
+      lockedState?.status === "complete"
+      && isRecent(lockedState.detailsCheckedAt, now, FRESH_DETAILS_MS)
+    ) {
+      return { status: "cached" as const };
+    }
+    if (
+      lockedState?.status === "failed"
+      && lockedState.nextRetryAt
+      && lockedState.nextRetryAt.getTime() > now.getTime()
+    ) {
+      return { status: "failed" as const, errorCode: "RETRY_PENDING" };
+    }
+
     await repository.markHydrationRunning(source, externalId, now);
     try {
       if (persist) {
@@ -113,13 +129,14 @@ export async function hydrateProject({
       } else {
         await persistHydratedBillGraph(
           adapter,
-          repository as HydrationRepository & SyncRepository,
+          repository as HydrationRepository & BillGraphRepository,
           externalId,
         );
       }
       await repository.markHydrationComplete(source, externalId, now);
       return { status: "complete" as const };
     } catch (error) {
+      if (!(error instanceof OfficialSourceError)) throw error;
       const errorCode = sourceErrorCode(error);
       await repository.markHydrationFailed(
         source,
