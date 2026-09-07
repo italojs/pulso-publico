@@ -14,8 +14,6 @@ interface PlainMovement {
   explanation: string;
 }
 
-const TIMELINE_HOUSES: readonly TimelineHouse[] = ["camara", "senado", "congresso"];
-
 function timelineHouseTitle(house: TimelineHouse) {
   if (house === "camara") return "Tramitação na Câmara";
   if (house === "senado") return "Tramitação no Senado";
@@ -24,15 +22,20 @@ function timelineHouseTitle(house: TimelineHouse) {
 
 function timelineGroups(items: PublicTimelineItem[]) {
   const grouped = new Map<TimelineHouse, PublicTimelineItem[]>();
-  for (const item of items) {
+  const newestFirst = items
+    .map((item, position) => ({ item, position }))
+    .sort((left, right) => {
+      const dateDifference = Date.parse(right.item.occurredAt) - Date.parse(left.item.occurredAt);
+      return dateDifference || right.position - left.position;
+    });
+
+  for (const { item } of newestFirst) {
     const houseItems = grouped.get(item.house) ?? [];
     houseItems.push(item);
     grouped.set(item.house, houseItems);
   }
-  return TIMELINE_HOUSES.flatMap((house) => {
-    const houseItems = grouped.get(house) ?? [];
-    return houseItems.length > 0 ? [{ house, items: houseItems }] : [];
-  });
+
+  return Array.from(grouped, ([house, houseItems]) => ({ house, items: houseItems }));
 }
 
 const FRIENDLY_BODY_NAMES: Readonly<Record<string, string>> = {
@@ -234,7 +237,7 @@ function SimpleTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) {
               <p>{group.items.length} {group.items.length === 1 ? "movimentação" : "movimentações"}</p>
             </header>
             <ol className="timeline timeline--simple">
-              {[...group.items].reverse().map((item) => {
+              {group.items.map((item) => {
                 const isCurrent = item === currentItem;
                 const simplified = simplifyMovement(item);
 
@@ -282,7 +285,7 @@ function DetailedTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) 
               <p>{group.items.length} {group.items.length === 1 ? "movimentação" : "movimentações"}</p>
             </header>
             <ol className="timeline timeline--detailed">
-              {[...group.items].reverse().map((item) => (
+              {group.items.map((item) => (
                 <li className={item === currentItem ? "timeline__item timeline__item--current" : "timeline__item"} key={`${item.source}-${item.externalId}`}>
                   <span className="timeline__station" aria-hidden="true" />
                   <div className="timeline__date"><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time><span>{houseLabel(item.house)}</span></div>

@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectTimeline } from "#/ui/project-timeline";
@@ -102,6 +102,54 @@ describe("project detail components", () => {
 
     expect(screen.getByRole("region", { name: "Tramitação na Câmara" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Tramitação no Senado" })).toBeInTheDocument();
+  });
+
+  it("shows the house and movements with the newest activity first", () => {
+    render(<ProjectTimeline items={[
+      {
+        source: "camara",
+        externalId: "camara-older",
+        occurredAt: "2024-05-10T12:00:00.000Z",
+        sequence: 1,
+        house: "camara",
+        bodyName: "Mesa Diretora",
+        statusLabel: "Apresentado",
+        description: "Projeto apresentado na Câmara dos Deputados.",
+        officialUrl: "https://example.com/camara-older",
+      },
+      {
+        source: "senado",
+        externalId: "senado-older",
+        occurredAt: "2026-08-20T10:00:00.000Z",
+        sequence: 1,
+        house: "senado",
+        bodyName: "Plenário",
+        statusLabel: "Recebido",
+        description: "Projeto recebido pelo Senado Federal.",
+        officialUrl: "https://example.com/senado-older",
+      },
+      {
+        source: "senado",
+        externalId: "senado-newest",
+        occurredAt: "2026-09-03T20:12:00.000Z",
+        sequence: 2,
+        house: "senado",
+        bodyName: "Plenário",
+        statusLabel: "Aprovado",
+        description: "Projeto levado a votação e aprovado no Senado Federal.",
+        officialUrl: "https://example.com/senado-newest",
+      },
+    ]} />);
+
+    const houseSections = screen.getAllByRole("region");
+    expect(houseSections.map((section) => section.getAttribute("aria-label"))).toEqual([
+      "Tramitação no Senado",
+      "Tramitação na Câmara",
+    ]);
+
+    const senateMovements = within(houseSections[0]!).getAllByRole("listitem");
+    expect(senateMovements[0]).toHaveTextContent("Projeto levado a votação");
+    expect(senateMovements[1]).toHaveTextContent("Projeto recebido pelo órgão responsável");
   });
 
   it("uses a neutral fallback when a movement cannot be simplified safely", () => {
