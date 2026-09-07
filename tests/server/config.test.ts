@@ -17,7 +17,7 @@ describe("parseEnv", () => {
     expect(value.SENADO_BASE_URL).toBe("https://legis.senado.leg.br/dadosabertos");
     expect(value.HTTP_TIMEOUT_MS).toBe(10_000);
     expect(value.HTTP_MAX_ATTEMPTS).toBe(3);
-    expect(value.INITIAL_HISTORY_MONTHS).toBe(36);
+    expect(value.LEGISLATIVE_HISTORY_START_YEAR).toBe(2019);
     expect(value.TSE_DATA_BASE_URL).toBe("https://cdn.tse.jus.br");
     expect(value.ELECTION_YEAR).toBe(2026);
     expect(value.GEO_PROVIDER).toBe("none");
@@ -46,5 +46,17 @@ describe("parseEnv", () => {
     const database = { DATABASE_URL: "postgres://app:app@localhost:5432/legislativo" };
     expect(() => parseEnv({ ...database, ELECTION_YEAR: "2024" })).toThrow(/ELECTION_YEAR/);
     expect(() => parseEnv({ ...database, GEO_PROVIDER: "arbitrary" })).toThrow(/GEO_PROVIDER/);
+  });
+
+  it("rejects legislative history years outside the supported range", () => {
+    const database = { DATABASE_URL: "postgres://app:app@localhost:5432/legislativo" };
+    expect(() => parseEnv({
+      ...database,
+      LEGISLATIVE_HISTORY_START_YEAR: "1945",
+    })).toThrow(/LEGISLATIVE_HISTORY_START_YEAR/);
+    expect(() => parseEnv({
+      ...database,
+      LEGISLATIVE_HISTORY_START_YEAR: String(new Date().getUTCFullYear() + 1),
+    })).toThrow(/LEGISLATIVE_HISTORY_START_YEAR/);
   });
 });

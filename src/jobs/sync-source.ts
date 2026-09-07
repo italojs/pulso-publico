@@ -208,7 +208,7 @@ export async function syncSource(
   adapter: LegislativeSourceAdapter,
   repository: SyncRepository,
   now: Date,
-  options: { initialHistoryMonths: number },
+  options: { historyStartYear: number },
 ): Promise<SyncReport> {
   const report = createReport(adapter.source, now);
 
@@ -217,11 +217,7 @@ export async function syncSource(
     const checkpoint = await repository.getCheckpoint(adapter.source);
 
     if (!checkpoint) {
-      const cutoff = Temporal.Instant.from(now.toISOString())
-        .toZonedDateTimeISO("UTC")
-        .subtract({ months: options.initialHistoryMonths })
-        .toInstant();
-      const since = new Date(cutoff.epochMilliseconds);
+      const since = new Date(Date.UTC(options.historyStartYear, 0, 1));
 
       if (supportsBulkBootstrap(adapter)) {
         for await (const bill of adapter.streamInitialBills(since, now)) {

@@ -246,7 +246,7 @@ class FakeRepository implements SyncRepository {
 describe("syncSource", () => {
   const now = new Date("2026-09-03T18:00:00.000Z");
 
-  it("uses the Câmara bulk bootstrap for the initial 36-month summary load", async () => {
+  it("uses the Câmara bulk bootstrap from January 1 of the fixed start year", async () => {
     const adapter = new FakeAdapter();
     const repository = new FakeRepository();
     const received = { since: null as Date | null };
@@ -259,11 +259,11 @@ describe("syncSource", () => {
     });
 
     const report = await syncSource(bulkAdapter, repository, now, {
-      initialHistoryMonths: 36,
+      historyStartYear: 2019,
     });
 
     expect(report).toMatchObject({ source: "camara", bills: 2, failed: false });
-    expect(received.since?.toISOString()).toBe("2023-09-03T18:00:00.000Z");
+    expect(received.since?.toISOString()).toBe("2019-01-01T00:00:00.000Z");
     expect(adapter.receivedSince).toBeNull();
     expect(adapter.movementCalls).toBe(0);
     expect(repository.graphs.every((item) => item.movements.length === 0)).toBe(true);
@@ -274,9 +274,9 @@ describe("syncSource", () => {
     const adapter = new FakeAdapter("senado");
     const repository = new FakeRepository();
 
-    await syncSource(adapter, repository, now, { initialHistoryMonths: 36 });
+    await syncSource(adapter, repository, now, { historyStartYear: 2019 });
 
-    expect(adapter.receivedSince?.toISOString()).toBe("2023-09-03T18:00:00.000Z");
+    expect(adapter.receivedSince?.toISOString()).toBe("2019-01-01T00:00:00.000Z");
     expect(adapter.movementCalls).toBe(0);
   });
 
@@ -286,7 +286,7 @@ describe("syncSource", () => {
     repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
 
     const report = await syncSource(adapter, repository, now, {
-      initialHistoryMonths: 36,
+      historyStartYear: 2019,
     });
 
     expect(adapter.receivedSince?.toISOString()).toBe("2026-09-03T17:25:00.000Z");
@@ -315,7 +315,7 @@ describe("syncSource", () => {
     repository.trackedBillExternalIds = [bill.externalId, "followed-old-bill"];
 
     const report = await syncSource(adapter, repository, now, {
-      initialHistoryMonths: 36,
+      historyStartYear: 2019,
     });
 
     expect(adapter.hydratedExternalIds).toEqual([bill.externalId, "followed-old-bill"]);
@@ -333,7 +333,7 @@ describe("syncSource", () => {
     repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
 
     const report = await syncSource(adapter, repository, now, {
-      initialHistoryMonths: 36,
+      historyStartYear: 2019,
     });
 
     expect(report.failed).toBe(false);
@@ -350,7 +350,7 @@ describe("syncSource", () => {
     repository.checkpoint = new Date("2026-09-03T17:30:00.000Z");
 
     const report = await syncSource(adapter, repository, now, {
-      initialHistoryMonths: 36,
+      historyStartYear: 2019,
     });
 
     expect(report.failed).toBe(true);

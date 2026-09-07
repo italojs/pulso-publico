@@ -55,7 +55,7 @@ try {
       let failed = false;
       for (const source of sources) {
         const report = await syncSource(adapters[source], repository, new Date(), {
-          initialHistoryMonths: env.INITIAL_HISTORY_MONTHS,
+          historyStartYear: env.LEGISLATIVE_HISTORY_START_YEAR,
         });
         console.log(JSON.stringify(report));
         failed ||= report.failed;

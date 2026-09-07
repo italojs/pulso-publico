@@ -78,6 +78,17 @@ export const electoralSyncStatusEnum = pgEnum("electoral_sync_status", [
   "successful",
   "failed",
 ]);
+export const billHydrationStatusEnum = pgEnum("bill_hydration_status", [
+  "pending",
+  "running",
+  "complete",
+  "failed",
+]);
+export const historicalImportStatusEnum = pgEnum("historical_import_status", [
+  "running",
+  "complete",
+  "failed",
+]);
 
 export type ElectoralResourceProvenanceJson = Record<string, {
   sourceArchiveUrl: string;
@@ -281,6 +292,47 @@ export const sourceHealth = pgTable("source_health", {
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const historicalImportCheckpoints = pgTable(
+  "historical_import_checkpoints",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    source: sourceEnum("source").notNull(),
+    dataset: text("dataset").notNull(),
+    year: integer("year").notNull(),
+    status: historicalImportStatusEnum("status").notNull(),
+    recordsRead: integer("records_read").default(0).notNull(),
+    recordsPersisted: integer("records_persisted").default(0).notNull(),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    ...timestamps,
+  },
+  (table) => [
+    unique("historical_import_checkpoints_source_dataset_year_uq")
+      .on(table.source, table.dataset, table.year),
+    index("historical_import_checkpoints_status_idx").on(table.status, table.year),
+  ],
+);
+
+export const billHydrationState = pgTable(
+  "bill_hydration_state",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    billId: uuid("bill_id").notNull().references(() => bills.id, { onDelete: "cascade" }),
+    status: billHydrationStatusEnum("status").default("pending").notNull(),
+    detailsCheckedAt: timestamp("details_checked_at", { withTimezone: true }),
+    lastRequestedAt: timestamp("last_requested_at", { withTimezone: true }),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    ...timestamps,
+  },
+  (table) => [
+    unique("bill_hydration_state_bill_id_uq").on(table.billId),
+    index("bill_hydration_state_status_retry_idx").on(table.status, table.nextRetryAt),
+    index("bill_hydration_state_last_requested_idx").on(table.lastRequestedAt),
+  ],
+);
 
 export const aiSummaries = pgTable(
   "ai_summaries",
@@ -592,6 +644,8 @@ export type NewVoteEvent = typeof voteEvents.$inferInsert;
 export type NewIndividualVote = typeof individualVotes.$inferInsert;
 export type NewSyncCheckpoint = typeof syncCheckpoints.$inferInsert;
 export type NewSourceHealth = typeof sourceHealth.$inferInsert;
+export type NewHistoricalImportCheckpoint = typeof historicalImportCheckpoints.$inferInsert;
+export type NewBillHydrationState = typeof billHydrationState.$inferInsert;
 export type NewAiSummary = typeof aiSummaries.$inferInsert;
 export type NewUser = typeof users.$inferInsert;
 export type NewSession = typeof sessions.$inferInsert;

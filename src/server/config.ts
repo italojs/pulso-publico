@@ -6,13 +6,15 @@ const optionalSecret = z.preprocess(
   z.string().min(1).optional(),
 );
 
+const currentYear = new Date().getUTCFullYear();
+
 const environmentSchema = z.object({
   DATABASE_URL: z.url().startsWith("postgres"),
   CAMARA_BASE_URL: z.url().default("https://dadosabertos.camara.leg.br/api/v2"),
   SENADO_BASE_URL: z.url().default("https://legis.senado.leg.br/dadosabertos"),
   HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   HTTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
-  INITIAL_HISTORY_MONTHS: z.coerce.number().int().min(1).max(120).default(36),
+  LEGISLATIVE_HISTORY_START_YEAR: z.coerce.number().int().min(1946).max(currentYear).default(2019),
   TSE_DATA_BASE_URL: z.url().default("https://cdn.tse.jus.br"),
   ELECTORAL_MEDIA_DIRECTORY: z.string().min(1).default(".data/electoral-assets"),
   ELECTION_YEAR: z.coerce.number().int().min(2026).max(9999).default(2026),
