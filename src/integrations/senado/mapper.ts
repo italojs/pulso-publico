@@ -156,15 +156,25 @@ function secureUrl(value: string | null | undefined) {
 
 function processIdentity(value: z.infer<typeof rawProcessSchema>) {
   const match = value.identificacao.match(
-    /^([^\s]+)\s+(\d+)\/(\d{4})(?:\s+.+)?$/u,
+    /^([^\s]+)\s+(\d+[A-Z]*)\/(\d{4})(?:\s+.+)?$/iu,
   );
   const sigla = blankToNull(value.sigla) ?? match?.[1] ?? null;
-  const numero = identifierOrNull(value.numero) ?? match?.[2] ?? null;
+  const officialNumber = identifierOrNull(value.numero) ?? match?.[2] ?? null;
   const ano = value.ano ?? (match?.[3] ? Number(match[3]) : null);
-  if (!sigla || !numero || !ano) {
+  const numericNumber = officialNumber?.match(/^\d+/u)?.[0];
+  if (!sigla || !officialNumber || !numericNumber || !ano) {
     throw new Error(`Senado process ${value.id} has an invalid official identification`);
   }
-  return { sigla, numero: String(Number(numero)), ano };
+  const displayNumber = /^\d+$/u.test(officialNumber)
+    ? String(Number(officialNumber))
+    : officialNumber.toUpperCase();
+  return {
+    sigla,
+    displayNumber,
+    proposalNumber: Number(numericNumber),
+    identityNumber: displayNumber.toLowerCase(),
+    ano,
+  };
 }
 
 function officialBillUrl(codigoMateria: string) {
@@ -214,11 +224,11 @@ export function mapSenadoBill(raw: unknown, checkedAt: Date): Bill {
   return BillRecord.parse({
     source: "senado",
     externalId: value.id,
-    officialCode: `${identity.sigla.toUpperCase()} ${identity.numero}/${identity.ano}`,
+    officialCode: `${identity.sigla.toUpperCase()} ${identity.displayNumber}/${identity.ano}`,
     proposalType: identity.sigla,
-    proposalNumber: Number(identity.numero),
+    proposalNumber: identity.proposalNumber,
     proposalYear: identity.ano,
-    congressionalKey: `${identity.sigla.toLowerCase()}:${identity.numero}:${identity.ano}`,
+    congressionalKey: `${identity.sigla.toLowerCase()}:${identity.identityNumber}:${identity.ano}`,
     officialTitle: value.identificacao,
     officialSummary: ementa,
     originHouse: inferOriginHouse(value),

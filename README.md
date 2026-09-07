@@ -9,7 +9,7 @@ O aplicativo oferece feed com busca e filtros, página completa de projeto com l
 - Node.js 26.8.1 (`.node-version` e `.nvmrc`);
 - npm 11;
 - PostgreSQL 18, local ou via Docker;
-- cerca de 2 GB livres para a carga legislativa móvel de 36 meses e ao menos 10 GB adicionais para sincronizar e manter a mídia eleitoral de 2026 com folga para a geração atômica seguinte.
+- espaço persistente para o catálogo legislativo desde 2019 e ao menos 10 GB adicionais para sincronizar e manter a mídia eleitoral de 2026 com folga para a geração atômica seguinte.
 
 ## Início rápido
 
@@ -19,6 +19,7 @@ docker compose up -d
 npm install
 npm run db:migrate
 npm run sync
+npm run backfill:legislative -- --from=2019 --source=all
 npm run sync:election
 npm run dev
 ```
@@ -44,6 +45,7 @@ npm run alerts:dispatch
 ```
 
 - `sync`: atualização incremental das duas casas e tentativa de entrega de push;
+- `backfill:legislative`: catálogo retomável por ano, independente do checkpoint incremental; anos concluídos são ignorados, salvo com `--refresh`;
 - `sync:election`: retrato completo e atômico das candidaturas de 2026 a partir dos arquivos oficiais do TSE;
 - `reconcile`: reconciliação diária da janela oficial do dia anterior;
 - `summaries`: gera e atualiza títulos e descrições simples somente para a janela superior do feed (100 projetos por padrão), ignorada com segurança sem chave;
@@ -75,7 +77,9 @@ O histórico legislativo no perfil só aparece para vínculos revisados e confir
 
 ## Dados e privacidade
 
-- A carga local inicial usa uma janela móvel de 36 meses (`INITIAL_HISTORY_MONTHS=36`).
+- O catálogo legislativo usa uma data inicial fixa (`LEGISLATIVE_HISTORY_START_YEAR=2019`). A primeira carga pode ser retomada com `npm run backfill:legislative -- --from=2019 --source=all`.
+- Tramitações, votações e votos individuais são carregados das fontes oficiais quando a página do projeto é aberta. O resultado fica armazenado; acessos simultâneos ao mesmo projeto não repetem o trabalho.
+- Matérias bicamerais são relacionadas somente por tipo, número e ano oficiais, com sinal de origem na outra Casa. Câmara e Senado continuam separados na página.
 - Documentos e anexos permanecem nas fontes oficiais; o banco guarda dados estruturados e links.
 - Seguir projetos, parlamentares ou candidaturas exige uma conta. Acompanhamentos antigos de projetos ou parlamentares que ainda estejam salvos no navegador são migrados de forma idempotente no primeiro acesso autenticado e, depois, removidos do armazenamento local.
 - Senhas usam `scrypt`; tokens de sessão ficam em cookie `HttpOnly` e somente seus hashes são armazenados.

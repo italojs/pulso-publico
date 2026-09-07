@@ -77,6 +77,29 @@ describe("Senado mapper", () => {
     });
   });
 
+  it("preserves an official alphabetic suffix in a Senate proposal number", () => {
+    const bill = mapSenadoBill(
+      {
+        id: 7715241,
+        codigoMateria: 135142,
+        identificacao: "RQS 11A/2019",
+        casaIdentificadora: "SF",
+        dataApresentacao: "2019-02-11",
+        ementa: "Requerimento oficial com sufixo alfabético.",
+        situacaoAtual: "ARQUIVADA",
+      },
+      checkedAt,
+    );
+
+    expect(bill).toMatchObject({
+      officialCode: "RQS 11A/2019",
+      proposalType: "RQS",
+      proposalNumber: 11,
+      proposalYear: 2019,
+      congressionalKey: "rqs:11a:2019",
+    });
+  });
+
   it.each(["R.C", "R.S"])("accepts the real official Senate type %s", (sigla) => {
     const bill = mapSenadoBill({
       ...processFixture,
