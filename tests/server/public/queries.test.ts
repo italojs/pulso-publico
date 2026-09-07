@@ -636,6 +636,135 @@ describe("public legislative queries", () => {
     expect(project?.voteEvents[0]?.individualVotes).toEqual([]);
   });
 
+  it("loads the timeline from both houses for bills with the same congressional identity", async () => {
+    const [cameraVersion, unrelatedSameCode] = await testDb
+      .insert(bills)
+      .values([
+        {
+          source: "camara",
+          externalId: "601-camara",
+          officialCode: "PL 12/2024",
+          proposalType: "PL",
+          proposalNumber: 12,
+          proposalYear: 2024,
+          congressionalKey: "PL-12-2024",
+          officialTitle: "Projeto de Lei nº 12, de 2024",
+          officialSummary: "Dispõe sobre atendimento básico de saúde.",
+          originHouse: "camara",
+          currentHouse: "senado",
+          statusLabel: "Enviado ao Senado Federal",
+          simplifiedStage: "voted",
+          officialUrl: "https://www.camara.leg.br/propostas-legislativas/601-camara",
+          presentedAt: new Date("2024-05-10T12:00:00.000Z"),
+          checkedAt,
+        },
+        {
+          source: "camara",
+          externalId: "601-unrelated",
+          officialCode: "PL 12/2024",
+          proposalType: "PL",
+          proposalNumber: 12,
+          proposalYear: 2024,
+          congressionalKey: "PL-12-2024",
+          officialTitle: "Projeto diferente com a mesma numeração",
+          officialSummary: "Matéria originada no Senado.",
+          originHouse: "senado",
+          currentHouse: "camara",
+          statusLabel: "Em análise na Câmara",
+          simplifiedStage: "committees",
+          officialUrl: "https://www.camara.leg.br/propostas-legislativas/601-unrelated",
+          presentedAt: new Date("2025-01-10T12:00:00.000Z"),
+          checkedAt,
+        },
+      ])
+      .returning();
+    if (!cameraVersion || !unrelatedSameCode) throw new Error("related Câmara bills not seeded");
+    await testDb.insert(movements).values([
+      {
+        source: "camara",
+        externalId: "move-601-camara-1",
+        billId: cameraVersion.id,
+        occurredAt: new Date("2024-05-10T12:00:00.000Z"),
+        sequence: 1,
+        house: "camara",
+        bodyName: "Mesa Diretora",
+        statusLabel: "Apresentado",
+        officialDescription: "Projeto apresentado na Câmara dos Deputados.",
+        officialUrl: cameraVersion.officialUrl,
+        checkedAt,
+      },
+      {
+        source: "camara",
+        externalId: "move-601-unrelated-1",
+        billId: unrelatedSameCode.id,
+        occurredAt: new Date("2025-01-10T12:00:00.000Z"),
+        sequence: 1,
+        house: "camara",
+        statusLabel: "Em análise",
+        officialDescription: "Movimentação de outra matéria com a mesma numeração.",
+        officialUrl: unrelatedSameCode.officialUrl,
+        checkedAt,
+      },
+      {
+        source: "camara",
+        externalId: "move-601-camara-tie",
+        billId: cameraVersion.id,
+        occurredAt: new Date("2026-08-29T10:00:00.000Z"),
+        sequence: 99,
+        house: "camara",
+        statusLabel: "Enviado ao Senado",
+        officialDescription: "Último registro da Câmara antes da análise no Senado.",
+        officialUrl: cameraVersion.officialUrl,
+        checkedAt,
+      },
+    ]);
+
+    const project = await getPublicBill(testDb, "senado", "601");
+
+    expect(project?.timeline.map((item) => [item.house, item.description])).toEqual([
+      ["camara", "Projeto apresentado na Câmara dos Deputados."],
+      ["senado", "Incluído na pauta do Plenário."],
+      ["camara", "Último registro da Câmara antes da análise no Senado."],
+      ["senado", "Aberta a deliberação do projeto."],
+    ]);
+  });
+
+  it("keeps an ambiguous bicameral match separate", async () => {
+    const cameraVersions = await testDb
+      .insert(bills)
+      .values(["a", "b"].map((suffix) => ({
+        source: "camara" as const,
+        externalId: `601-camara-${suffix}`,
+        officialCode: "PL 12/2024",
+        congressionalKey: "PL-12-2024",
+        officialTitle: `Possível versão ${suffix}`,
+        officialSummary: "Correspondência ambígua.",
+        originHouse: "camara" as const,
+        currentHouse: "senado" as const,
+        statusLabel: "Enviado ao Senado Federal",
+        simplifiedStage: "voted" as const,
+        officialUrl: `https://www.camara.leg.br/propostas-legislativas/601-camara-${suffix}`,
+        checkedAt,
+      })))
+      .returning();
+    await testDb.insert(movements).values(cameraVersions.map((bill, index) => ({
+      source: "camara" as const,
+      externalId: `move-ambiguous-${index}`,
+      billId: bill.id,
+      occurredAt: new Date("2024-05-10T12:00:00.000Z"),
+      sequence: 1,
+      house: "camara" as const,
+      statusLabel: "Apresentado",
+      officialDescription: `Movimentação ambígua ${index}.`,
+      officialUrl: bill.officialUrl,
+      checkedAt,
+    })));
+
+    const project = await getPublicBill(testDb, "senado", "601");
+
+    expect(project?.timeline.map((item) => item.house)).toEqual(["senado", "senado"]);
+  });
+
   it("loads a neutral lawmaker profile with authored bills and votes", async () => {
     const profile = await getPublicLawmaker(testDb, "senado", "200");
 

@@ -38,6 +38,7 @@ export interface PublicBillPage {
 }
 
 export interface PublicTimelineItem {
+  source: LegislativeSourceName;
   externalId: string;
   occurredAt: string;
   sequence: number;

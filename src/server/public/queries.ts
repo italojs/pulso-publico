@@ -237,6 +237,7 @@ async function enrichBillRows(
     officialSummary: string;
     officialUrl: string;
     statusLabel: string;
+    congressionalKey: string | null;
     originHouse: "camara" | "senado" | "congresso";
     currentHouse: "camara" | "senado" | "congresso" | null;
     presentedAt: Date | null;
@@ -321,6 +322,7 @@ const billSelection = {
   officialSummary: bills.officialSummary,
   officialUrl: bills.officialUrl,
   statusLabel: bills.statusLabel,
+  congressionalKey: bills.congressionalKey,
   originHouse: bills.originHouse,
   currentHouse: bills.currentHouse,
   presentedAt: bills.presentedAt,
@@ -409,12 +411,31 @@ export async function getPublicBill(
   const stored = rows[0];
   if (!card || !stored) return null;
 
+  const relatedBillRows = stored.congressionalKey
+    ? await database
+        .select({ id: bills.id, source: bills.source, originHouse: bills.originHouse })
+        .from(bills)
+        .where(eq(bills.congressionalKey, stored.congressionalKey))
+    : [{ id: stored.id, source: stored.source, originHouse: stored.originHouse }];
+  const partnerCandidates = relatedBillRows.filter(
+    (item) => item.source !== stored.source && item.originHouse === stored.originHouse,
+  );
+  const relatedBillIds = [
+    stored.id,
+    ...(partnerCandidates.length === 1 ? [partnerCandidates[0]!.id] : []),
+  ];
+
   const [timelineRows, voteRows] = await Promise.all([
     database
       .select()
       .from(movements)
-      .where(eq(movements.billId, stored.id))
-      .orderBy(asc(movements.occurredAt), asc(movements.sequence)),
+      .where(inArray(movements.billId, relatedBillIds))
+      .orderBy(
+        asc(movements.occurredAt),
+        asc(sql<boolean>`${movements.source} = ${source}`),
+        asc(movements.sequence),
+        asc(movements.externalId),
+      ),
     database
       .select()
       .from(voteEvents)
@@ -445,6 +466,7 @@ export async function getPublicBill(
   return {
     ...card,
     timeline: timelineRows.map((item) => ({
+      source: item.source,
       externalId: item.externalId,
       occurredAt: iso(item.occurredAt),
       sequence: item.sequence,

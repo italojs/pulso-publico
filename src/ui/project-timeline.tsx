@@ -7,10 +7,32 @@ import { formatDateTime, houseLabel } from "#/ui/format";
 import { ExternalIcon } from "#/ui/icons";
 
 type TimelineView = "simple" | "detailed";
+type TimelineHouse = PublicTimelineItem["house"];
 
 interface PlainMovement {
   title: string;
   explanation: string;
+}
+
+const TIMELINE_HOUSES: readonly TimelineHouse[] = ["camara", "senado", "congresso"];
+
+function timelineHouseTitle(house: TimelineHouse) {
+  if (house === "camara") return "Tramitação na Câmara";
+  if (house === "senado") return "Tramitação no Senado";
+  return "Tramitação no Congresso Nacional";
+}
+
+function timelineGroups(items: PublicTimelineItem[]) {
+  const grouped = new Map<TimelineHouse, PublicTimelineItem[]>();
+  for (const item of items) {
+    const houseItems = grouped.get(item.house) ?? [];
+    houseItems.push(item);
+    grouped.set(item.house, houseItems);
+  }
+  return TIMELINE_HOUSES.flatMap((house) => {
+    const houseItems = grouped.get(house) ?? [];
+    return houseItems.length > 0 ? [{ house, items: houseItems }] : [];
+  });
 }
 
 const FRIENDLY_BODY_NAMES: Readonly<Record<string, string>> = {
@@ -198,66 +220,92 @@ function ViewSelector({ view, onChange }: Readonly<{ view: TimelineView; onChang
 }
 
 function SimpleTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) {
+  const currentItem = items.at(-1);
+
   return (
     <div aria-labelledby="timeline-simple-tab" id="timeline-simple-panel" role="tabpanel">
       <p className="timelineViewIntro">Entenda os principais acontecimentos sem termos técnicos. As explicações abaixo são criadas por regras, a partir dos registros oficiais.</p>
-      <ol className="timeline timeline--simple">
-        {[...items].reverse().map((item, index) => {
-          const isCurrent = index === 0;
-          const simplified = simplifyMovement(item);
+      <div className="timelineHouses">
+        {timelineGroups(items).map((group) => (
+          <section aria-label={timelineHouseTitle(group.house)} className={`timelineHouse timelineHouse--${group.house}`} key={group.house}>
+            <header className="timelineHouse__header">
+              <span>{houseLabel(group.house)}</span>
+              <h3>{timelineHouseTitle(group.house)}</h3>
+              <p>{group.items.length} {group.items.length === 1 ? "movimentação" : "movimentações"}</p>
+            </header>
+            <ol className="timeline timeline--simple">
+              {[...group.items].reverse().map((item) => {
+                const isCurrent = item === currentItem;
+                const simplified = simplifyMovement(item);
 
-          return (
-            <li className={isCurrent ? "timeline__item timeline__item--current" : "timeline__item timeline__item--complete"} key={item.externalId}>
-              <span className="timeline__station" aria-hidden="true" />
-              <div className="timeline__date"><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time><span>{houseLabel(item.house)}</span></div>
-              <div className="timeline__body">
-                <span className={isCurrent ? "timeline__state timeline__state--current" : "timeline__state timeline__state--complete"}>
-                  {isCurrent ? "Etapa atual" : "Concluída"}
-                </span>
-                <strong>{simplified.title}</strong>
-                <p>{simplified.explanation}</p>
-                {isCurrent ? (
-                  <div className="timeline__nextStep">
-                    <b>O que acontece agora</b>
-                    <span>{explainNextStep(item.statusLabel)}</span>
-                  </div>
-                ) : null}
-                <ResponsibleBody bodyName={item.bodyName} />
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+                return (
+                  <li className={isCurrent ? "timeline__item timeline__item--current" : "timeline__item timeline__item--complete"} key={`${item.source}-${item.externalId}`}>
+                    <span className="timeline__station" aria-hidden="true" />
+                    <div className="timeline__date"><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time><span>{houseLabel(item.house)}</span></div>
+                    <div className="timeline__body">
+                      <span className={isCurrent ? "timeline__state timeline__state--current" : "timeline__state timeline__state--complete"}>
+                        {isCurrent ? "Etapa atual" : "Concluída"}
+                      </span>
+                      <strong>{simplified.title}</strong>
+                      <p>{simplified.explanation}</p>
+                      {isCurrent ? (
+                        <div className="timeline__nextStep">
+                          <b>O que acontece agora</b>
+                          <span>{explainNextStep(item.statusLabel)}</span>
+                        </div>
+                      ) : null}
+                      <ResponsibleBody bodyName={item.bodyName} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
 
 function DetailedTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) {
+  const currentItem = items.at(-1);
+
   return (
     <div aria-labelledby="timeline-detailed-tab" id="timeline-detailed-panel" role="tabpanel">
       <p className="timelineViewIntro">Veja os registros completos exatamente como foram publicados pela fonte oficial.</p>
-      <ol className="timeline timeline--detailed">
-        {[...items].reverse().map((item, index) => (
-          <li className={index === 0 ? "timeline__item timeline__item--current" : "timeline__item"} key={item.externalId}>
-            <span className="timeline__station" aria-hidden="true" />
-            <div className="timeline__date"><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time><span>{houseLabel(item.house)}</span></div>
-            <div className="timeline__body">
-              {index === 0 ? <span className="timeline__currentLabel">Etapa atual</span> : null}
-              {item.statusLabel ? (
-                <div className="timeline__officialStatus">
-                  <span>Situação registrada nesse momento</span>
-                  <strong>{item.statusLabel}</strong>
-                </div>
-              ) : null}
-              <p>{item.description}</p>
-              <ResponsibleBody bodyName={item.bodyName} />
-              <div className="timeline__meta">
-                <a href={item.officialUrl} rel="noreferrer" target="_blank">Registro oficial <ExternalIcon /></a>
-              </div>
-            </div>
-          </li>
+      <div className="timelineHouses">
+        {timelineGroups(items).map((group) => (
+          <section aria-label={timelineHouseTitle(group.house)} className={`timelineHouse timelineHouse--${group.house}`} key={group.house}>
+            <header className="timelineHouse__header">
+              <span>{houseLabel(group.house)}</span>
+              <h3>{timelineHouseTitle(group.house)}</h3>
+              <p>{group.items.length} {group.items.length === 1 ? "movimentação" : "movimentações"}</p>
+            </header>
+            <ol className="timeline timeline--detailed">
+              {[...group.items].reverse().map((item) => (
+                <li className={item === currentItem ? "timeline__item timeline__item--current" : "timeline__item"} key={`${item.source}-${item.externalId}`}>
+                  <span className="timeline__station" aria-hidden="true" />
+                  <div className="timeline__date"><time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time><span>{houseLabel(item.house)}</span></div>
+                  <div className="timeline__body">
+                    {item === currentItem ? <span className="timeline__currentLabel">Etapa atual</span> : null}
+                    {item.statusLabel ? (
+                      <div className="timeline__officialStatus">
+                        <span>Situação registrada nesse momento</span>
+                        <strong>{item.statusLabel}</strong>
+                      </div>
+                    ) : null}
+                    <p>{item.description}</p>
+                    <ResponsibleBody bodyName={item.bodyName} />
+                    <div className="timeline__meta">
+                      <a href={item.officialUrl} rel="noreferrer" target="_blank">Registro oficial <ExternalIcon /></a>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
         ))}
-      </ol>
+      </div>
     </div>
   );
 }

@@ -654,6 +654,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .timelineViewSelector__button:hover { color: var(--ink); background: rgb(255 255 255 / 55%); }
 .timelineViewSelector__button--active { color: var(--green-dark); background: white; box-shadow: 0 2px 8px rgb(23 36 31 / 10%); }
 .timelineViewIntro { max-width: 720px; margin: 0 0 28px; color: var(--ink-soft); font-size: 14px; }
+.timelineHouses { display: grid; gap: 44px; }
+.timelineHouse { padding: 24px 24px 0; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.timelineHouse--camara { border-top: 4px solid var(--green); }
+.timelineHouse--senado { border-top: 4px solid #315c8c; }
+.timelineHouse--congresso { border-top: 4px solid var(--yellow); }
+.timelineHouse__header { display: grid; padding-bottom: 22px; grid-template-columns: 1fr auto; align-items: end; gap: 2px 20px; }
+.timelineHouse__header > span { grid-column: 1 / -1; color: var(--ink-soft); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.timelineHouse__header h3 { margin: 0; font-family: var(--display); font-size: clamp(28px, 4vw, 38px); line-height: 1; }
+.timelineHouse__header p { margin: 0; color: var(--ink-soft); font-size: 12px; }
 .timeline { padding: 0; margin: 0; list-style: none; }
 .timeline__item { position: relative; display: grid; padding: 0 0 34px 38px; grid-template-columns: 145px minmax(0, 1fr); gap: 24px; }
 .timeline__item::before { position: absolute; top: 8px; bottom: -8px; left: 9px; width: 2px; background: #becbc6; content: ""; }
@@ -990,6 +999,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .detailSidebar { position: static; }
   .timelineViewSelector { display: grid; width: 100%; grid-template-columns: 1fr 1fr; }
   .timelineViewSelector__button { padding-inline: 10px; }
+  .timelineHouse { padding-inline: 16px; }
+  .timelineHouse__header { grid-template-columns: 1fr; }
   .timeline__item { padding-left: 30px; grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .timeline__meta { flex-direction: column; }
   .voteEvent > header { grid-template-columns: 1fr; }

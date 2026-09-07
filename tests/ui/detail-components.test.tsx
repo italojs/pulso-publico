@@ -14,6 +14,7 @@ describe("project detail components", () => {
   it("opens a plain-language timeline that marks only the latest movement as current", () => {
     render(<ProjectTimeline items={[
       {
+        source: "camara",
         externalId: "m1",
         occurredAt: "2026-04-22T19:23:00.000Z",
         sequence: 1,
@@ -24,6 +25,7 @@ describe("project detail components", () => {
         officialUrl: "https://example.com/m1",
       },
       {
+        source: "camara",
         externalId: "m2",
         occurredAt: "2026-09-03T19:36:00.000Z",
         sequence: 14,
@@ -51,6 +53,7 @@ describe("project detail components", () => {
 
   it("reveals every official timeline fact and source in the detailed view", () => {
     render(<ProjectTimeline items={[{
+      source: "camara",
       externalId: "m1",
       occurredAt: "2026-08-30T14:00:00.000Z",
       sequence: 1,
@@ -71,8 +74,39 @@ describe("project detail components", () => {
     expect(screen.getByText("Registro oficial")).toHaveAttribute("href", "https://example.com/m1");
   });
 
+  it("separates Câmara and Senado movements into clearly labeled sections", () => {
+    render(<ProjectTimeline items={[
+      {
+        source: "camara",
+        externalId: "camara-1",
+        occurredAt: "2024-05-10T12:00:00.000Z",
+        sequence: 1,
+        house: "camara",
+        bodyName: "Mesa Diretora",
+        statusLabel: "Apresentado",
+        description: "Projeto apresentado na Câmara dos Deputados.",
+        officialUrl: "https://example.com/camara-1",
+      },
+      {
+        source: "senado",
+        externalId: "senado-1",
+        occurredAt: "2026-08-20T10:00:00.000Z",
+        sequence: 1,
+        house: "senado",
+        bodyName: "Plenário",
+        statusLabel: "Em análise",
+        description: "Projeto recebido pelo Senado Federal.",
+        officialUrl: "https://example.com/senado-1",
+      },
+    ]} />);
+
+    expect(screen.getByRole("region", { name: "Tramitação na Câmara" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Tramitação no Senado" })).toBeInTheDocument();
+  });
+
   it("uses a neutral fallback when a movement cannot be simplified safely", () => {
     render(<ProjectTimeline items={[{
+      source: "senado",
       externalId: "m1",
       occurredAt: "2026-08-30T14:00:00.000Z",
       sequence: 1,
