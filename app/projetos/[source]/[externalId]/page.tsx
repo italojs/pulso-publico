@@ -45,7 +45,7 @@ export default async function ProjectPage({ params }: Readonly<{ params: Promise
         </aside>
         <div className="detailMain">
           <section className="detailSection"><header className="sectionHeader"><span className="eyebrow">Do mais recente ao mais antigo</span><h2>Linha do tempo</h2><p>{project.timeline.length} movimentações oficiais</p></header><ProjectTimeline items={project.timeline} /></section>
-          <section className="detailSection"><header className="sectionHeader"><span className="eyebrow">Decisões registradas</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteStack">{project.voteEvents.map((event) => <VoteEventCard event={event} key={event.externalId} />)}</div> : <p className="sectionEmpty">Ainda não há votações associadas a esta matéria na fonte consultada.</p>}</section>
+          <section className="detailSection" id="votacoes"><header className="sectionHeader"><span className="eyebrow">Decisões registradas</span><h2>Votações</h2><p>{project.voteEvents.length} votações relacionadas</p></header>{project.voteEvents.length ? <div className="voteStack">{project.voteEvents.map((event) => <VoteEventCard event={event} key={event.externalId} />)}</div> : <p className="sectionEmpty">Ainda não há votações associadas a esta matéria na fonte consultada.</p>}</section>
         </div>
       </div>
     </main>

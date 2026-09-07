@@ -13,6 +13,13 @@ interface PlainMovement {
   explanation: string;
 }
 
+interface InvolvedPerson {
+  name: string;
+  role: string;
+  party: string;
+  region: string;
+}
+
 const FRIENDLY_BODY_NAMES: Readonly<Record<string, string>> = {
   CCP: "Coordenação de Comissões Permanentes",
   CSAUDE: "Comissão de Saúde",
@@ -126,6 +133,72 @@ function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
+function peopleMentionedInMovement(description: string): InvolvedPerson[] {
+  const people: InvolvedPerson[] = [];
+  const addPerson = (person: InvolvedPerson) => {
+    if (!people.some((known) => normalize(known.name) === normalize(person.name))) {
+      people.push(person);
+    }
+  };
+  const affiliation = String.raw`\(\s*([^/()–—-]+?)\s*[/–—-]\s*([A-Z]{2})\s*\)`;
+  const rapporteurPattern = new RegExp(
+    String.raw`\brelator(?:a)?\s*[,;:]?\s*(?:Dep(?:utad[oa])?\.?|Sen(?:ador(?:a)?)?\.?)?\s*([^,(.;]+?)\s*${affiliation}`,
+    "giu",
+  );
+  const authorPattern = new RegExp(
+    String.raw`\bpel[oa]\s+(?:Deputad[oa]|Senador(?:a)?)\s+([^,(.;]+?)\s*${affiliation}`,
+    "giu",
+  );
+
+  for (const match of description.matchAll(rapporteurPattern)) {
+    addPerson({ name: match[1]!.trim(), role: "Relatoria", party: match[2]!.trim(), region: match[3]!.trim() });
+  }
+
+  const authorRole = normalize(description).includes("requerimento") ? "Autoria da solicitação" : "Autoria do projeto";
+  for (const match of description.matchAll(authorPattern)) {
+    addPerson({ name: match[1]!.trim(), role: authorRole, party: match[2]!.trim(), region: match[3]!.trim() });
+  }
+
+  return people;
+}
+
+function MovementParticipants({ item }: Readonly<{ item: PublicTimelineItem }>) {
+  const people = peopleMentionedInMovement(item.description);
+  const isVoteMovement = /votacao|votad[oa]|deliberacao/.test(normalize(item.description));
+
+  return (
+    <div className="timeline__participants">
+      <b>Quem participou</b>
+      {people.length > 0 ? (
+        <ul>
+          {people.map((person) => (
+            <li key={`${person.role}-${person.name}`}>
+              <strong>{person.name}</strong>
+              <span>{person.role} · {person.party} · {person.region}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>Nenhuma pessoa foi mencionada individualmente neste registro.</p>
+      )}
+      {isVoteMovement ? <a href="#votacoes">Ver votos individuais</a> : null}
+    </div>
+  );
+}
+
+function ResponsibleBody({ bodyName }: Readonly<{ bodyName: string | null }>) {
+  if (!bodyName) {
+    return null;
+  }
+
+  return (
+    <div className="timeline__responsible">
+      <b>Órgão responsável</b>
+      <span>{friendlyBodyName(bodyName)}</span>
+    </div>
+  );
+}
+
 function simplifyMovement(item: PublicTimelineItem): PlainMovement {
   const description = normalize(item.description);
   return MOVEMENT_RULES.find((rule) => rule.matches.test(description))?.movement(item) ?? {
@@ -209,7 +282,8 @@ function SimpleTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) {
                     <span>{explainNextStep(item.statusLabel)}</span>
                   </div>
                 ) : null}
-                {item.bodyName ? <div className="timeline__meta"><span>Responsável: {friendlyBodyName(item.bodyName)}</span></div> : null}
+                <MovementParticipants item={item} />
+                <ResponsibleBody bodyName={item.bodyName} />
               </div>
             </li>
           );
@@ -237,8 +311,9 @@ function DetailedTimeline({ items }: Readonly<{ items: PublicTimelineItem[] }>) 
                 </div>
               ) : null}
               <p>{item.description}</p>
+              <MovementParticipants item={item} />
+              <ResponsibleBody bodyName={item.bodyName} />
               <div className="timeline__meta">
-                {item.bodyName ? <span>{item.bodyName}</span> : null}
                 <a href={item.officialUrl} rel="noreferrer" target="_blank">Registro oficial <ExternalIcon /></a>
               </div>
             </div>
