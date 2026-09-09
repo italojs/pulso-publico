@@ -67,6 +67,7 @@ export interface CamaraAdapterOptions {
   archiveBaseUrl?: string;
   fetcher?: Fetcher;
   archiveFetcher?: Fetcher;
+  minimumIntervalMs?: number;
   now?: () => Date;
 }
 
@@ -91,7 +92,9 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
 
   constructor(options: CamaraAdapterOptions = {}) {
     this.baseUrl = new URL(`${(options.baseUrl ?? env.CAMARA_BASE_URL).replace(/\/$/, "")}/`);
-    this.fetcher = options.fetcher ?? createGovernedFetcher({ minimumIntervalMs: 3_000 });
+    this.fetcher = options.fetcher ?? createGovernedFetcher({
+      minimumIntervalMs: options.minimumIntervalMs ?? 3_000,
+    });
     this.archiveBaseUrl = options.archiveBaseUrl;
     this.archiveFetcher = options.archiveFetcher ?? this.fetcher;
     this.now = options.now ?? (() => new Date());

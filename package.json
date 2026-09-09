@@ -24,6 +24,8 @@
     "sync": "node scripts/sync.ts",
     "backfill:legislative": "node scripts/backfill-legislative.ts",
     "backfill:votes": "node scripts/backfill-camara-votes.ts",
+    "collect:history": "node scripts/collect-history.ts",
+    "collect:status": "node scripts/collect-status.ts",
     "reconcile": "node scripts/reconcile.ts",
     "sync:election": "node scripts/sync-election.ts",
     "candidates:link": "node scripts/manage-candidate-link.ts",

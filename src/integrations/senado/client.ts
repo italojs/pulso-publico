@@ -37,6 +37,7 @@ type Fetcher = (url: URL, init?: RetryingRequestInit) => Promise<Response>;
 export interface SenadoAdapterOptions {
   baseUrl?: string;
   fetcher?: Fetcher;
+  minimumIntervalMs?: number;
   now?: () => Date;
 }
 
@@ -122,7 +123,9 @@ export class SenadoAdapter implements LegislativeSourceAdapter, LegislativeCatal
 
   constructor(options: SenadoAdapterOptions = {}) {
     this.baseUrl = new URL(`${(options.baseUrl ?? env.SENADO_BASE_URL).replace(/\/$/, "")}/`);
-    this.fetcher = options.fetcher ?? createGovernedFetcher({ minimumIntervalMs: 3_000 });
+    this.fetcher = options.fetcher ?? createGovernedFetcher({
+      minimumIntervalMs: options.minimumIntervalMs ?? 3_000,
+    });
     this.now = options.now ?? (() => new Date());
   }
 
