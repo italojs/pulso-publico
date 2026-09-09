@@ -1,0 +1,9 @@
+.git/
+.next/
+node_modules/
+.data/
+.env*
+coverage/
+.worktrees/
+docs/
+*.log
