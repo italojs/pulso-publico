@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { bills } from "#/server/db/schema";
+import { bills, voteEvents } from "#/server/db/schema";
 import { HistoricalBillReader } from "#/server/historical/bill-reader";
 import {
   migrateTestDatabase,
@@ -77,5 +77,62 @@ describe("HistoricalBillReader", () => {
       checkedAt: checkedAt.toISOString(),
     });
     expect(second.map((item) => item.cursor)).toEqual(["101"]);
+  });
+
+  it("returns stored vote events with their parent bill in cursor order", async () => {
+    const checkedAt = new Date("2026-09-09T12:00:00.000Z");
+    const [storedBill] = await testDb.insert(bills).values({
+      source: "senado",
+      externalId: "900",
+      officialCode: "PL 10/2026",
+      proposalYear: 2026,
+      officialTitle: "Título oficial",
+      originHouse: "senado",
+      statusLabel: "Em análise",
+      officialUrl: "https://example.test/900",
+      checkedAt,
+    }).returning({ id: bills.id });
+    await testDb.insert(voteEvents).values([
+      {
+        source: "senado",
+        externalId: "vote-1",
+        billId: storedBill!.id,
+        occurredAt: checkedAt,
+        house: "senado",
+        description: "Votação pública",
+        result: "Aprovado",
+        isNominal: false,
+        isSecret: false,
+        officialUrl: "https://example.test/vote-1",
+        checkedAt,
+      },
+      {
+        source: "senado",
+        externalId: "vote-2",
+        billId: storedBill!.id,
+        occurredAt: checkedAt,
+        house: "senado",
+        description: "Votação secreta",
+        result: null,
+        isNominal: false,
+        isSecret: true,
+        officialUrl: "https://example.test/vote-2",
+        checkedAt,
+      },
+    ]);
+
+    const rows = await reader.listVoteEvents({
+      source: "senado",
+      year: 2026,
+      after: "vote-1",
+      limit: 10,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      cursor: "vote-2",
+      bill: { externalId: "900", officialTitle: "Título oficial" },
+      voteEvent: { externalId: "vote-2", isSecret: true },
+    });
   });
 });

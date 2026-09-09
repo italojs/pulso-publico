@@ -39,6 +39,8 @@ try {
     { HistoricalBillReader },
     { createLegislativeHistoricalTaskExecutor },
     { runHistoricalCollector },
+    { loadReferencedLawmakers },
+    { resolveBicameralPartner },
   ] = await Promise.all([
     import("#/integrations/camara/client"),
     import("#/integrations/senado/client"),
@@ -48,6 +50,8 @@ try {
     import("#/server/historical/bill-reader"),
     import("#/jobs/historical-task-executor"),
     import("#/jobs/historical-collector"),
+    import("#/server/legislative/persist-bill-graph"),
+    import("#/server/legislative/reconcile-bicameral"),
   ]);
   closeDatabase = () => sql.end({ timeout: 5 });
   const minimumIntervalMs = 60_000 / arguments_.requestsPerMinute;
@@ -56,11 +60,25 @@ try {
     senado: new SenadoAdapter({ minimumIntervalMs }),
   };
   const legislativeRepository = new LegislativeRepository(db);
+  const billReader = new HistoricalBillReader(db);
   const executor = createLegislativeHistoricalTaskExecutor({
     adapters,
-    billReader: new HistoricalBillReader(db),
+    billReader,
+    voteReader: billReader,
     persistBillGraph: (transaction, graph) =>
       legislativeRepository.upsertBillGraphInTransaction(transaction, graph),
+    persistLawmakers: (transaction, lawmakers) =>
+      legislativeRepository.upsertLawmakersInTransaction(transaction, lawmakers),
+    persistArchivedVotes: (transaction, items) =>
+      legislativeRepository.upsertArchivedIndividualVotesInTransaction(transaction, items),
+    loadReferencedLawmakers: (adapter, externalIds) =>
+      loadReferencedLawmakers(adapter, legislativeRepository, externalIds),
+    resolveBicameralPartner: (bill) => resolveBicameralPartner(bill, {
+      repository: legislativeRepository,
+      adapters,
+    }),
+    validateYear: (source, year) =>
+      legislativeRepository.validateHistoricalYear(source, year),
   });
 
   const report = await runHistoricalCollector(

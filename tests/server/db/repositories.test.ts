@@ -14,6 +14,7 @@ import {
   bills,
   billHydrationState,
   historicalImportCheckpoints,
+  historicalCollectionTasks,
   individualVotes,
   lawmakers,
   movements,
@@ -340,5 +341,28 @@ describe("LegislativeRepository", () => {
 
     await expect(repository.findBillByOfficialIdentity("camara", "PEC", 221, 2019))
       .resolves.toBeNull();
+  });
+
+  it("reports an incomplete historical predecessor with a stable code", async () => {
+    await testDb.insert(historicalCollectionTasks).values({
+      source: "camara",
+      year: 2026,
+      phase: "catalog",
+      status: "pending",
+    });
+
+    await expect(repository.validateHistoricalYear("camara", 2026)).resolves.toEqual({
+      valid: false,
+      code: "INCOMPLETE_PREDECESSOR",
+    });
+  });
+
+  it("accepts a historical year whose persisted relations are consistent", async () => {
+    await repository.upsertLawmakers([lawmaker]);
+    await repository.upsertBillGraph(graph({ proposalYear: 2026 }));
+
+    await expect(repository.validateHistoricalYear("camara", 2026)).resolves.toEqual({
+      valid: true,
+    });
   });
 });

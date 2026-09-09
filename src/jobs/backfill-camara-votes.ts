@@ -58,12 +58,61 @@ export interface CamaraVoteBackfillReport {
   errorCode?: string;
 }
 
+export interface CamaraVoteArchiveBatch {
+  items: ArchivedIndividualVote[];
+  nextCursor: string | null;
+  complete: boolean;
+  read: number;
+}
+
 function yearInterval(year: number) {
   const nextYear = new Date(`${year + 1}-01-01T00:00:00-03:00`);
   return {
     since: new Date(`${year}-01-01T00:00:00-03:00`),
     until: new Date(nextYear.getTime() - 1),
   };
+}
+
+export async function collectCamaraVoteArchivePage(
+  adapter: Pick<LegislativeVoteArchiveBootstrap, "streamHistoricalIndividualVotes">,
+  year: number,
+  cursor: string | null,
+  limit = BATCH_SIZE,
+): Promise<CamaraVoteArchiveBatch> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > BATCH_SIZE) {
+    throw new RangeError(`Câmara vote archive batch size must be between 1 and ${BATCH_SIZE}`);
+  }
+  const after = cursor === null
+    ? null
+    : cursor.startsWith("archive-vote:")
+      ? cursor.slice("archive-vote:".length)
+      : "";
+  if (cursor !== null && !after) {
+    throw new Error("Historical vote archive cursor is invalid");
+  }
+
+  const { since, until } = yearInterval(year);
+  const items: ArchivedIndividualVote[] = [];
+  let cursorFound = after === null;
+  for await (const item of adapter.streamHistoricalIndividualVotes(since, until)) {
+    if (!cursorFound) {
+      if (item.vote.externalId === after) cursorFound = true;
+      continue;
+    }
+    items.push(item);
+    if (items.length === limit) {
+      return {
+        items,
+        nextCursor: `archive-vote:${items.at(-1)!.vote.externalId}`,
+        complete: false,
+        read: items.length,
+      };
+    }
+  }
+  if (!cursorFound) {
+    throw new Error("Historical vote archive cursor was not found during resume");
+  }
+  return { items, nextCursor: null, complete: true, read: items.length };
 }
 
 export async function backfillCamaraVotes(

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Bill, LegislativeSourceAdapter } from "#/domain/legislative";
-import { ensureBicameralPartner } from "#/server/legislative/reconcile-bicameral";
+import {
+  ensureBicameralPartner,
+  resolveBicameralPartner,
+} from "#/server/legislative/reconcile-bicameral";
 
 const current = {
   source: "senado",
@@ -51,6 +54,18 @@ function dependencies(matches: Bill[]) {
 }
 
 describe("ensureBicameralPartner", () => {
+  it("resolves an exact remote partner without persisting it", async () => {
+    const deps = dependencies([partner]);
+
+    await expect(resolveBicameralPartner(current, deps)).resolves.toEqual({
+      source: "camara",
+      externalId: "2233802",
+      bill: partner,
+    });
+    expect(deps.repository.upsertBillGraph).not.toHaveBeenCalled();
+    expect(deps.hydrate).not.toHaveBeenCalled();
+  });
+
   it("imports and hydrates one exact partner from the official origin house", async () => {
     const deps = dependencies([partner]);
 

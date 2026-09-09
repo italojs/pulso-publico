@@ -68,28 +68,45 @@ export async function persistHydratedBillGraph(
     ),
     ...graph.individualVotes.map((vote) => vote.lawmakerExternalId),
   ];
-  const missingLawmakerIds = await repository.findMissingLawmakerExternalIds(
-    adapter.source,
-    referencedLawmakerIds,
-  );
-  if (missingLawmakerIds.length > 0) {
-    const lawmakers: Lawmaker[] = [];
-    for (let index = 0; index < missingLawmakerIds.length; index += 8) {
-      const batch = missingLawmakerIds.slice(index, index + 8);
-      lawmakers.push(
-        ...await Promise.all(
-          batch.map((externalId) => adapter.getLawmaker(externalId)),
-        ),
-      );
-    }
-    for (const [index, lawmaker] of lawmakers.entries()) {
-      const expectedExternalId = missingLawmakerIds[index];
-      if (lawmaker.source !== adapter.source || lawmaker.externalId !== expectedExternalId) {
-        throw new Error(`Adapter ${adapter.source} returned an unexpected lawmaker`);
-      }
-    }
-    await repository.upsertLawmakers(lawmakers);
-  }
+  await ensureReferencedLawmakers(adapter, repository, referencedLawmakerIds);
   await repository.upsertBillGraph(graph);
   return graph;
+}
+
+export async function loadReferencedLawmakers(
+  adapter: LegislativeSourceAdapter,
+  repository: Pick<BillGraphRepository, "findMissingLawmakerExternalIds">,
+  externalIds: readonly string[],
+): Promise<Lawmaker[]> {
+  const missingLawmakerIds = await repository.findMissingLawmakerExternalIds(
+    adapter.source,
+    [...new Set(externalIds)],
+  );
+  const lawmakers: Lawmaker[] = [];
+  for (let index = 0; index < missingLawmakerIds.length; index += 8) {
+    const batch = missingLawmakerIds.slice(index, index + 8);
+    lawmakers.push(
+      ...await Promise.all(
+        batch.map((externalId) => adapter.getLawmaker(externalId)),
+      ),
+    );
+  }
+  for (const [index, lawmaker] of lawmakers.entries()) {
+    const expectedExternalId = missingLawmakerIds[index];
+    if (lawmaker.source !== adapter.source || lawmaker.externalId !== expectedExternalId) {
+      throw new Error(`Adapter ${adapter.source} returned an unexpected lawmaker`);
+    }
+  }
+  return lawmakers;
+}
+
+export async function ensureReferencedLawmakers(
+  adapter: LegislativeSourceAdapter,
+  repository: BillGraphRepository,
+  externalIds: readonly string[],
+): Promise<void> {
+  const lawmakers = await loadReferencedLawmakers(adapter, repository, externalIds);
+  if (lawmakers.length > 0) {
+    await repository.upsertLawmakers(lawmakers);
+  }
 }

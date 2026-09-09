@@ -334,21 +334,95 @@ export class LegislativeRepository {
   }
 
   async upsertLawmakers(items: Lawmaker[]): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      for (const lawmaker of items) {
-        const values = lawmakerValues(lawmaker);
-        await transaction
-          .insert(lawmakers)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [lawmakers.source, lawmakers.externalId],
-            set: { ...values, updatedAt: new Date() },
-          });
-      }
-    });
+    await this.database.transaction((transaction) =>
+      this.upsertLawmakersInTransaction(transaction, items));
+  }
+
+  async upsertLawmakersInTransaction(
+    transaction: DatabaseTransaction,
+    items: readonly Lawmaker[],
+  ): Promise<void> {
+    for (const lawmaker of items) {
+      const values = lawmakerValues(lawmaker);
+      await transaction
+        .insert(lawmakers)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [lawmakers.source, lawmakers.externalId],
+          set: { ...values, updatedAt: new Date() },
+        });
+    }
+  }
+
+  async validateHistoricalYear(
+    source: LegislativeSourceName,
+    year: number,
+  ): Promise<{ valid: true } | { valid: false; code: string }> {
+    const [result] = await this.database.execute<{ code: string | null }>(sql`
+      select case
+        when exists (
+          select 1 from bills
+          where source = ${source}
+            and proposal_year is not null
+            and (proposal_year < 1946 or proposal_year > ${new Date().getUTCFullYear()})
+        ) then 'INVALID_PROPOSAL_YEAR'
+        when exists (
+          select 1 from bill_authors as child
+          left join bills as parent on parent.id = child.bill_id
+          where parent.id is null
+        ) then 'ORPHAN_BILL_AUTHOR'
+        when exists (
+          select 1 from bill_topics as child
+          left join bills as parent on parent.id = child.bill_id
+          where parent.id is null
+        ) then 'ORPHAN_BILL_TOPIC'
+        when exists (
+          select 1 from movements as child
+          left join bills as parent on parent.id = child.bill_id
+          where parent.id is null
+        ) then 'ORPHAN_MOVEMENT'
+        when exists (
+          select 1 from vote_events as child
+          left join bills as parent on parent.id = child.bill_id
+          where parent.id is null
+        ) then 'ORPHAN_VOTE_EVENT'
+        when exists (
+          select 1 from individual_votes as child
+          left join vote_events as event on event.id = child.vote_event_id
+          left join lawmakers as lawmaker on lawmaker.id = child.lawmaker_id
+          where event.id is null or lawmaker.id is null
+        ) then 'ORPHAN_INDIVIDUAL_VOTE'
+        when exists (
+          select source, external_id
+          from bills
+          group by source, external_id
+          having count(*) > 1
+        ) then 'DUPLICATE_BILL_IDENTITY'
+        when exists (
+          select 1
+          from historical_collection_tasks
+          where source = ${source}
+            and year = ${year}
+            and phase <> 'validate'
+            and status <> 'complete'
+        ) then 'INCOMPLETE_PREDECESSOR'
+        else null
+      end as code
+    `);
+    return result?.code
+      ? { valid: false, code: result.code }
+      : { valid: true };
   }
 
   async upsertArchivedIndividualVotes(
+    items: readonly ArchivedIndividualVote[],
+  ): Promise<number> {
+    return this.database.transaction((transaction) =>
+      this.upsertArchivedIndividualVotesInTransaction(transaction, items));
+  }
+
+  async upsertArchivedIndividualVotesInTransaction(
+    transaction: DatabaseTransaction,
     items: readonly ArchivedIndividualVote[],
   ): Promise<number> {
     if (items.length === 0) return 0;
@@ -362,7 +436,6 @@ export class LegislativeRepository {
       }
     }
 
-    return this.database.transaction(async (transaction) => {
       const voteExternalIds = [...new Set(
         items.map((item) => item.vote.voteEventExternalId),
       )];
@@ -434,7 +507,6 @@ export class LegislativeRepository {
         })
         .returning({ id: individualVotes.id });
       return stored.length;
-    });
   }
 
   async findMissingLawmakerExternalIds(

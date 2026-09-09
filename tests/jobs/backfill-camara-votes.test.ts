@@ -5,7 +5,10 @@ import {
   LawmakerRecord,
   type ArchivedIndividualVote,
 } from "#/domain/legislative";
-import { backfillCamaraVotes } from "#/jobs/backfill-camara-votes";
+import {
+  backfillCamaraVotes,
+  collectCamaraVoteArchivePage,
+} from "#/jobs/backfill-camara-votes";
 
 const checkedAt = "2026-09-07T03:00:00.000Z";
 
@@ -40,6 +43,31 @@ function archivedVote(index: number): ArchivedIndividualVote {
 }
 
 describe("backfillCamaraVotes", () => {
+  it("resumes an annual vote archive after its committed vote cursor", async () => {
+    const records = [archivedVote(1), archivedVote(2), archivedVote(3)];
+    const adapter = {
+      async *streamHistoricalIndividualVotes() {
+        yield* records;
+      },
+    };
+
+    const first = await collectCamaraVoteArchivePage(adapter, 2019, null, 2);
+    const second = await collectCamaraVoteArchivePage(
+      adapter,
+      2019,
+      first.nextCursor,
+      2,
+    );
+
+    expect(first).toMatchObject({
+      complete: false,
+      nextCursor: "archive-vote:vote-2:1002",
+      read: 2,
+    });
+    expect(second).toMatchObject({ complete: true, nextCursor: null, read: 1 });
+    expect(second.items[0]?.vote.externalId).toBe("vote-3:1003");
+  });
+
   it("imports an annual archive in bounded batches and records its checkpoint", async () => {
     const records = Array.from({ length: 501 }, (_, index) => archivedVote(index));
     const receivedIntervals: Array<[string, string]> = [];

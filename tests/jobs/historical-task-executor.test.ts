@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  ArchivedIndividualVote,
   Bill,
   BillAuthor,
   BillTopic,
   LegislativeSourceAdapter,
+  IndividualVote,
   Movement,
+  VoteEvent,
 } from "#/domain/legislative";
 import { collectCatalogPage } from "#/jobs/backfill-legislative";
 import {
@@ -71,6 +74,29 @@ const movement: Movement = {
   officialUrl: "https://example.test/movements/1",
   checkedAt,
 };
+const voteEvent: VoteEvent = {
+  source: "camara",
+  externalId: "vote-1",
+  billExternalId: "100",
+  occurredAt: "2026-03-10T12:00:00.000Z",
+  house: "camara",
+  description: "Votação do requerimento.",
+  result: "Aprovado",
+  isNominal: true,
+  isSecret: false,
+  officialUrl: "https://example.test/votes/1",
+  checkedAt,
+};
+const individualVote: IndividualVote = {
+  source: "camara",
+  externalId: "vote-1:member-1",
+  voteEventExternalId: "vote-1",
+  lawmakerExternalId: "member-1",
+  choice: "sim",
+  rawChoice: "Sim",
+  officialUrl: "https://example.test/votes/1/members/1",
+  checkedAt,
+};
 
 function adapter(overrides: Partial<LegislativeSourceAdapter> = {}): LegislativeSourceAdapter {
   const notUsed = async () => {
@@ -91,7 +117,15 @@ function adapter(overrides: Partial<LegislativeSourceAdapter> = {}): Legislative
   } as LegislativeSourceAdapter;
 }
 
-function historicalTask(phase: "authors_topics" | "movements") {
+function historicalTask(
+  phase:
+    | "authors_topics"
+    | "movements"
+    | "vote_events"
+    | "individual_votes"
+    | "reconcile"
+    | "validate",
+) {
   return {
     id: "00000000-0000-4000-8000-000000000001",
     source: "camara" as const,
@@ -198,6 +232,174 @@ describe("createHistoricalTaskExecutor", () => {
 
     await expect(executor.execute(historicalTask("authors_topics"))).resolves
       .toMatchObject({ outcome: "complete", read: 0, persisted: 0 });
+  });
+
+  it("stores an empty public individual-vote collection as completed progress", async () => {
+    const requestedVotes: string[] = [];
+    let persistedGraph: BillGraph | null = null;
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: {
+        camara: adapter({
+          listIndividualVotes: async (externalId) => {
+            requestedVotes.push(externalId);
+            return [];
+          },
+        }),
+      },
+      billReader: { list: async () => [] },
+      voteReader: {
+        listVoteEvents: async () => [{ bill, voteEvent, cursor: voteEvent.externalId }],
+      },
+      persistBillGraph: async (_transaction, graph) => {
+        persistedGraph = graph;
+      },
+      loadReferencedLawmakers: async () => [],
+    });
+
+    const result = await executor.execute(historicalTask("individual_votes"));
+    await result.persist({} as DatabaseTransaction);
+
+    expect(requestedVotes).toEqual(["vote-1"]);
+    expect(result).toMatchObject({
+      outcome: "progress",
+      cursor: "vote-1",
+      read: 1,
+      persisted: 0,
+    });
+    expect(persistedGraph).toMatchObject({
+      voteEvents: [voteEvent],
+      individualVotes: [],
+    });
+  });
+
+  it("uses the bounded Câmara archive after vote events have been collected", async () => {
+    const archived: ArchivedIndividualVote = {
+      vote: individualVote,
+      lawmaker: {
+        source: "camara",
+        externalId: "member-1",
+        name: "Pessoa Um",
+        electoralName: "Pessoa Um",
+        role: "deputado_federal",
+        party: "ABC",
+        region: "SP",
+        photoUrl: null,
+        active: false,
+        officialUrl: "https://example.test/lawmakers/member-1",
+        checkedAt,
+      },
+    };
+    const archivedWrites: ArchivedIndividualVote[][] = [];
+    const archiveAdapter = Object.assign(adapter(), {
+      async *streamHistoricalIndividualVotes() {
+        yield archived;
+      },
+    });
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: { camara: archiveAdapter },
+      billReader: { list: async () => [] },
+      persistBillGraph: async () => undefined,
+      persistArchivedVotes: async (_transaction, items) => {
+        archivedWrites.push([...items]);
+        return items.length;
+      },
+    });
+
+    const result = await executor.execute(historicalTask("individual_votes"));
+    await result.persist({} as DatabaseTransaction);
+
+    expect(result).toMatchObject({ outcome: "complete", read: 1, persisted: 1 });
+    expect(archivedWrites).toEqual([[archived]]);
+  });
+
+  it("never requests individual votes for a secret event", async () => {
+    const requestedVotes: string[] = [];
+    const secretVote = { ...voteEvent, isSecret: true };
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: {
+        camara: adapter({
+          listIndividualVotes: async (externalId) => {
+            requestedVotes.push(externalId);
+            return [individualVote];
+          },
+        }),
+      },
+      billReader: { list: async () => [] },
+      voteReader: {
+        listVoteEvents: async () => [{ bill, voteEvent: secretVote, cursor: secretVote.externalId }],
+      },
+      persistBillGraph: async () => undefined,
+      loadReferencedLawmakers: async () => [],
+    });
+
+    const result = await executor.execute(historicalTask("individual_votes"));
+    await result.persist({} as DatabaseTransaction);
+
+    expect(requestedVotes).toEqual([]);
+    expect(result).toMatchObject({ outcome: "progress", persisted: 0 });
+  });
+
+  it("persists vote events separately from individual votes", async () => {
+    let persistedGraph: BillGraph | null = null;
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: {
+        camara: adapter({ listBillVoteEvents: async () => [voteEvent] }),
+      },
+      billReader: { list: async () => [{ bill, cursor: bill.externalId }] },
+      persistBillGraph: async (_transaction, graph) => {
+        persistedGraph = graph;
+      },
+    });
+
+    const result = await executor.execute(historicalTask("vote_events"));
+    await result.persist({} as DatabaseTransaction);
+
+    expect(persistedGraph).toMatchObject({
+      voteEvents: [voteEvent],
+      individualVotes: [],
+    });
+  });
+
+  it("fails validation with the stable integrity code", async () => {
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: { camara: adapter() },
+      billReader: { list: async () => [] },
+      persistBillGraph: async () => undefined,
+      validateYear: async () => ({ valid: false, code: "ORPHAN_BILL_AUTHOR" }),
+    });
+
+    await expect(executor.execute(historicalTask("validate"))).rejects.toEqual(
+      expect.objectContaining({ code: "ORPHAN_BILL_AUTHOR", retryable: false }),
+    );
+  });
+
+  it("persists a newly resolved bicameral partner in the reconcile batch", async () => {
+    let persistedGraph: BillGraph | null = null;
+    const partner = {
+      ...bill,
+      source: "senado" as const,
+      externalId: "900",
+      originHouse: "camara" as const,
+      currentHouse: "senado" as const,
+    };
+    const executor = createLegislativeHistoricalTaskExecutor({
+      adapters: { camara: adapter() },
+      billReader: { list: async () => [{ bill, cursor: bill.externalId }] },
+      persistBillGraph: async (_transaction, graph) => {
+        persistedGraph = graph;
+      },
+      resolveBicameralPartner: async () => ({
+        source: "senado",
+        externalId: "900",
+        bill: partner,
+      }),
+    });
+
+    const result = await executor.execute(historicalTask("reconcile"));
+    await result.persist({} as DatabaseTransaction);
+
+    expect(result).toMatchObject({ outcome: "progress", persisted: 1 });
+    expect(persistedGraph).toMatchObject({ bill: partner });
   });
 });
 

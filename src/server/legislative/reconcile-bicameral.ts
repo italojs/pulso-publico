@@ -40,6 +40,12 @@ interface BicameralDependencies {
   ): Promise<unknown>;
 }
 
+export interface ResolvedBicameralPartner {
+  source: LegislativeSourceName;
+  externalId: string;
+  bill?: Bill;
+}
+
 function partnerSource(bill: BicameralBillIdentity): LegislativeSourceName | null {
   if (bill.source === "senado" && bill.originHouse === "camara") return "camara";
   if (bill.source === "camara" && bill.currentHouse === "senado") return "senado";
@@ -57,10 +63,10 @@ function summaryGraph(bill: Bill): BillGraph {
   };
 }
 
-export async function ensureBicameralPartner(
+export async function resolveBicameralPartner(
   bill: BicameralBillIdentity,
-  dependencies: BicameralDependencies,
-): Promise<{ source: LegislativeSourceName; externalId: string } | null> {
+  dependencies: Pick<BicameralDependencies, "repository" | "adapters">,
+): Promise<ResolvedBicameralPartner | null> {
   const source = partnerSource(bill);
   if (
     !source
@@ -79,7 +85,6 @@ export async function ensureBicameralPartner(
   );
   if (local) {
     if (local.congressionalKey !== bill.congressionalKey) return null;
-    await dependencies.hydrate(local.source, local.externalId);
     return local;
   }
 
@@ -104,7 +109,18 @@ export async function ensureBicameralPartner(
     return null;
   }
 
-  await dependencies.repository.upsertBillGraph(summaryGraph(partner));
-  await dependencies.hydrate(source, partner.externalId);
-  return { source, externalId: partner.externalId };
+  return { source, externalId: partner.externalId, bill: partner };
+}
+
+export async function ensureBicameralPartner(
+  bill: BicameralBillIdentity,
+  dependencies: BicameralDependencies,
+): Promise<{ source: LegislativeSourceName; externalId: string } | null> {
+  const partner = await resolveBicameralPartner(bill, dependencies);
+  if (!partner) return null;
+  if (partner.bill) {
+    await dependencies.repository.upsertBillGraph(summaryGraph(partner.bill));
+  }
+  await dependencies.hydrate(partner.source, partner.externalId);
+  return { source: partner.source, externalId: partner.externalId };
 }

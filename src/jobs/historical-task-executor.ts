@@ -3,16 +3,24 @@ import type {
   HistoricalTask,
 } from "#/domain/historical-collection";
 import type {
+  ArchivedIndividualVote,
+  Lawmaker,
   LegislativeSourceAdapter,
   LegislativeSourceName,
+  LegislativeVoteArchiveBootstrap,
 } from "#/domain/legislative";
 import {
   collectCatalogPage,
   type HistoricalCatalogBatch,
 } from "#/jobs/backfill-legislative";
+import { collectCamaraVoteArchivePage } from "#/jobs/backfill-camara-votes";
 import type { BillGraph } from "#/server/db/repositories";
 import type { DatabaseTransaction } from "#/server/db/types";
-import type { HistoricalBillReaderContract } from "#/server/historical/bill-reader";
+import type {
+  HistoricalBillReaderContract,
+  HistoricalVoteReaderContract,
+} from "#/server/historical/bill-reader";
+import type { ResolvedBicameralPartner } from "#/server/legislative/reconcile-bicameral";
 
 interface HistoricalTaskBatchBase {
   read: number;
@@ -72,10 +80,30 @@ export function createHistoricalTaskExecutor(
 export interface LegislativeHistoricalTaskExecutorDependencies {
   adapters: Partial<Record<LegislativeSourceName, LegislativeSourceAdapter>>;
   billReader: HistoricalBillReaderContract;
+  voteReader?: HistoricalVoteReaderContract;
   persistBillGraph(
     transaction: DatabaseTransaction,
     graph: BillGraph,
   ): Promise<void>;
+  persistLawmakers?(
+    transaction: DatabaseTransaction,
+    lawmakers: readonly Lawmaker[],
+  ): Promise<void>;
+  persistArchivedVotes?(
+    transaction: DatabaseTransaction,
+    items: readonly ArchivedIndividualVote[],
+  ): Promise<number>;
+  loadReferencedLawmakers?(
+    adapter: LegislativeSourceAdapter,
+    externalIds: readonly string[],
+  ): Promise<Lawmaker[]>;
+  resolveBicameralPartner?(
+    bill: BillGraph["bill"],
+  ): Promise<ResolvedBicameralPartner | null>;
+  validateYear?(
+    source: LegislativeSourceName,
+    year: number,
+  ): Promise<{ valid: true } | { valid: false; code: string }>;
   collectCatalog?: typeof collectCatalogPage;
 }
 
@@ -104,6 +132,13 @@ function graphFor(
     voteEvents: values.voteEvents ?? [],
     individualVotes: values.individualVotes ?? [],
   };
+}
+
+function isVoteArchiveAdapter(
+  adapter: LegislativeSourceAdapter,
+): adapter is LegislativeSourceAdapter & LegislativeVoteArchiveBootstrap {
+  return "streamHistoricalIndividualVotes" in adapter
+    && typeof adapter.streamHistoricalIndividualVotes === "function";
 }
 
 function catalogTaskBatch(
@@ -190,6 +225,138 @@ export function createLegislativeHistoricalTaskExecutor(
         persisted: movements.length,
         persist: (transaction) => dependencies.persistBillGraph(transaction, graph),
       };
+    },
+    vote_events: async (task) => {
+      const [next] = await dependencies.billReader.list({
+        source: task.source,
+        year: task.year,
+        after: task.cursor,
+        limit: 1,
+      });
+      if (!next) return completeBatch();
+
+      const voteEvents = await adapterFor(task.source)
+        .listBillVoteEvents(next.bill.externalId);
+      const graph = graphFor(next.bill, { voteEvents });
+      return {
+        outcome: "progress",
+        cursor: next.cursor,
+        read: 1,
+        persisted: voteEvents.length,
+        persist: (transaction) => dependencies.persistBillGraph(transaction, graph),
+      };
+    },
+    individual_votes: async (task) => {
+      const adapter = adapterFor(task.source);
+      if (task.source === "camara" && isVoteArchiveAdapter(adapter)) {
+        if (!dependencies.persistArchivedVotes) {
+          throw new HistoricalTaskExecutionError(
+            "HISTORICAL_ARCHIVED_VOTE_PERSISTENCE_MISSING",
+            false,
+          );
+        }
+        const batch = await collectCamaraVoteArchivePage(
+          adapter,
+          task.year,
+          task.cursor,
+        );
+        const base = {
+          read: batch.read,
+          persisted: batch.items.length,
+          persist: async (transaction: DatabaseTransaction) => {
+            await dependencies.persistArchivedVotes!(transaction, batch.items);
+          },
+        };
+        if (batch.complete) return { ...base, outcome: "complete" };
+        if (!batch.nextCursor) {
+          throw new HistoricalTaskExecutionError("HISTORICAL_CURSOR_MISSING", false);
+        }
+        return { ...base, outcome: "progress", cursor: batch.nextCursor };
+      }
+      if (!dependencies.voteReader) {
+        throw new HistoricalTaskExecutionError("HISTORICAL_VOTE_READER_MISSING", false);
+      }
+      const [next] = await dependencies.voteReader.listVoteEvents({
+        source: task.source,
+        year: task.year,
+        after: task.cursor,
+        limit: 1,
+      });
+      if (!next) return completeBatch();
+
+      const individualVotes = next.voteEvent.isSecret
+        ? []
+        : await adapter.listIndividualVotes(next.voteEvent.externalId);
+      if (individualVotes.some((vote) =>
+        vote.source !== task.source
+        || vote.voteEventExternalId !== next.voteEvent.externalId
+      )) {
+        throw new HistoricalTaskExecutionError("INDIVIDUAL_VOTE_IDENTITY_MISMATCH", false);
+      }
+      const lawmakers = individualVotes.length === 0
+        ? []
+        : await dependencies.loadReferencedLawmakers?.(
+          adapter,
+          individualVotes.map((vote) => vote.lawmakerExternalId),
+        );
+      if (individualVotes.length > 0 && !lawmakers) {
+        throw new HistoricalTaskExecutionError("HISTORICAL_LAWMAKER_LOADER_MISSING", false);
+      }
+      const graph = graphFor(next.bill, {
+        voteEvents: [next.voteEvent],
+        individualVotes,
+      });
+      return {
+        outcome: "progress",
+        cursor: next.cursor,
+        read: 1,
+        persisted: individualVotes.length + (lawmakers?.length ?? 0),
+        persist: async (transaction) => {
+          if (lawmakers && lawmakers.length > 0) {
+            if (!dependencies.persistLawmakers) {
+              throw new HistoricalTaskExecutionError(
+                "HISTORICAL_LAWMAKER_PERSISTENCE_MISSING",
+                false,
+              );
+            }
+            await dependencies.persistLawmakers(transaction, lawmakers);
+          }
+          await dependencies.persistBillGraph(transaction, graph);
+        },
+      };
+    },
+    reconcile: async (task) => {
+      const [next] = await dependencies.billReader.list({
+        source: task.source,
+        year: task.year,
+        after: task.cursor,
+        limit: 1,
+      });
+      if (!next) return completeBatch();
+      if (!dependencies.resolveBicameralPartner) {
+        throw new HistoricalTaskExecutionError("HISTORICAL_RECONCILER_MISSING", false);
+      }
+      const partner = await dependencies.resolveBicameralPartner(next.bill);
+      const graph = partner?.bill ? graphFor(partner.bill, {}) : null;
+      return {
+        outcome: "progress",
+        cursor: next.cursor,
+        read: 1,
+        persisted: graph ? 1 : 0,
+        persist: graph
+          ? (transaction) => dependencies.persistBillGraph(transaction, graph)
+          : emptyPersistence(),
+      };
+    },
+    validate: async (task) => {
+      if (!dependencies.validateYear) {
+        throw new HistoricalTaskExecutionError("HISTORICAL_VALIDATOR_MISSING", false);
+      }
+      const result = await dependencies.validateYear(task.source, task.year);
+      if (!result.valid) {
+        throw new HistoricalTaskExecutionError(result.code, false);
+      }
+      return completeBatch();
     },
   });
 }
