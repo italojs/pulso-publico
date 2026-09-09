@@ -8,7 +8,8 @@ Este documento descreve o primeiro deploy e a carga histórica sem registrar cre
 - Instalação: `npm ci`.
 - Build: `npm run build`.
 - Inicialização: `npm start`.
-- Health check: `/api/health`.
+- Liveness usada pelo Galaxy: `/api/live`. Ela confirma somente que o processo HTTP está respondendo e não depende do PostgreSQL.
+- Diagnóstico da aplicação: `/api/health`. Ele testa o acesso ao banco e informa se as fontes Câmara e Senado estão atualizadas.
 - O coletor histórico roda no Mac local, não durante build, startup ou requisições do Web App.
 - O custo exato por hora e por mês deve ser mostrado e confirmado pelo responsável imediatamente antes da criação do recurso pago.
 

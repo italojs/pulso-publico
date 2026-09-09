@@ -28,7 +28,7 @@ describe("production runtime configuration", () => {
         build: "DATABASE_URL=postgres://build:build@127.0.0.1:5432/build npm run build",
         start: "npm start",
       },
-      health: { path: "/api/health" },
+      health: { path: "/api/live" },
     });
   });
 });

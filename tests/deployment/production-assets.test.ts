@@ -11,7 +11,9 @@ describe("production database assets", () => {
     expect(gitignore).toContain(".env.production.local");
     expect(gitignore).toContain(".galaxy/");
     expect(runbook).not.toMatch(/postgres(?:ql)?:\/\/[^\s<]+:[^\s<]+@/iu);
-    expect(galaxy).not.toContain("DATABASE_URL");
+    expect(galaxy.match(/postgres(?:ql)?:\/\/[^\s"]+/giu)).toEqual([
+      "postgres://build:build@127.0.0.1:5432/build",
+    ]);
     expect(galaxy).not.toMatch(/password|credential|secret/iu);
   });
 
@@ -38,6 +40,7 @@ describe("production database assets", () => {
       "npm ci",
       "npm run build",
       "npm start",
+      "/api/live",
       "/api/health",
       "NODE_ENV=production",
       "GEO_PROVIDER=none",
