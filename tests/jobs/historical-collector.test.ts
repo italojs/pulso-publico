@@ -115,6 +115,29 @@ const options = {
 };
 
 describe("runHistoricalCollector", () => {
+  it("stops before reserving new work when database storage reaches 90 percent", async () => {
+    const repository = new MemoryRepository();
+    let executions = 0;
+
+    const report = await runHistoricalCollector(
+      {
+        repository,
+        executor: {
+          async execute() {
+            executions += 1;
+            return progress("should-not-run");
+          },
+        },
+        readStorageLevel: async () => "stop",
+      },
+      { ...options, once: true },
+    );
+
+    expect(report).toMatchObject({ reason: "capacity", processedBatches: 0 });
+    expect(executions).toBe(0);
+    expect(repository.stored.status).toBe("pending");
+  });
+
   it("commits the in-flight batch before exiting after an abort", async () => {
     const repository = new MemoryRepository();
     const controller = new AbortController();

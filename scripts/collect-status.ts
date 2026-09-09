@@ -10,19 +10,15 @@ for (const filename of [".env.production.local", ".env"]) {
 
 let closeDatabase: (() => Promise<void>) | undefined;
 try {
-  const [{ db, sql }, { HistoricalTaskRepository }] = await Promise.all([
+  const [{ db, sql }, { readHistoricalStatus }] = await Promise.all([
     import("#/server/db/client"),
-    import("#/server/historical/task-repository"),
+    import("#/jobs/historical-status"),
   ]);
   closeDatabase = () => sql.end({ timeout: 5 });
-  const tasks = await new HistoricalTaskRepository(db).listStatus();
-  const counts = Object.fromEntries(
-    ["pending", "running", "waiting", "complete", "failed"].map((status) => [
-      status,
-      tasks.filter((task) => task.status === status).length,
-    ]),
-  );
-  console.log(JSON.stringify({ status: "ok", tasks: counts }));
+  const configuredCapacity = process.env.HISTORICAL_DATABASE_CAPACITY_BYTES;
+  const capacityBytes = configuredCapacity ? BigInt(configuredCapacity) : undefined;
+  const report = await readHistoricalStatus(db, capacityBytes);
+  console.log(JSON.stringify({ status: "ok", ...report }));
 } catch {
   console.error(JSON.stringify({ status: "failed", errorCode: "STATUS_UNAVAILABLE" }));
   process.exitCode = 1;

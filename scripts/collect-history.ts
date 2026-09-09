@@ -39,6 +39,7 @@ try {
     { HistoricalBillReader },
     { createLegislativeHistoricalTaskExecutor },
     { runHistoricalCollector },
+    { readHistoricalStorage },
     { loadReferencedLawmakers },
     { resolveBicameralPartner },
   ] = await Promise.all([
@@ -50,6 +51,7 @@ try {
     import("#/server/historical/bill-reader"),
     import("#/jobs/historical-task-executor"),
     import("#/jobs/historical-collector"),
+    import("#/jobs/historical-status"),
     import("#/server/legislative/persist-bill-graph"),
     import("#/server/legislative/reconcile-bicameral"),
   ]);
@@ -85,6 +87,11 @@ try {
     {
       repository: new HistoricalTaskRepository(db),
       executor,
+      readStorageLevel: async () => {
+        const configuredCapacity = process.env.HISTORICAL_DATABASE_CAPACITY_BYTES;
+        const capacityBytes = configuredCapacity ? BigInt(configuredCapacity) : undefined;
+        return (await readHistoricalStorage(db, capacityBytes)).level;
+      },
     },
     {
       fromYear: arguments_.fromYear,

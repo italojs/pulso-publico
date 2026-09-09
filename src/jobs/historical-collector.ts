@@ -9,6 +9,7 @@ import {
   HistoricalTaskExecutionError,
   type HistoricalTaskExecutor,
 } from "#/jobs/historical-task-executor";
+import type { HistoricalStorageLevel } from "#/jobs/historical-status";
 import {
   OfficialSourceError,
 } from "#/server/http/retrying-fetch";
@@ -56,6 +57,7 @@ export interface HistoricalCollectorRepository {
 export interface HistoricalCollectorDependencies {
   repository: HistoricalCollectorRepository;
   executor: HistoricalTaskExecutor;
+  readStorageLevel?: () => Promise<HistoricalStorageLevel>;
   now?: () => Date;
   sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
@@ -64,7 +66,8 @@ export type HistoricalCollectorStopReason =
   | "once"
   | "aborted"
   | "drained"
-  | "blocked";
+  | "blocked"
+  | "capacity";
 
 export interface HistoricalCollectorReport {
   reason: HistoricalCollectorStopReason;
@@ -113,6 +116,9 @@ export async function runHistoricalCollector(
   while (true) {
     if (options.signal?.aborted) {
       return { reason: "aborted", processedBatches, seededTasks };
+    }
+    if (dependencies.readStorageLevel && await dependencies.readStorageLevel() === "stop") {
+      return { reason: "capacity", processedBatches, seededTasks };
     }
 
     const reservedAt = now();
