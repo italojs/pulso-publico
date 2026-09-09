@@ -4,6 +4,7 @@ coverage/
 .env
 .env.local
 .env.production.local
+.env.galaxy-admin.local
 .galaxy/
 data/
 .data/electoral-assets/

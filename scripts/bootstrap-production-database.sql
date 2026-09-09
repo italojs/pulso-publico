@@ -7,6 +7,10 @@
 \endif
 \if :{?app_password}
 \else
+  \getenv app_password PULSE_APP_PASSWORD
+\endif
+\if :{?app_password}
+\else
   \echo 'Missing required psql variable: app_password'
   \quit 3
 \endif
