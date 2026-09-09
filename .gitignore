@@ -3,6 +3,8 @@ node_modules/
 coverage/
 .env
 .env.local
+.env.production.local
+.galaxy/
 data/
 .data/electoral-assets/
 *.log
