@@ -89,6 +89,22 @@ export const historicalImportStatusEnum = pgEnum("historical_import_status", [
   "complete",
   "failed",
 ]);
+export const historicalCollectionStatusEnum = pgEnum("historical_collection_status", [
+  "pending",
+  "running",
+  "waiting",
+  "complete",
+  "failed",
+]);
+export const historicalCollectionPhaseEnum = pgEnum("historical_collection_phase", [
+  "catalog",
+  "authors_topics",
+  "movements",
+  "vote_events",
+  "individual_votes",
+  "reconcile",
+  "validate",
+]);
 
 export type ElectoralResourceProvenanceJson = Record<string, {
   sourceArchiveUrl: string;
@@ -312,6 +328,57 @@ export const historicalImportCheckpoints = pgTable(
     unique("historical_import_checkpoints_source_dataset_year_uq")
       .on(table.source, table.dataset, table.year),
     index("historical_import_checkpoints_status_idx").on(table.status, table.year),
+  ],
+);
+
+export const historicalCollectionTasks = pgTable(
+  "historical_collection_tasks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    source: sourceEnum("source").notNull(),
+    year: integer("year").notNull(),
+    phase: historicalCollectionPhaseEnum("phase").notNull(),
+    cursor: text("cursor"),
+    status: historicalCollectionStatusEnum("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    recordsRead: integer("records_read").default(0).notNull(),
+    recordsPersisted: integer("records_persisted").default(0).notNull(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("historical_collection_tasks_source_year_phase_uq")
+      .on(table.source, table.year, table.phase),
+    index("historical_collection_tasks_schedule_idx")
+      .on(table.status, table.nextAttemptAt, table.year),
+    index("historical_collection_tasks_lease_idx").on(table.leaseExpiresAt),
+  ],
+);
+
+export const historicalCollectionRuns = pgTable(
+  "historical_collection_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workerId: text("worker_id").notNull(),
+    status: historicalCollectionStatusEnum("status").default("running").notNull(),
+    fromYear: integer("from_year").notNull(),
+    throughYear: integer("through_year").notNull(),
+    sources: jsonb("sources").$type<Array<"camara" | "senado">>().notNull(),
+    recordsRead: integer("records_read").default(0).notNull(),
+    recordsPersisted: integer("records_persisted").default(0).notNull(),
+    lastErrorCode: text("last_error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("historical_collection_runs_status_started_idx")
+      .on(table.status, table.startedAt),
   ],
 );
 
@@ -645,6 +712,8 @@ export type NewIndividualVote = typeof individualVotes.$inferInsert;
 export type NewSyncCheckpoint = typeof syncCheckpoints.$inferInsert;
 export type NewSourceHealth = typeof sourceHealth.$inferInsert;
 export type NewHistoricalImportCheckpoint = typeof historicalImportCheckpoints.$inferInsert;
+export type NewHistoricalCollectionTask = typeof historicalCollectionTasks.$inferInsert;
+export type NewHistoricalCollectionRun = typeof historicalCollectionRuns.$inferInsert;
 export type NewBillHydrationState = typeof billHydrationState.$inferInsert;
 export type NewAiSummary = typeof aiSummaries.$inferInsert;
 export type NewUser = typeof users.$inferInsert;
