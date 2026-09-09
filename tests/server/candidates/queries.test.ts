@@ -622,13 +622,15 @@ describe("candidate catalog queries", () => {
       expect.objectContaining({
         kind: "government_plan",
         officialUrl: "https://cdn.tse.jus.br/plano-ana.pdf",
-        downloadUrl: expect.stringMatching(/^\/api\/candidates\/media\/government-plan\/[0-9a-f-]+$/),
+        downloadUrl: null,
+        availableLocally: false,
         sourceArchiveUrl: "https://cdn.tse.jus.br/planos.zip",
       }),
       expect.objectContaining({
         kind: "certificate",
         officialUrl: "https://cdn.tse.jus.br/certidao-ana.pdf",
-        downloadUrl: expect.stringMatching(/^\/api\/candidates\/media\/certificate\/[0-9a-f-]+$/),
+        downloadUrl: null,
+        availableLocally: false,
         sourceArchiveUrl: "https://cdn.tse.jus.br/certidoes.zip",
       }),
     ]));

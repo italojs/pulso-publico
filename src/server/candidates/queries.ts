@@ -42,6 +42,7 @@ import {
   candidateLawmakerLinks,
   candidateSocialLinks,
   electoralCandidates,
+  electoralMediaBlobs,
   electoralSyncRuns,
   followedCandidates,
   individualVotes,
@@ -826,10 +827,8 @@ async function getCandidateDetailFromSnapshot(
         kind: "government_plan" as const,
         label: "Proposta de governo",
         officialUrl: plan.officialUrl,
-        downloadUrl: plan.storageKey
-          ? `/api/candidates/media/government-plan/${plan.id}`
-          : null,
-        availableLocally: plan.storageKey !== null,
+        downloadUrl: null,
+        availableLocally: false,
         originalFilename: plan.originalFilename,
         sourceArchiveUrl: plan.sourceArchiveUrl,
         sourceExtractedAt: plan.sourceExtractedAt ? iso(plan.sourceExtractedAt) : null,
@@ -839,10 +838,8 @@ async function getCandidateDetailFromSnapshot(
         kind: "certificate" as const,
         label: document.label,
         officialUrl: document.officialUrl,
-        downloadUrl: document.storageKey
-          ? `/api/candidates/media/certificate/${document.id}`
-          : null,
-        availableLocally: document.storageKey !== null,
+        downloadUrl: null,
+        availableLocally: false,
         originalFilename: document.originalFilename,
         sourceArchiveUrl: document.sourceArchiveUrl,
         sourceExtractedAt: document.sourceExtractedAt ? iso(document.sourceExtractedAt) : null,
@@ -1083,13 +1080,12 @@ export async function compareCandidates(
 }
 
 export interface CandidateMediaAsset {
-  storageKey: string;
-  mimeType: "image/jpeg" | "application/pdf";
+  content: Uint8Array;
+  mimeType: "image/jpeg";
   originalFilename: string;
 }
 
 const candidateExternalIdPattern = /^\d{1,30}$/;
-const mediaDocumentIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function resolveCandidateMediaAsset(
   database: Database,
@@ -1105,60 +1101,26 @@ export async function resolveCandidateMediaAsset(
     const year = Number(segments[1]);
     if (!Number.isSafeInteger(year) || year < 2026) return null;
     const [row] = await database.select({
-      storageKey: electoralCandidates.photoStorageKey,
-      mimeType: electoralCandidates.photoMimeType,
+      content: electoralMediaBlobs.content,
+      mimeType: electoralMediaBlobs.mimeType,
       originalFilename: electoralCandidates.photoOriginalFilename,
-    }).from(electoralCandidates).where(and(
+    }).from(electoralCandidates)
+      .innerJoin(electoralMediaBlobs, and(
+        eq(electoralMediaBlobs.storageKey, electoralCandidates.photoStorageKey),
+        eq(electoralMediaBlobs.syncRunId, electoralCandidates.snapshotRunId),
+      ))
+      .where(and(
       currentSnapshot,
       eq(electoralCandidates.electionYear, year),
       eq(electoralCandidates.externalId, segments[2]!),
       isNotNull(electoralCandidates.photoStorageKey),
+      eq(electoralMediaBlobs.published, true),
     )).limit(1);
-    if (!row?.storageKey || row.mimeType !== "image/jpeg") return null;
+    if (!row?.content || row.mimeType !== "image/jpeg") return null;
     return {
-      storageKey: row.storageKey,
+      content: new Uint8Array(row.content),
       mimeType: "image/jpeg",
       originalFilename: row.originalFilename ?? `foto-${segments[2]}.jpg`,
-    };
-  }
-
-  if (segments.length !== 2 || !mediaDocumentIdPattern.test(segments[1] ?? "")) return null;
-  if (segments[0] === "government-plan") {
-    const [row] = await database.select({
-      storageKey: candidateGovernmentPlans.storageKey,
-      mimeType: candidateGovernmentPlans.mimeType,
-      originalFilename: candidateGovernmentPlans.originalFilename,
-    }).from(candidateGovernmentPlans)
-      .innerJoin(electoralCandidates, eq(electoralCandidates.id, candidateGovernmentPlans.candidateId))
-      .where(and(
-        currentSnapshot,
-        eq(candidateGovernmentPlans.id, segments[1]!),
-        isNotNull(candidateGovernmentPlans.storageKey),
-      )).limit(1);
-    if (!row?.storageKey || row.mimeType !== "application/pdf") return null;
-    return {
-      storageKey: row.storageKey,
-      mimeType: "application/pdf",
-      originalFilename: row.originalFilename ?? "proposta-de-governo.pdf",
-    };
-  }
-  if (segments[0] === "certificate") {
-    const [row] = await database.select({
-      storageKey: candidateDocuments.storageKey,
-      mimeType: candidateDocuments.mimeType,
-      originalFilename: candidateDocuments.originalFilename,
-    }).from(candidateDocuments)
-      .innerJoin(electoralCandidates, eq(electoralCandidates.id, candidateDocuments.candidateId))
-      .where(and(
-        currentSnapshot,
-        eq(candidateDocuments.id, segments[1]!),
-        isNotNull(candidateDocuments.storageKey),
-      )).limit(1);
-    if (!row?.storageKey || row.mimeType !== "application/pdf") return null;
-    return {
-      storageKey: row.storageKey,
-      mimeType: "application/pdf",
-      originalFilename: row.originalFilename ?? "documento-eleitoral.pdf",
     };
   }
   return null;

@@ -2,6 +2,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  customType,
   date,
   foreignKey,
   index,
@@ -21,6 +22,12 @@ const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
+
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const sourceEnum = pgEnum("legislative_source", ["camara", "senado"]);
 export const houseEnum = pgEnum("legislative_house", ["camara", "senado", "congresso"]);
@@ -533,6 +540,20 @@ export const electoralSyncRuns = pgTable("electoral_sync_runs", {
     table.status,
     table.publicationOrder,
   ),
+]);
+
+export const electoralMediaBlobs = pgTable("electoral_media_blobs", {
+  storageKey: text("storage_key").primaryKey(),
+  syncRunId: text("sync_run_id").notNull(),
+  kind: text("kind").notNull(),
+  mimeType: text("mime_type").notNull(),
+  byteLength: integer("byte_length").notNull(),
+  sha256: text("sha256").notNull(),
+  content: bytea("content").notNull(),
+  published: boolean("published").default(false).notNull(),
+  ...timestamps,
+}, (table) => [
+  index("electoral_media_blobs_run_published_idx").on(table.syncRunId, table.published),
 ]);
 
 export const electoralCandidates = pgTable("electoral_candidates", {

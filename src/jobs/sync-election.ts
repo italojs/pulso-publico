@@ -64,7 +64,7 @@ interface ElectionClient {
 
 interface ElectionMediaStore {
   prepare(runId: string): Promise<void>;
-  stage(runId: string, entry: TseMediaEntry): Promise<string>;
+  stage(runId: string, entry: TseMediaEntry): Promise<string | null>;
   publish(runId: string): Promise<void>;
   discard(runId: string): Promise<void>;
   removePublished(runId: string): Promise<void>;
@@ -726,6 +726,7 @@ async function performSync(
           const storageKey = await mediaStore.stage(runId, entry);
           resources[kind] += 1;
           if (kind === "photos") {
+            if (!storageKey) fail("MISSING_CANDIDATE_PHOTO_CONTENT");
             if (candidate.photoStorageKey) fail("DUPLICATE_CANDIDATE_PHOTO");
             candidate.photoStorageKey = storageKey;
             candidate.photoSourceArchiveUrl = entry.sourceArchiveUrl;

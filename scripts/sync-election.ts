@@ -15,7 +15,7 @@ try {
     { withAdvisoryLock },
     { ElectoralRepository },
     { TseOpenDataClient },
-    { ElectoralMediaStore },
+    { DatabaseElectoralMediaStore },
     { syncElection },
   ] = await Promise.all([
     import("#/server/config"),
@@ -23,7 +23,7 @@ try {
     import("#/server/db/advisory-lock"),
     import("#/server/electoral/repository"),
     import("#/integrations/tse/client"),
-    import("#/integrations/tse/media-store"),
+    import("#/server/electoral/database-media-store"),
     import("#/jobs/sync-election"),
   ]);
   closeDatabase = () => databaseModule.sql.end({ timeout: 5 });
@@ -32,7 +32,7 @@ try {
       baseUrl: env.TSE_DATA_BASE_URL,
       requestTimeoutMs: env.HTTP_TIMEOUT_MS,
     }),
-    new ElectoralMediaStore(env.ELECTORAL_MEDIA_DIRECTORY),
+    new DatabaseElectoralMediaStore(databaseModule.db),
     new ElectoralRepository(databaseModule.db),
     {
       electionYear: env.ELECTION_YEAR,
