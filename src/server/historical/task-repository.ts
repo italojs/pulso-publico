@@ -1,5 +1,4 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import {
   HISTORICAL_PHASES,
@@ -8,10 +7,9 @@ import {
 } from "#/domain/historical-collection";
 import type { LegislativeSourceName } from "#/domain/legislative";
 import { historicalCollectionTasks } from "#/server/db/schema";
-import * as schema from "#/server/db/schema";
+import type { Database, DatabaseTransaction } from "#/server/db/types";
 
-type Database = PostgresJsDatabase<typeof schema>;
-export type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type { DatabaseTransaction } from "#/server/db/types";
 
 interface ReservedTaskRow extends Record<string, unknown> {
   id: string;

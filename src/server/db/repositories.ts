@@ -1,5 +1,4 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { AlertRepository } from "#/alerts/alert-repository";
 import { detectAlertCandidates } from "#/alerts/detect-events";
@@ -35,7 +34,7 @@ import {
   syncCheckpoints,
   voteEvents,
 } from "#/server/db/schema";
-import * as schema from "#/server/db/schema";
+import type { Database, DatabaseTransaction } from "#/server/db/types";
 
 export interface BillGraph {
   bill: Bill;
@@ -45,8 +44,6 @@ export interface BillGraph {
   voteEvents: VoteEvent[];
   individualVotes: IndividualVote[];
 }
-
-type Database = PostgresJsDatabase<typeof schema>;
 
 function date(value: string) {
   return new Date(value);
@@ -107,7 +104,14 @@ export class LegislativeRepository {
   }
 
   async upsertBillGraph(graph: BillGraph): Promise<void> {
-    await this.database.transaction(async (transaction) => {
+    await this.database.transaction((transaction) =>
+      this.upsertBillGraphInTransaction(transaction, graph));
+  }
+
+  async upsertBillGraphInTransaction(
+    transaction: DatabaseTransaction,
+    graph: BillGraph,
+  ): Promise<void> {
       const [previousBill] = await transaction
         .select({ id: bills.id, statusLabel: bills.statusLabel })
         .from(bills)
@@ -327,7 +331,6 @@ export class LegislativeRepository {
         });
         await new AlertRepository(transaction as unknown as Database).publishForBill(storedBill.id, candidates);
       }
-    });
   }
 
   async upsertLawmakers(items: Lawmaker[]): Promise<void> {

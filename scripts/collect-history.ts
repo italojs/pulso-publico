@@ -35,13 +35,17 @@ try {
     { SenadoAdapter },
     { db, sql },
     { HistoricalTaskRepository },
-    { createHistoricalTaskExecutor },
+    { LegislativeRepository },
+    { HistoricalBillReader },
+    { createLegislativeHistoricalTaskExecutor },
     { runHistoricalCollector },
   ] = await Promise.all([
     import("#/integrations/camara/client"),
     import("#/integrations/senado/client"),
     import("#/server/db/client"),
     import("#/server/historical/task-repository"),
+    import("#/server/db/repositories"),
+    import("#/server/historical/bill-reader"),
     import("#/jobs/historical-task-executor"),
     import("#/jobs/historical-collector"),
   ]);
@@ -51,8 +55,13 @@ try {
     camara: new CamaraAdapter({ minimumIntervalMs }),
     senado: new SenadoAdapter({ minimumIntervalMs }),
   };
-  const executor = createHistoricalTaskExecutor({});
-  void adapters;
+  const legislativeRepository = new LegislativeRepository(db);
+  const executor = createLegislativeHistoricalTaskExecutor({
+    adapters,
+    billReader: new HistoricalBillReader(db),
+    persistBillGraph: (transaction, graph) =>
+      legislativeRepository.upsertBillGraphInTransaction(transaction, graph),
+  });
 
   const report = await runHistoricalCollector(
     {
