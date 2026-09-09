@@ -11,6 +11,7 @@ describe("production runtime configuration", () => {
       readFile(".nvmrc", "utf8"),
       readFile("package.json", "utf8").then((value) => JSON.parse(value) as {
         engines: { node: string };
+        scripts: { build: string; start: string };
       }),
       readFile("galaxy.json", "utf8").then((value) => JSON.parse(value) as unknown),
     ]);
@@ -18,6 +19,8 @@ describe("production runtime configuration", () => {
     expect(nodeVersion.trim()).toBe("22.23.2");
     expect(nvmrc.trim()).toBe("22.23.2");
     expect(packageJson.engines.node).toBe(">=22 <23");
+    expect(packageJson.scripts.build).toContain("scripts/prepare-standalone.ts");
+    expect(packageJson.scripts.start).toBe("node .next/standalone/server.js");
     expect(nextConfig.output).toBe("standalone");
     expect(galaxy).toMatchObject({
       commands: {
