@@ -1,3 +1,5 @@
+import { Temporal } from "@js-temporal/polyfill";
+
 import type {
   Lawmaker,
   LegislativeSourceAdapter,

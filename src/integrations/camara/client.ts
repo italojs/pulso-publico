@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Temporal } from "@js-temporal/polyfill";
 
 import { normalizeProposalType } from "#/domain/bill-facets";
 import type {
@@ -31,9 +32,9 @@ import {
   mapCamaraVoteEvent,
 } from "#/integrations/camara/mapper";
 import { env } from "#/server/config";
+import { createGovernedFetcher } from "#/server/http/request-governor";
 import {
   OfficialSourceError,
-  retryingFetch,
   type RetryingRequestInit,
 } from "#/server/http/retrying-fetch";
 
@@ -90,7 +91,7 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
 
   constructor(options: CamaraAdapterOptions = {}) {
     this.baseUrl = new URL(`${(options.baseUrl ?? env.CAMARA_BASE_URL).replace(/\/$/, "")}/`);
-    this.fetcher = options.fetcher ?? retryingFetch;
+    this.fetcher = options.fetcher ?? createGovernedFetcher({ minimumIntervalMs: 3_000 });
     this.archiveBaseUrl = options.archiveBaseUrl;
     this.archiveFetcher = options.archiveFetcher ?? this.fetcher;
     this.now = options.now ?? (() => new Date());

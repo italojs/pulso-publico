@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Temporal } from "@js-temporal/polyfill";
 
 import { normalizeProposalType } from "#/domain/bill-facets";
 import type {
@@ -25,9 +26,9 @@ import {
   mapSenadoVoteEvent,
 } from "#/integrations/senado/mapper";
 import { env } from "#/server/config";
+import { createGovernedFetcher } from "#/server/http/request-governor";
 import {
   OfficialSourceError,
-  retryingFetch,
   type RetryingRequestInit,
 } from "#/server/http/retrying-fetch";
 
@@ -121,7 +122,7 @@ export class SenadoAdapter implements LegislativeSourceAdapter, LegislativeCatal
 
   constructor(options: SenadoAdapterOptions = {}) {
     this.baseUrl = new URL(`${(options.baseUrl ?? env.SENADO_BASE_URL).replace(/\/$/, "")}/`);
-    this.fetcher = options.fetcher ?? retryingFetch;
+    this.fetcher = options.fetcher ?? createGovernedFetcher({ minimumIntervalMs: 3_000 });
     this.now = options.now ?? (() => new Date());
   }
 

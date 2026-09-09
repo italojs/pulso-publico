@@ -33,6 +33,7 @@
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
     "@fontsource/barlow-condensed": "^5.3.0",
+    "@js-temporal/polyfill": "0.5.1",
     "csv-parse": "7.0.2",
     "drizzle-orm": "0.45.2",
     "next": "16.3.4",

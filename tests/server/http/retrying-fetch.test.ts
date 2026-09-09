@@ -82,4 +82,42 @@ describe("retryingFetch", () => {
 
     await expect(response.text()).resolves.toBe("stream concluído");
   });
+
+  it("respects a Retry-After delta longer than the exponential backoff", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", {
+        status: 429,
+        headers: { "Retry-After": "7" },
+      }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    const sleep = vi.fn(async () => undefined);
+
+    const response = await retryingFetch(new URL("https://example.test/items"), {
+      retry: { attempts: 2, baseDelayMs: 250, timeoutMs: 100 },
+      sleep,
+      random: () => 0,
+    });
+
+    expect(await response.text()).toBe("ok");
+    expect(sleep).toHaveBeenCalledOnce();
+    expect(sleep).toHaveBeenCalledWith(7_000, undefined);
+  });
+
+  it("respects a Retry-After HTTP date", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-09T12:00:00.000Z"));
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", {
+        status: 503,
+        headers: { "Retry-After": "Wed, 09 Sep 2026 12:00:05 GMT" },
+      }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    const sleep = vi.fn(async () => undefined);
+
+    await retryingFetch(new URL("https://example.test/items"), {
+      retry: { attempts: 2, baseDelayMs: 0, timeoutMs: 100 },
+      sleep,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(5_000, undefined);
+  });
 });

@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { parse } from "csv-parse";
+import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
 
 import type {

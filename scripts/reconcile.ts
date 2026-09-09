@@ -1,5 +1,7 @@
 import { loadEnvFile } from "node:process";
 
+import { Temporal } from "@js-temporal/polyfill";
+
 const USAGE = "Usage: npm run reconcile -- --source=all|camara|senado";
 
 function loadLocalEnvironment() {
