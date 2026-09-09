@@ -40,7 +40,10 @@ Uma interrupção forçada que não entrega o sinal ao processo Node pode manter
 
 ## Pendências externas
 
-- Criar/verificar `pulse_app` e o banco lógico `pulse` no Galaxy usando a credencial administrativa apenas em memória.
-- Aplicar as migrações como `pulse_app` e confirmar `superuser: false`.
+- Banco lógico `pulse` e role restrita `pulse_app` criados no Galaxy; a credencial administrativa foi usada somente em memória e o utilitário temporário foi removido.
+- As 14 migrações foram aplicadas como `pulse_app`; o verificador confirmou `superuser: false` e todas as nove tabelas obrigatórias.
+- O endpoint público fornecido pelo Galaxy informou que não oferece TLS. A conexão operacional usa `sslmode=prefer`; no deploy, deve-se preferir o endpoint privado do Galaxy, se disponibilizado ao Web App.
+- A execução controlada do coletor criou 1.134 tarefas para Câmara e Senado de 1946 a 2026, persistiu o primeiro lote e deixou o armazenamento em nível `ok`, usando 0,03% dos 30 GB configurados.
+- O coletor histórico contínuo foi iniciado no Mac, limitado a 20 requisições por minuto por fonte e com checkpoint durável.
 - Inspecionar no Galaxy o preço exato do menor Web App Production com um contêiner e obter confirmação do custo antes de criar o recurso.
-- Publicar, validar manualmente o app ao vivo e iniciar o coletor histórico local persistente.
+- Publicar e validar manualmente o app ao vivo.
