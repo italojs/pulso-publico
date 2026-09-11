@@ -308,6 +308,7 @@ async function enrichBillRows(
         billId: aiSummaries.billId,
         friendlyTitle: aiSummaries.friendlyTitle,
         shortDescription: aiSummaries.shortDescription,
+        practicalImpact: aiSummaries.practicalImpact,
       })
       .from(aiSummaries)
       .where(inArray(aiSummaries.billId, billIds)),
@@ -344,6 +345,7 @@ async function enrichBillRows(
     )),
     friendlyTitle: summariesByBill.get(row.id)?.friendlyTitle ?? null,
     shortDescription: summariesByBill.get(row.id)?.shortDescription ?? null,
+    practicalImpact: summariesByBill.get(row.id)?.practicalImpact ?? null,
   }));
 }
 

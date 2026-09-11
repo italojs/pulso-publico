@@ -101,6 +101,18 @@ describe("project detail route", () => {
       .toBeLessThan(mocks.getPublicBill.mock.invocationCallOrder[0]!);
   });
 
+  it("shows a practical impact only when an AI summary provides one", async () => {
+    mocks.getPublicBill.mockResolvedValue({
+      ...project,
+      practicalImpact: "Na prática: trabalhadores abrangidos passariam a ter uma escala com dois dias consecutivos de descanso, se o texto entrar em vigor.",
+    });
+
+    render(await ProjectPage({ params: Promise.resolve({ source: "senado", externalId: "9105948" }) }));
+
+    expect(screen.getByRole("heading", { name: "O que muda na prática" })).toBeInTheDocument();
+    expect(screen.getByText(/trabalhadores abrangidos passariam a ter uma escala/i)).toBeInTheDocument();
+  });
+
   it("does not claim there are no votes while history is still pending", async () => {
     mocks.getPublicBill.mockResolvedValue({
       ...project,
