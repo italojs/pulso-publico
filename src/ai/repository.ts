@@ -21,6 +21,7 @@ export class AiSummaryRepository {
         officialCode: bills.officialCode,
         officialTitle: bills.officialTitle,
         officialSummary: bills.officialSummary,
+        officialDocumentText: bills.officialSummary,
         storedFingerprint: aiSummaries.sourceFingerprint,
       })
       .from(bills)
@@ -40,6 +41,7 @@ export class AiSummaryRepository {
         officialCode: bills.officialCode,
         officialTitle: bills.officialTitle,
         officialSummary: bills.officialSummary,
+        officialDocumentText: bills.officialSummary,
         storedFingerprint: aiSummaries.sourceFingerprint,
       })
       .from(bills)
@@ -61,6 +63,7 @@ export class AiSummaryRepository {
   async save(billId: string, summary: {
     friendlyTitle: string;
     shortDescription: string;
+    practicalImpact: string | null;
     model: string;
     promptVersion: string;
     sourceFingerprint: string;

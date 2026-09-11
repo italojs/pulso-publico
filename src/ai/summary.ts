@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-export const PROMPT_VERSION = "plain-language-v1";
+export const PROMPT_VERSION = "plain-language-full-text-v3";
 
 export interface BillSummaryInput {
   officialCode: string;
   officialTitle: string;
   officialSummary: string;
+  officialDocumentText: string;
   promptVersion: typeof PROMPT_VERSION;
 }
 
@@ -19,7 +20,8 @@ export interface BillSummaryProvider {
 const summaryOutput = z
   .object({
     friendlyTitle: z.string().trim().min(8).max(120),
-    shortDescription: z.string().trim().min(20).max(420),
+    shortDescription: z.string().trim().min(80).max(420),
+    practicalImpact: z.string().trim().min(80).max(520).nullable(),
   })
   .strict();
 
@@ -36,6 +38,7 @@ export function summaryFingerprint(input: BillSummaryInput) {
       input.officialTitle,
       input.officialSummary,
       input.promptVersion,
+      createHash("sha256").update(input.officialDocumentText).digest("hex"),
     ]))
     .digest("hex");
 }

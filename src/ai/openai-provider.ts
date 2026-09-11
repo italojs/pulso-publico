@@ -49,10 +49,11 @@ export class OpenAiSummaryProvider implements BillSummaryProvider {
         store: false,
         instructions: [
           "Você transforma linguagem legislativa brasileira em português simples e neutro.",
-          "Use somente os dados oficiais fornecidos. Não acrescente impacto, intenção, opinião, previsão ou recomendação.",
+          "Use somente os dados oficiais fornecidos. Não acrescente opinião, previsão ou recomendação.",
           "O título deve explicar o assunto, sem sensacionalismo. A descrição deve ter uma ou duas frases para alguém leigo em política.",
+          "Em practicalImpact, use 'Na prática:' e cite apenas mudanças ou exemplos explícitos, ou consequência direta da regra. Retorne null quando a fonte não sustentar uma explicação concreta.",
         ].join(" "),
-        input: `Identificação oficial: ${input.officialCode}\nTítulo oficial: ${input.officialTitle}\nEmenta oficial: ${input.officialSummary || "Não informada."}`,
+        input: `Identificação oficial: ${input.officialCode}\nTítulo oficial: ${input.officialTitle}\nEmenta oficial: ${input.officialSummary || "Não informada."}\nTexto oficial integral: ${input.officialDocumentText}`,
         text: {
           format: {
             type: "json_schema",
@@ -63,9 +64,10 @@ export class OpenAiSummaryProvider implements BillSummaryProvider {
               additionalProperties: false,
               properties: {
                 friendlyTitle: { type: "string", minLength: 8, maxLength: 120 },
-                shortDescription: { type: "string", minLength: 20, maxLength: 420 },
+                shortDescription: { type: "string", minLength: 80, maxLength: 420 },
+                practicalImpact: { type: ["string", "null"], minLength: 80, maxLength: 520 },
               },
-              required: ["friendlyTitle", "shortDescription"],
+              required: ["friendlyTitle", "shortDescription", "practicalImpact"],
             },
           },
         },

@@ -29,7 +29,8 @@ describe("summary generation job", () => {
       model: "test-model",
       generate: vi.fn().mockResolvedValue({
         friendlyTitle: "Jornada semanal com nova escala de descanso",
-        shortDescription: "A proposta altera a jornada semanal e a organização dos dias de descanso.",
+        shortDescription: "A proposta altera a jornada semanal e a organização dos dias de descanso para os trabalhadores abrangidos pela nova regra.",
+        practicalImpact: "Na prática: trabalhadores abrangidos passariam a ter uma escala com dois dias consecutivos de descanso, se o texto entrar em vigor.",
       }),
     };
     const repository = new AiSummaryRepository(testDb);
@@ -94,7 +95,8 @@ describe("summary generation job", () => {
       model: "test-model",
       generate: vi.fn().mockImplementation(async (input: { officialCode: string }) => ({
         friendlyTitle: `Explicação simples para ${input.officialCode}`,
-        shortDescription: "Descrição simples, neutra e baseada somente nos dados oficiais.",
+        shortDescription: "Descrição simples, neutra e baseada somente nos dados oficiais fornecidos para explicar a proposta a pessoas leigas em política.",
+        practicalImpact: "Na prática: o texto alteraria as regras aplicáveis ao caso descrito, caso seja aprovado e passe a valer como lei.",
       })),
     };
     const repository = new AiSummaryRepository(testDb);
