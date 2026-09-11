@@ -1,7 +1,7 @@
 import { asc, count, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { aiSummaryBatchItems, bills } from "#/server/db/schema";
+import { aiSummaries, aiSummaryBatchItems, bills } from "#/server/db/schema";
 import type * as schema from "#/server/db/schema";
 
 type Database = PostgresJsDatabase<typeof schema>;
@@ -47,4 +47,71 @@ export async function preparePracticalImpactBatch(
   }
 
   return { selected: selected.length, inserted: selected.length, existing: 0 };
+}
+
+export interface VerifyPracticalImpactBatchOptions {
+  promptVersion: string;
+}
+
+function hasValidLength(value: string | null, minimum: number, maximum: number) {
+  const length = value?.trim().length ?? 0;
+  return length >= minimum && length <= maximum;
+}
+
+export async function verifyPracticalImpactBatch(
+  database: Database,
+  { promptVersion }: VerifyPracticalImpactBatchOptions,
+) {
+  const rows = await database
+    .select({
+      status: aiSummaryBatchItems.status,
+      summaryPromptVersion: aiSummaries.promptVersion,
+      friendlyTitle: aiSummaries.friendlyTitle,
+      shortDescription: aiSummaries.shortDescription,
+      practicalImpact: aiSummaries.practicalImpact,
+    })
+    .from(aiSummaryBatchItems)
+    .leftJoin(aiSummaries, eq(aiSummaries.billId, aiSummaryBatchItems.billId))
+    .where(eq(aiSummaryBatchItems.promptVersion, promptVersion));
+
+  const statuses = {
+    total: rows.length,
+    completed: 0,
+    pending: 0,
+    processing: 0,
+    needsReview: 0,
+    failed: 0,
+    invalidCompleted: 0,
+  };
+
+  for (const row of rows) {
+    switch (row.status) {
+      case "completed":
+        statuses.completed += 1;
+        if (
+          row.summaryPromptVersion !== promptVersion
+          || !hasValidLength(row.friendlyTitle, 8, 120)
+          || !hasValidLength(row.shortDescription, 80, 420)
+          || !hasValidLength(row.practicalImpact, 80, 520)
+          || !row.practicalImpact?.trim().startsWith("Na prática:")
+        ) {
+          statuses.invalidCompleted += 1;
+        }
+        break;
+      case "pending":
+        statuses.pending += 1;
+        break;
+      case "processing":
+        statuses.processing += 1;
+        break;
+      case "needs_review":
+        statuses.needsReview += 1;
+        break;
+      case "failed":
+        statuses.failed += 1;
+        break;
+    }
+  }
+
+  return statuses;
 }
