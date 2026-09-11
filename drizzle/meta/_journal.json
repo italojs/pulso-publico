@@ -99,6 +99,13 @@
       "when": 1788982826628,
       "tag": "0013_orange_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789152719351,
+      "tag": "0014_high_excalibur",
+      "breakpoints": true
     }
   ]
 }

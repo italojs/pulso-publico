@@ -91,6 +91,13 @@ export const billHydrationStatusEnum = pgEnum("bill_hydration_status", [
   "complete",
   "failed",
 ]);
+export const aiSummaryBatchStatusEnum = pgEnum("ai_summary_batch_status", [
+  "pending",
+  "processing",
+  "completed",
+  "needs_review",
+  "failed",
+]);
 export const historicalImportStatusEnum = pgEnum("historical_import_status", [
   "running",
   "complete",
@@ -417,6 +424,7 @@ export const aiSummaries = pgTable(
       .references(() => bills.id, { onDelete: "cascade" }),
     friendlyTitle: text("friendly_title").notNull(),
     shortDescription: text("short_description").notNull(),
+    practicalImpact: text("practical_impact"),
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
     sourceFingerprint: text("source_fingerprint").notNull(),
@@ -426,6 +434,25 @@ export const aiSummaries = pgTable(
   (table) => [
     uniqueIndex("ai_summaries_bill_id_uq").on(table.billId),
     index("ai_summaries_fingerprint_idx").on(table.sourceFingerprint),
+  ],
+);
+
+export const aiSummaryBatchItems = pgTable(
+  "ai_summary_batch_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    billId: uuid("bill_id").notNull().references(() => bills.id, { onDelete: "cascade" }),
+    promptVersion: text("prompt_version").notNull(),
+    rank: integer("rank").notNull(),
+    status: aiSummaryBatchStatusEnum("status").default("pending").notNull(),
+    documentHash: text("document_hash"),
+    attempts: integer("attempts").default(0).notNull(),
+    errorCode: text("error_code"),
+    ...timestamps,
+  },
+  (table) => [
+    unique("ai_summary_batch_items_bill_version_uq").on(table.billId, table.promptVersion),
+    index("ai_summary_batch_items_status_rank_idx").on(table.status, table.rank),
   ],
 );
 
