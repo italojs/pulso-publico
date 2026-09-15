@@ -20,5 +20,6 @@ Mudanças relevantes do Pulso Público. A versão `0.1.0` é a base MVP; não in
 - Demo sintética aditiva e idempotente, sem contas predefinidas, IA ou consulta às fontes oficiais.
 - Proteções que restringem testes a bancos descartáveis locais `_test` e `_test_demo`, separados da demo de exploração; seed interativo somente em banco local `_demo`.
 - Automação de qualidade e varredura de segredos, metadados do repositório e avisos de licenças de terceiros.
+- Correção dos limites de datas brasileiras para não depender do fuso da sessão PostgreSQL, com regressões em UTC, São Paulo e Tóquio.
 
 Relatórios de validações anteriores permanecem em [`docs/validation`](docs/validation) e [`docs/superpowers/validation`](docs/superpowers/validation). A documentação de decisões e planos também é preservada; não deve ser confundida com garantia de que todos os passos históricos foram executados.

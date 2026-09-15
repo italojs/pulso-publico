@@ -4,7 +4,7 @@
 
 Preparação do Pulso Público `0.1.0` como MVP open source sob MIT. As verificações foram realizadas em uma cópia limpa do commit-base `277633b685da4b8829d6a07746c0fbbed4193670`, acrescida somente dos arquivos desta preparação, sem `.env` local. Três alterações preexistentes em filtros e testes ficaram fora da cópia e do commit.
 
-Nenhuma conexão, migração ou sincronização foi feita em banco de produção. PostgreSQL `18.4`, inicializado temporariamente em loopback, serviu bancos UTF-8 separados `legislativo_test`, `legislativo_demo` e `legislativo_test_demo`. A configuração Docker foi inspecionada; Docker Compose não foi executado localmente porque o CLI Docker não estava disponível.
+Nenhuma conexão, migração ou sincronização foi feita em banco de produção. A primeira rodada local usou PostgreSQL 16 pelo PATH do computador. Após conferir o ambiente do CI, a suite final foi repetida num cluster novo PostgreSQL `18.4`, chamado por caminho explícito, com bancos UTF-8 descartáveis `legislativo_test` e `legislativo_test_demo` em loopback e fuso UTC. A demo de exploração foi validada separadamente em `legislativo_demo`. A configuração Docker foi inspecionada; Docker Compose não foi executado localmente porque o CLI Docker não estava disponível.
 
 ## Verificações locais
 
@@ -12,7 +12,7 @@ Nenhuma conexão, migração ou sincronização foi feita em banco de produção
 | --- | --- |
 | Node/npm fixados | Node `22.23.2`, npm `11.19.0` |
 | Instalação limpa | `npm ci` concluído |
-| Testes | 76 arquivos, 773 testes aprovados |
+| Testes | 77 arquivos, 776 testes aprovados no PostgreSQL 18.4, com processo e bancos em UTC |
 | Tipos | `npm run typecheck` aprovado |
 | Build | `npm run build` aprovado; artefato Next.js standalone gerado |
 | Demo | Migrações aplicadas em banco novo; seed repetido sem duplicar três projetos e dois parlamentares |
@@ -35,4 +35,10 @@ Licenças das dependências diretas e componentes transitivos relevantes foram i
 
 ## Publicação e verificações externas
 
-As evidências acima são locais. A criação do repositório, checks GitHub Actions, proteção de `main`, recursos de segurança e release devem ser conferidos nos respectivos registros do GitHub após o push; este relatório não substitui seus resultados nem certifica segurança, completude dos dados ou estabilidade do MVP.
+O repositório [italojs/pulso-publico](https://github.com/italojs/pulso-publico) foi publicado como público, com histórico preservado e MIT reconhecida pelo GitHub. Issues, Discussions, alertas/atualizações de segurança Dependabot, secret scanning, push protection e relato privado de vulnerabilidades foram ativados e conferidos por API. A permissão padrão dos tokens de workflow é somente leitura, sem aprovação de PRs.
+
+A [primeira varredura de segredos no GitHub](https://github.com/italojs/pulso-publico/actions/runs/34979040384) passou. O [primeiro CI](https://github.com/italojs/pulso-publico/actions/runs/34979040403) passou na instalação, PostgreSQL 18, auditoria de produção e tipos, mas encontrou um teste herdado de limite de data falhando em UTC. A causa foi reproduzida localmente: `date AT TIME ZONE` escolhia conversão implícita dependente do fuso da sessão. A correção explicita `date::timestamp AT TIME ZONE 'America/Sao_Paulo'`, inclusive para o próximo dia, sem alterar os três arquivos preexistentes.
+
+Três regressões novas verificam lista e contagem nos instantes antes/primeiro/último/depois do dia brasileiro, sob UTC, São Paulo e Tóquio. Antes da correção, UTC e Tóquio falharam; depois, os 47 testes originais de consultas e as três regressões passaram. A suite final de 776 testes também passou em PostgreSQL 18/UTC. Actions foram atualizadas para releases oficiais que usam Node 24, fixadas por SHA completo, eliminando a dependência do runtime Node 20 depreciado.
+
+O CI do commit corrigido, a proteção de `main` e a release devem ser conferidos nos [registros atuais do GitHub](https://github.com/italojs/pulso-publico/actions). Este relatório é um registro de verificações, não certificação de segurança, completude dos dados ou estabilidade do MVP.

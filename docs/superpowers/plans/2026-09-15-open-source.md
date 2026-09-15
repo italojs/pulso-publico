@@ -41,6 +41,8 @@
 
 **Ruling:** A revisão final separou a regressão offline num terceiro banco descartável `_test_demo`, evitando alterações na demo de exploração. A proteção exige o sufixo mais específico, Docker/CI criam o banco e os guias explicam os dois overrides de testes. Regressão, suite de 773 testes, tipos e build aprovados após a correção.
 
+**Ruling:** O primeiro CI encontrou conversão de calendário dependente do fuso PostgreSQL. Corrigida por cast explícito para timestamp antes de aplicar o fuso brasileiro, sem modificar arquivos preexistentes. Três regressões novas cobrem UTC/São Paulo/Tóquio. Suite final: 776 testes em 77 arquivos, PostgreSQL 18.4 e UTC. Releases oficiais atuais de checkout/setup-node usam Node 24 e permanecem fixadas por SHA.
+
 ## Task 2: Licença, comunidade e documentação
 
 **Files:** `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `ROADMAP.md`, `CHANGELOG.md`, `README.md`, `docs/architecture.md`, `docs/data-and-ai.md`, `docs/development.md`, `docs/deployment.md`, `docs/third-party-notices.md`, `package.json`, `package-lock.json`.

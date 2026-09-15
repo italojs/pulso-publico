@@ -61,9 +61,11 @@ function brazilianDateBoundary(value: string | undefined, nextDay: boolean): SQL
     || calendarDate.getUTCMonth() !== (month ?? 0) - 1
     || calendarDate.getUTCDate() !== day
   ) return undefined;
+  // A date's implicit timestamptz cast inherits the session timezone. Interpret
+  // the calendar day explicitly in Brazil before comparing absolute instants.
   return nextDay
-    ? sql`((${value}::date + 1) AT TIME ZONE 'America/Sao_Paulo')`
-    : sql`(${value}::date AT TIME ZONE 'America/Sao_Paulo')`;
+    ? sql`((${value}::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')`
+    : sql`(${value}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`;
 }
 
 function billConditions(filters: PublicBillFilters, scope: PublicBillScope = {}): SQL[] {
