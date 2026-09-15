@@ -41,4 +41,10 @@ A [primeira varredura de segredos no GitHub](https://github.com/italojs/pulso-pu
 
 Três regressões novas verificam lista e contagem nos instantes antes/primeiro/último/depois do dia brasileiro, sob UTC, São Paulo e Tóquio. Antes da correção, UTC e Tóquio falharam; depois, os 47 testes originais de consultas e as três regressões passaram. A suite final de 776 testes também passou em PostgreSQL 18/UTC. Actions foram atualizadas para releases oficiais que usam Node 24, fixadas por SHA completo, eliminando a dependência do runtime Node 20 depreciado.
 
-O CI do commit corrigido, a proteção de `main` e a release devem ser conferidos nos [registros atuais do GitHub](https://github.com/italojs/pulso-publico/actions). Este relatório é um registro de verificações, não certificação de segurança, completude dos dados ou estabilidade do MVP.
+O [CI corrigido](https://github.com/italojs/pulso-publico/actions/runs/34979630639) e a [varredura de segredos corrigida](https://github.com/italojs/pulso-publico/actions/runs/34979630558) passaram no commit `3d053f65436944fb36a551df59c9e7f8c4ccb498`: 77 arquivos, 776 testes, tipos e build aprovados, auditoria de produção sem vulnerabilidades detectadas.
+
+A proteção de `main` foi aplicada e conferida por API: checks `quality` e `secret-scan` vinculados ao app GitHub Actions, branch atualizada, uma aprovação, CODEOWNERS, conversas resolvidas e histórico linear. Force push e exclusão estão desabilitados. Administradores mantêm exceção de revisão/checks para não bloquear o mantenedor único; essa exceção deve ser reavaliada quando houver outros mantenedores e não substitui revisão de contribuições.
+
+A [release `v0.1.0`](https://github.com/italojs/pulso-publico/releases/tag/v0.1.0) foi publicada como pré-lançamento MVP, não rascunho, com tag anotada no commit validado acima. Atualizações de dependências propostas automaticamente permanecem em PRs, sem merge automático. As três alterações preexistentes continuam locais e fora da publicação.
+
+Este relatório é um registro de verificações, não certificação de segurança, completude dos dados ou estabilidade do MVP. Resultados posteriores são consultados nos [registros atuais do GitHub](https://github.com/italojs/pulso-publico/actions).

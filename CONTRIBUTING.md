@@ -29,3 +29,9 @@ Os testes usam dois bancos locais descartáveis: `TEST_DATABASE_URL` exige `_tes
 - Dependências e mídia novas precisam de origem e licença identificadas; atualize [avisos de terceiros](docs/third-party-notices.md).
 
 O mantenedor revisa as propostas e pode pedir ajustes ou recusar mudanças incompatíveis com o escopo. Não há prazo garantido de revisão ou aceitação automática por aprovação dos checks. Novas contribuições originais entram sob a [licença MIT](LICENSE) do projeto; não envie material cuja licença você não possa conceder.
+
+## Proteção da branch principal
+
+Contribuições para `main` exigem branch atualizada, checks `quality` e `secret-scan`, uma aprovação e revisão de CODEOWNERS, além de conversas resolvidas. O repositório usa squash merge e histórico linear; force push e exclusão da branch estão desabilitados.
+
+O administrador mantém uma exceção de revisão/checks enquanto houver somente um mantenedor, para evitar bloqueio por impossibilidade de aprovar seu próprio PR. Não use essa exceção como fluxo habitual para contribuições externas. Reavalie a configuração quando houver outros mantenedores; as regras efetivas são as configuradas no GitHub.

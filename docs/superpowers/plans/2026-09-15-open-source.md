@@ -80,6 +80,8 @@
 - [x] `npm ci`, `npm test`, `npm run typecheck` e `npm run build` em cópia sem `.env` local, usando Node/npm fixados.
 - [x] Migrar banco demo novo, executar seed duas vezes e conferir página HTTP e screenshot.
 - [x] Revisão independente read-only; corrigir problemas relevantes e repetir verificações afetadas.
-- [ ] Registrar evidências, commit seletivo, criar repositório público, push inicial e verificar CI real.
-- [ ] Configurar proteção, alertas de dependências e private vulnerability reporting; conferir por API.
-- [ ] Criar release `v0.1.0` como MVP e entregar links; relatar qualquer bloqueio externo sem fingir conclusão.
+- [x] Registrar evidências, commit seletivo, criar repositório público, push inicial e verificar CI real.
+- [x] Configurar proteção, alertas de dependências e private vulnerability reporting; conferir por API.
+- [x] Criar release `v0.1.0` como MVP e disponibilizar links; relatar qualquer bloqueio externo sem fingir conclusão.
+
+**External evidence:** [repositório público](https://github.com/italojs/pulso-publico), [CI corrigido aprovado](https://github.com/italojs/pulso-publico/actions/runs/34979630639), [segredos aprovado](https://github.com/italojs/pulso-publico/actions/runs/34979630558), [release MVP experimental](https://github.com/italojs/pulso-publico/releases/tag/v0.1.0). Proteção exige checks GitHub Actions atualizados e uma aprovação/CODEOWNERS, mantendo exceção de administrador para o mantenedor único. Limitação de toolchain registrada em SECURITY.md.
