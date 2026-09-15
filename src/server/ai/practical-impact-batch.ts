@@ -1,4 +1,4 @@
-import { asc, count, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, notExists, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { aiSummaries, aiSummaryBatchItems, bills } from "#/server/db/schema";
@@ -10,6 +10,15 @@ export interface PreparePracticalImpactBatchOptions {
   limit: number;
   promptVersion: string;
 }
+
+const billActivityOrder = [
+  sql`greatest(
+    (select max("movements"."occurred_at") from "movements" where "movements"."bill_id" = "bills"."id"),
+    (select max("vote_events"."occurred_at") from "vote_events" where "vote_events"."bill_id" = "bills"."id"),
+    ${bills.presentedAt}
+  ) desc nulls last`,
+  asc(bills.id),
+] as const;
 
 export async function preparePracticalImpactBatch(
   database: Database,
@@ -25,14 +34,7 @@ export async function preparePracticalImpactBatch(
   const selected = await database
     .select({ id: bills.id })
     .from(bills)
-    .orderBy(
-      sql`greatest(
-        (select max("movements"."occurred_at") from "movements" where "movements"."bill_id" = "bills"."id"),
-        (select max("vote_events"."occurred_at") from "vote_events" where "vote_events"."bill_id" = "bills"."id"),
-        ${bills.presentedAt}
-      ) desc nulls last`,
-      asc(bills.id),
-    )
+    .orderBy(...billActivityOrder)
     .limit(limit);
 
   if (selected.length > 0) {
@@ -47,6 +49,56 @@ export async function preparePracticalImpactBatch(
   }
 
   return { selected: selected.length, inserted: selected.length, existing: 0 };
+}
+
+export async function appendPracticalImpactBatch(
+  database: Database,
+  { limit, promptVersion }: PreparePracticalImpactBatchOptions,
+) {
+  const [stored] = await database
+    .select({ value: count() })
+    .from(aiSummaryBatchItems)
+    .where(eq(aiSummaryBatchItems.promptVersion, promptVersion));
+  const existing = stored?.value ?? 0;
+
+  const [rank] = await database
+    .select({ value: sql<number>`coalesce(max(${aiSummaryBatchItems.rank}), 0)` })
+    .from(aiSummaryBatchItems)
+    .where(eq(aiSummaryBatchItems.promptVersion, promptVersion));
+  const startingRank = Number(rank?.value ?? 0) + 1;
+
+  const selected = await database
+    .select({ id: bills.id })
+    .from(bills)
+    .where(notExists(
+      database
+        .select({ one: sql`1` })
+        .from(aiSummaryBatchItems)
+        .where(and(
+          eq(aiSummaryBatchItems.billId, bills.id),
+          eq(aiSummaryBatchItems.promptVersion, promptVersion),
+        )),
+    ))
+    .orderBy(...billActivityOrder)
+    .limit(limit);
+
+  if (selected.length > 0) {
+    await database
+      .insert(aiSummaryBatchItems)
+      .values(selected.map((bill, index) => ({
+        billId: bill.id,
+        promptVersion,
+        rank: startingRank + index,
+      })))
+      .onConflictDoNothing();
+  }
+
+  return {
+    selected: selected.length,
+    inserted: selected.length,
+    existing,
+    startingRank,
+  };
 }
 
 export interface VerifyPracticalImpactBatchOptions {

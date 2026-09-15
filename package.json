@@ -31,7 +31,9 @@
     "candidates:link": "node scripts/manage-candidate-link.ts",
     "summaries": "node scripts/generate-summaries.ts",
     "practical-impact:prepare": "node scripts/prepare-practical-impact-batch.ts --limit=600",
+    "practical-impact:append:5000": "node scripts/append-practical-impact-batch.ts --limit=5000",
     "practical-impact:verify": "node scripts/verify-practical-impact-batch.ts",
+    "practical-impact:verify:5600": "node scripts/verify-practical-impact-batch.ts --expected=5600",
     "alerts:dispatch": "node scripts/dispatch-push.ts"
   },
   "dependencies": {

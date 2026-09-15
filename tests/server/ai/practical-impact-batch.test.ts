@@ -2,7 +2,11 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { aiSummaries, aiSummaryBatchItems, bills } from "#/server/db/schema";
-import { preparePracticalImpactBatch, verifyPracticalImpactBatch } from "#/server/ai/practical-impact-batch";
+import {
+  appendPracticalImpactBatch,
+  preparePracticalImpactBatch,
+  verifyPracticalImpactBatch,
+} from "#/server/ai/practical-impact-batch";
 import { migrateTestDatabase, testDb, testSql, truncateLegislativeTables } from "../../setup-database.ts";
 
 const promptVersion = "plain-language-full-text-v3";
@@ -52,6 +56,38 @@ describe("practical impact batch", () => {
     const byId = new Map(selected.map((bill) => [bill.id, bill.externalId]));
 
     expect(items.map((item) => [item.rank, byId.get(item.billId)])).toEqual([[1, "newest"], [2, "middle"]]);
+  });
+
+  it("appends only unprocessed projects after a frozen batch", async () => {
+    await seedBill("oldest", "2026-01-01T12:00:00.000Z");
+    await seedBill("middle", "2026-02-01T12:00:00.000Z");
+    await seedBill("newest", "2026-03-01T12:00:00.000Z");
+    await preparePracticalImpactBatch(testDb, { limit: 1, promptVersion });
+
+    await expect(appendPracticalImpactBatch(testDb, { limit: 2, promptVersion })).resolves.toEqual({
+      selected: 2,
+      inserted: 2,
+      existing: 1,
+      startingRank: 2,
+    });
+    await expect(appendPracticalImpactBatch(testDb, { limit: 2, promptVersion })).resolves.toEqual({
+      selected: 0,
+      inserted: 0,
+      existing: 3,
+      startingRank: 4,
+    });
+
+    const items = await testDb.select({ rank: aiSummaryBatchItems.rank, billId: aiSummaryBatchItems.billId })
+      .from(aiSummaryBatchItems)
+      .orderBy(aiSummaryBatchItems.rank);
+    const selected = await testDb.select({ id: bills.id, externalId: bills.externalId }).from(bills);
+    const byId = new Map(selected.map((bill) => [bill.id, bill.externalId]));
+
+    expect(items.map((item) => [item.rank, byId.get(item.billId)])).toEqual([
+      [1, "newest"],
+      [2, "middle"],
+      [3, "oldest"],
+    ]);
   });
 
   it("reports only completed items whose practical explanation satisfies the public contract", async () => {
