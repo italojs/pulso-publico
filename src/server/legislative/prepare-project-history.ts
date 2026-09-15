@@ -1,4 +1,6 @@
 import type { LegislativeSourceName } from "#/domain/legislative";
+import { isLocalDemoRecord } from "#/development/database-url";
+import { env } from "#/server/config";
 import { CamaraAdapter } from "#/integrations/camara/client";
 import { SenadoAdapter } from "#/integrations/senado/client";
 import { withAdvisoryLock } from "#/server/db/advisory-lock";
@@ -30,6 +32,8 @@ export async function prepareProjectHistory(
 ) {
   const identity = await repository.getBillIdentity(source, externalId);
   if (!identity) return { status: "missing" as const };
+  // Synthetic demo IDs are never sent to the official APIs, even after cache expiry.
+  if (isLocalDemoRecord(env.DATABASE_URL, externalId)) return { status: "cached" as const };
 
   const hydration = await hydrateOne(source, externalId);
   const needsPartner = (identity.source === "senado" && identity.originHouse === "camara")

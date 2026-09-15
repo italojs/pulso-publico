@@ -1,105 +1,81 @@
 # Pulso Público
 
-MVP de acompanhamento da atividade legislativa federal brasileira, com dados oficiais da Câmara dos Deputados e do Senado Federal apresentados em linguagem acessível.
+Projetos de lei sem juridiquês. Um MVP open source para acompanhar a atividade legislativa federal brasileira e consultar candidaturas de 2026 com dados oficiais, linguagem acessível e rastreabilidade.
 
-O aplicativo oferece feed com busca e filtros, página completa de projeto com linha do tempo e votações, perfis neutros de parlamentares e candidaturas, comparação de candidaturas e acompanhamento vinculado a uma conta. Somente o título amigável e a descrição curta podem ser gerados por IA; todos os demais fatos permanecem vinculados à fonte oficial.
+O Pulso Público é um projeto independente: não representa a Câmara, o Senado ou o TSE, não atribui notas a políticos e não recomenda voto. A versão `0.1.0` é um MVP, não uma plataforma eleitoral estável ou uma garantia de cobertura completa.
 
-## Requisitos
+## O que já funciona
 
-- Node.js 26.8.1 (`.node-version` e `.nvmrc`);
-- npm 11;
-- PostgreSQL 18, local ou via Docker;
-- espaço persistente para o catálogo legislativo desde 2019 e ao menos 10 GB adicionais para sincronizar e manter a mídia eleitoral de 2026 com folga para a geração atômica seguinte.
+- Feed de projetos com busca, filtros rápidos e avançados, ordenação e paginação.
+- Detalhes de projetos, linha do tempo, votações e votos individuais quando disponibilizados pela fonte, mantendo Câmara e Senado separados.
+- Perfis de parlamentares, contas, acompanhamentos e alertas no aplicativo; Web Push opcional.
+- Catálogo de candidaturas de 2026, perfis e comparação de até três candidaturas compatíveis, sem ranking.
+- IA opcional para título amigável, descrição curta e explicação de impacto prático, sem substituir os registros oficiais.
+
+![Feed do Pulso Público com dados sintéticos de demonstração](docs/images/feed-demo.png)
+
+Captura da aplicação com dados inteiramente fictícios de demonstração. Os projetos e parlamentares mostrados não representam registros oficiais nem pessoas reais.
 
 ## Início rápido
 
+Requisitos: Git, [nvm](https://github.com/nvm-sh/nvm), Node.js `22.23.2`, npm `11.19.0` e Docker Compose para o PostgreSQL `18`. As versões de Node e npm estão registradas no repositório; confira `node --version` e `npm --version` antes de instalar.
+
 ```bash
+git clone https://github.com/italojs/pulso-publico.git
+cd pulso-publico
+nvm install
+nvm use
+npm install --global npm@11.19.0
+npm ci
 cp .env.example .env
-docker compose up -d
-npm install
+docker compose up -d --wait
 npm run db:migrate
-npm run sync
-npm run backfill:legislative -- --from=2019 --source=all
-npm run sync:election
 npm run dev
 ```
 
-Abra `http://localhost:3000`. O PostgreSQL do `docker-compose.yml` fica exposto em `127.0.0.1:5435`, como configurado no `.env.example`.
+Abra [localhost:3000](http://localhost:3000). O exemplo de configuração usa `postgres://app:app@127.0.0.1:5435/legislativo`; essas credenciais são apenas para desenvolvimento local. O Docker expõe o PostgreSQL somente em `127.0.0.1:5435`.
 
-Nenhuma chave externa é necessária para navegar, seguir itens, criar uma conta ou receber alertas dentro do aplicativo. Quando você quiser ativar os recursos opcionais, preencha no `.env`:
+Não é necessário cadastrar chave de IA, carregar todo o histórico ou baixar arquivos eleitorais para iniciar. Um banco recém-migrado tem feed vazio. Para explorar a interface sem consultar fontes externas, use a demo abaixo.
 
-- `OPENAI_API_KEY` e `OPENAI_MODEL`: títulos e descrições curtas em linguagem simples;
-- `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `NEXT_PUBLIC_VAPID_PUBLIC_KEY`: notificações Web Push.
+### Demo local, sem dados reais
 
-## Comandos
+O Docker cria `legislativo_demo`, `legislativo_test` e `legislativo_test_demo` apenas na primeira inicialização de um banco novo. Se seu contêiner já existia, consulte [o guia de desenvolvimento](docs/development.md#bancos-locais-e-contêineres-existentes) para criar os bancos ausentes sem apagar dados.
+
+Depois de preparar o ambiente do início rápido, pare o servidor de desenvolvimento, se estiver ativo, e execute:
+
+```bash
+DATABASE_URL=postgres://app:app@127.0.0.1:5435/legislativo_demo npm run db:migrate
+DEMO_DATABASE_URL=postgres://app:app@127.0.0.1:5435/legislativo_demo npm run db:seed:demo
+DATABASE_URL=postgres://app:app@127.0.0.1:5435/legislativo_demo npm run dev
+```
+
+O seed acrescenta três projetos e dois parlamentares fictícios, temas e movimentações, sem apagar registros nem criar contas predefinidas. Pode ser executado novamente sem duplicar os exemplos. Não chama IA ou APIs oficiais. O CLI exige `DEMO_DATABASE_URL` explicitamente, aceita somente PostgreSQL de loopback com nome terminado em `_demo`, não lê `.env` nem usa `DATABASE_URL` como alternativa e recusa `NODE_ENV=production`.
+
+A demo cobre o feed e detalhes legislativos; ainda não inclui candidaturas, finanças eleitorais ou exemplos de votações. Para experimentar acompanhamentos, crie sua própria conta local com dados fictícios.
+
+## Verificação e dados opcionais
 
 ```bash
 npm test
 npm run typecheck
 npm run build
-npm run sync
-npm run sync:election
-npm run reconcile -- --source=all
-npm run summaries -- 100
-npm run alerts:dispatch
 ```
 
-- `sync`: atualização incremental das duas casas e tentativa de entrega de push;
-- `backfill:legislative`: catálogo retomável por ano, independente do checkpoint incremental; anos concluídos são ignorados, salvo com `--refresh`;
-- `sync:election`: retrato completo e atômico das candidaturas de 2026 a partir dos arquivos oficiais do TSE;
-- `reconcile`: reconciliação diária da janela oficial do dia anterior;
-- `summaries`: gera e atualiza títulos e descrições simples somente para a janela superior do feed (100 projetos por padrão), ignorada com segurança sem chave;
-- `alerts:dispatch`: reenvio dos pushes pendentes, também inofensivo sem VAPID.
+Os testes usam dois bancos descartáveis, separados da demo de exploração: `legislativo_test` (pode ser truncado) e `legislativo_test_demo` (migrado, semeado e alterado pela regressão da demo). `TEST_DATABASE_URL` exige loopback e nome terminado em `_test`; `DEMO_TEST_DATABASE_URL` exige loopback e nome terminado em `_test_demo`. Ao usar PostgreSQL personalizado, configure os dois destinos. Nunca use bancos com dados que deseja preservar; veja [o guia de testes](docs/development.md#testes-e-build).
 
-Para produção, execute `npm run build` e `npm start`. Agende `npm run sync` a cada 30 minutos e `npm run reconcile -- --source=all` uma vez ao dia. A página oficial de estatísticas eleitorais informa quatro atualizações diárias para os conjuntos de 2026; programe `npm run sync:election` depois dessas janelas conforme a capacidade de rede e armazenamento. Os sincronizadores usam advisory lock no PostgreSQL para impedir execuções concorrentes.
+Para carregar registros reais em um banco de desenvolvimento escolhido conscientemente, comece por `npm run sync`. Cargas históricas e eleitorais são opcionais, exigem rede e podem consumir bastante tempo e armazenamento. A carga eleitoral completa validada em setembro de 2026 transferiu cerca de 3,5 GB compactados; o planejamento de disco deve considerar também extração e gerações simultâneas. Veja [comandos e operação de dados](docs/development.md#sincronização-opcional-de-dados-reais).
 
-O sincronizador eleitoral baixa os seis recursos tabulares de candidaturas, complementos, bens, coligações, redes sociais e prestação de contas, além dos 84 arquivos regionais de fotos, propostas de governo e certidões (Brasil e 27 unidades federativas para cada tipo de mídia). A carga real validada em setembro de 2026 transferiu aproximadamente 3,5 GB de arquivos compactados. `ELECTORAL_MEDIA_DIRECTORY` é resolvido como caminho absoluto na inicialização e precisa apontar para um volume persistente em produção. A aplicação só troca o retrato público depois que toda a carga foi validada; uma falha preserva o último retrato e sua geração de mídia. O TSE não exige chave de API.
+## Documentação e contribuição
 
-As consultas públicas usam exclusivamente a geração do último sincronismo eleitoral bem-sucedido. Verifique os horários de extração e conferência exibidos nas telas e monitore falhas do job: enquanto a fonte estiver indisponível ou uma carga for rejeitada, o retrato anterior continua íntegro, mas fica naturalmente mais antigo. Antes da primeira carga, aplique `npm run db:migrate` e confirme espaço suficiente tanto para a geração publicada quanto para a próxima geração em staging.
+- [Arquitetura](docs/architecture.md), [dados e IA](docs/data-and-ai.md).
+- [Desenvolvimento](docs/development.md), [deploy independente](docs/deployment.md).
+- [Como contribuir](CONTRIBUTING.md), [código de conduta](CODE_OF_CONDUCT.md), [segurança](SECURITY.md).
+- [Roadmap](ROADMAP.md), [changelog](CHANGELOG.md), [avisos de terceiros](docs/third-party-notices.md).
 
-Vínculos sugeridos entre candidatura e mandato permanecem pendentes e não aparecem publicamente até revisão explícita. O operador confirma ou rejeita uma correspondência usando somente identificadores públicos e uma evidência oficial:
+Encontrou um erro comum ou tem uma sugestão? Abra uma [issue](https://github.com/italojs/pulso-publico/issues). Vulnerabilidades devem ser relatadas pelo [canal privado de segurança](https://github.com/italojs/pulso-publico/security/advisories/new), sem publicar segredos ou dados pessoais.
 
-```bash
-npm run candidates:link -- confirm --year=2026 --candidate=260001234567 --source=camara --lawmaker=220530 --evidence=https://dadosabertos.camara.leg.br/api/v2/deputados/220530
-npm run candidates:link -- reject --year=2026 --candidate=260001234567 --source=camara --lawmaker=220530 --evidence=https://dadosabertos.tse.jus.br/dataset/candidatos-2026
-```
+## Licença
 
-Os comandos imprimem apenas um resultado JSON sanitizado; nenhuma linha bruta do TSE é exibida. Nesta entrega, apenas `ELECTION_YEAR=2026` é aceito em execução. Use `GEO_PROVIDER=none` em desenvolvimento local.
+O código original do projeto é distribuído sob [MIT](LICENSE), copyright 2026 Italo José. `private: true` em `package.json` evita publicação acidental no npm; não restringe o acesso público no GitHub nem o uso permitido pela licença.
 
-## Catálogo de candidaturas
-
-- `/candidatos` lista o retrato nacional de 2026 com busca, filtros rápidos e avançados, chips removíveis e paginação. `GEO_PROVIDER=cloudflare` ou `vercel` pode sugerir uma UF em produção; `none` mantém Brasil inteiro e é obrigatório para o comportamento previsível em desenvolvimento local.
-- `/candidatos/2026/<id público do TSE>` abre o dossiê neutro com foto ou fallback, situação, bens, finanças, redes, proposta, certidões e proveniência oficial. Valor zero é preservado como zero; campo ausente continua “não informado”.
-- `/candidatos/comparar?ano=2026&id=<id>&id=<id>` compara até três candidaturas compatíveis. A seleção pode atravessar páginas do catálogo; a tela apresenta fatos lado a lado, sem nota, ranking ou recomendação de voto.
-- O botão **Seguir candidatura** exige sessão e redireciona visitantes para entrar ou criar conta com o retorno preservado. Acompanhamentos são exclusivos da conta autenticada, aparecem em `/seguindo` e nunca são compartilhados com outra conta.
-
-O histórico legislativo no perfil só aparece para vínculos revisados e confirmados pelo operador. Sugestões pendentes e rejeições permanecem privadas e não alteram o catálogo público.
-
-## Dados e privacidade
-
-- O catálogo legislativo usa uma data inicial fixa (`LEGISLATIVE_HISTORY_START_YEAR=2019`). A primeira carga pode ser retomada com `npm run backfill:legislative -- --from=2019 --source=all`.
-- Tramitações, votações e votos individuais são carregados das fontes oficiais quando a página do projeto é aberta. O resultado fica armazenado; acessos simultâneos ao mesmo projeto não repetem o trabalho.
-- Matérias bicamerais são relacionadas somente por tipo, número e ano oficiais, com sinal de origem na outra Casa. Câmara e Senado continuam separados na página.
-- Documentos e anexos permanecem nas fontes oficiais; o banco guarda dados estruturados e links.
-- Seguir projetos, parlamentares ou candidaturas exige uma conta. Acompanhamentos antigos de projetos ou parlamentares que ainda estejam salvos no navegador são migrados de forma idempotente no primeiro acesso autenticado e, depois, removidos do armazenamento local.
-- Senhas usam `scrypt`; tokens de sessão ficam em cookie `HttpOnly` e somente seus hashes são armazenados.
-
-## Filtros avançados do feed
-
-Além da busca e dos filtros rápidos, o botão **Filtros avançados** abre um painel com sete seções recolhíveis: identificação; tramitação; datas e atividade; votações; assuntos e autoria; acompanhamento; e ordenação. Tipos, situações, temas, autoria e partidos têm busca com sugestões limitadas, para que os catálogos oficiais grandes não sejam renderizados integralmente. Valores de um mesmo campo são alternativas (por exemplo, `PEC` **ou** `PL`); campos diferentes são combinados entre si (por exemplo, tipo **e** tema).
-
-Os filtros que podem ser compartilhados ficam na URL. Seleções múltiplas usam parâmetros repetidos, como `/?tipo=PEC&tipo=PL&tema=Saúde&tema=Trabalho`; intervalos usam, por exemplo, `anoInicio=2024&anoFim=2026` e `apresentadaInicio=2024-01-01`. Alterar um filtro volta à primeira página, preserva as demais seleções e omite parâmetros vazios. Se uma opção selecionada sair do catálogo sincronizado, ela continua visível como indisponível até ser removida explicitamente.
-
-Para tornar a busca rápida, o banco normaliza facetas sem alterar os textos oficiais: tipo, número e ano da proposta; uma fase geral determinística da tramitação; e uma categoria de resultado de votação (`aprovada`, `rejeitada`, `outros` ou `não informado`). Siglas oficiais compostas por segmentos alfabéticos separados por hífen, ponto ou sublinhado — como `SBT-A`, `R.C` e `ATA_PRE` — são reconhecidas com limite de 20 caracteres. Uma sigla fora dessa gramática fica sem a faceta de tipo, mas o projeto e seu texto oficial são preservados e continuam pesquisáveis. A tela continua mostrando os títulos, situações e resultados oficiais quando eles existem.
-
-“Mostrar somente projetos que acompanho” exige autenticação e é resolvido no servidor pelos acompanhamentos da conta. Para visitantes, o filtro fica desabilitado e leva à entrada ou criação de conta, preservando o endereço de retorno.
-
-Todos os filtros usam exclusivamente dados oficiais já sincronizados da Câmara dos Deputados e do Senado Federal. Aplicar, contar ou combinar filtros não faz requisição de IA.
-
-Após atualizar o código, aplique a migração aditiva antes de sincronizar ou consultar as novas facetas:
-
-```bash
-npm run db:migrate
-```
-
-As decisões de produto e a arquitetura estão em [`docs/superpowers/specs`](docs/superpowers/specs). O relatório da validação mais recente dos filtros está em [`docs/validation/2026-09-04-filtros-avancados-validation.md`](docs/validation/2026-09-04-filtros-avancados-validation.md); a validação de base do MVP permanece em [`docs/validation/2026-09-03-mvp-validation.md`](docs/validation/2026-09-03-mvp-validation.md).
+Dados oficiais, fotografias, documentos, fontes tipográficas e dependências não são relicenciados pela MIT do projeto. Preserve os avisos aplicáveis e verifique as condições de cada origem antes de redistribuir dados ou mídia. Consulte [dados e IA](docs/data-and-ai.md) e [avisos de terceiros](docs/third-party-notices.md).

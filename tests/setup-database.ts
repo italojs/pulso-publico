@@ -3,13 +3,14 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
+import { assertLocalDisposableDatabaseUrl } from "#/development/database-url";
 import * as schema from "#/server/db/schema";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required for database integration tests");
 }
 
-export const testSql = postgres(process.env.DATABASE_URL, { max: 1 });
+export const testSql = postgres(assertLocalDisposableDatabaseUrl(process.env.DATABASE_URL, "test"), { max: 1 });
 export const testDb = drizzle(testSql, { schema });
 
 export async function migrateTestDatabase() {

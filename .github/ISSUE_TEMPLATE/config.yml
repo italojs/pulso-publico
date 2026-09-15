@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reportar vulnerabilidade em privado
+    url: https://github.com/italojs/pulso-publico/security/advisories/new
+    about: Não publique detalhes de segurança em issues abertas.

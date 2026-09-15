@@ -1,0 +1,25 @@
+name: Reportar um problema
+description: Falhas técnicas ou divergências de dados verificáveis.
+body:
+  - type: markdown
+    attributes:
+      value: "Não publique credenciais, dados de usuários ou vulnerabilidades aqui. Para segurança, use o canal privado indicado em SECURITY.md."
+  - type: textarea
+    id: description
+    attributes:
+      label: O que aconteceu?
+      description: Inclua o comportamento esperado e o observado.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Como reproduzir?
+      description: Passos, versão ou commit, navegador e ambiente. Se for um dado político, inclua o link oficial e a data de consulta.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidências sanitizadas
+      description: Logs ou screenshots sem informações sensíveis.

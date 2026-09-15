@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: app
       POSTGRES_DB: legislativo
     ports:
-      - "5435:5432"
+      - "127.0.0.1:5435:5432"
     volumes:
       - ./docker/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/001-test-db.sql:ro
     healthcheck:

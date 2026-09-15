@@ -12,3 +12,21 @@ data/
 *.tsbuildinfo
 .DS_Store
 .worktrees/
+
+# Configuration examples are public; all real environment variants remain local.
+.env*
+!.env.example
+.galaxyignore.local
+.data/
+.superpowers/
+
+# Keys, database exports and local operational artifacts.
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.backup
+*.sql.gz
+*.sqlite
+*.sqlite3

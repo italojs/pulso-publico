@@ -1,6 +1,16 @@
 {
-  "name": "acompanhamento-legislativo",
+  "name": "pulso-publico",
   "version": "0.1.0",
+  "description": "Acompanhamento neutro da política brasileira com dados oficiais e linguagem acessível.",
+  "license": "MIT",
+  "author": "Italo José (https://github.com/italojs)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/italojs/pulso-publico.git"
+  },
+  "bugs": { "url": "https://github.com/italojs/pulso-publico/issues" },
+  "homepage": "https://github.com/italojs/pulso-publico#readme",
+  "keywords": ["civic-tech", "brasil", "dados-abertos", "camara", "senado", "tse"],
   "private": true,
   "type": "module",
   "packageManager": "npm@11.19.0",
@@ -21,20 +31,21 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "sync": "node scripts/sync.ts",
-    "backfill:legislative": "node scripts/backfill-legislative.ts",
-    "backfill:votes": "node scripts/backfill-camara-votes.ts",
-    "collect:history": "node scripts/collect-history.ts",
-    "collect:status": "node scripts/collect-status.ts",
-    "reconcile": "node scripts/reconcile.ts",
-    "sync:election": "node scripts/sync-election.ts",
-    "candidates:link": "node scripts/manage-candidate-link.ts",
-    "summaries": "node scripts/generate-summaries.ts",
-    "practical-impact:prepare": "node scripts/prepare-practical-impact-batch.ts --limit=600",
-    "practical-impact:append:5000": "node scripts/append-practical-impact-batch.ts --limit=5000",
-    "practical-impact:verify": "node scripts/verify-practical-impact-batch.ts",
-    "practical-impact:verify:5600": "node scripts/verify-practical-impact-batch.ts --expected=5600",
-    "alerts:dispatch": "node scripts/dispatch-push.ts"
+    "db:seed:demo": "tsx scripts/seed-demo.ts",
+    "sync": "tsx scripts/sync.ts",
+    "backfill:legislative": "tsx scripts/backfill-legislative.ts",
+    "backfill:votes": "tsx scripts/backfill-camara-votes.ts",
+    "collect:history": "tsx scripts/collect-history.ts",
+    "collect:status": "tsx scripts/collect-status.ts",
+    "reconcile": "tsx scripts/reconcile.ts",
+    "sync:election": "tsx scripts/sync-election.ts",
+    "candidates:link": "tsx scripts/manage-candidate-link.ts",
+    "summaries": "tsx scripts/generate-summaries.ts",
+    "practical-impact:prepare": "tsx scripts/prepare-practical-impact-batch.ts --limit=600",
+    "practical-impact:append:5000": "tsx scripts/append-practical-impact-batch.ts --limit=5000",
+    "practical-impact:verify": "tsx scripts/verify-practical-impact-batch.ts",
+    "practical-impact:verify:5600": "tsx scripts/verify-practical-impact-batch.ts --expected=5600",
+    "alerts:dispatch": "tsx scripts/dispatch-push.ts"
   },
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
@@ -63,6 +74,7 @@
     "drizzle-kit": "0.31.10",
     "jsdom": "^30.0.1",
     "typescript": "7.0.2",
+    "tsx": "4.23.13",
     "vitest": "5.0.0"
   }
 }

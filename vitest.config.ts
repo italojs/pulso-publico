@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { assertLocalDisposableDatabaseUrl } from "./src/development/database-url.ts";
 
 export default defineConfig({
   test: {
@@ -6,9 +7,11 @@ export default defineConfig({
     fileParallelism: false,
     restoreMocks: true,
     env: {
-      DATABASE_URL:
+      DATABASE_URL: assertLocalDisposableDatabaseUrl(
         process.env.TEST_DATABASE_URL
-        ?? "postgres://app:app@localhost:5432/legislativo_test",
+        ?? "postgres://app:app@127.0.0.1:5435/legislativo_test",
+        "test",
+      ),
     },
   },
   resolve: {

@@ -50,7 +50,7 @@ psql <galaxy-admin-url> \
   --file=scripts/bootstrap-production-database.sql
 
 node --env-file=.env.production.local ./node_modules/drizzle-kit/bin.cjs migrate
-node --env-file=.env.production.local scripts/verify-production-database.ts
+npx tsx --env-file=.env.production.local scripts/verify-production-database.ts
 ```
 
 O verificador imprime apenas nomes do banco/usuário, condição de superusuário, quantidade de migrações, presença das tabelas e bytes utilizados. Ele nunca imprime a URL de conexão.
@@ -60,11 +60,11 @@ O verificador imprime apenas nomes do banco/usuário, condição de superusuári
 Depois do deploy saudável, execute nesta ordem, sempre com `.env.production.local`: sincronismo legislativo atual, sincronismo eleitoral de 2026, uma unidade do coletor histórico e então o coletor contínuo. O limite operacional é 20 requisições por minuto por fonte.
 
 ```sh
-node --env-file=.env.production.local scripts/sync.ts
-node --env-file=.env.production.local scripts/sync-election.ts
-node --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20 --once
-node --env-file=.env.production.local scripts/collect-status.ts
-node --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20
+npx tsx --env-file=.env.production.local scripts/sync.ts
+npx tsx --env-file=.env.production.local scripts/sync-election.ts
+npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20 --once
+npx tsx --env-file=.env.production.local scripts/collect-status.ts
+npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20
 ```
 
 O status de armazenamento muda para aviso em 70%, crítico em 80% e interrompe a reserva de novas páginas em 90%. Lotes já persistidos e cursores continuam válidos para uma retomada posterior.

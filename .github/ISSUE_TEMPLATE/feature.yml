@@ -1,0 +1,17 @@
+name: Sugerir uma melhoria
+description: Propostas para tornar a informação pública mais acessível e verificável.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema precisa ser resolvido?
+      description: Explique a necessidade de quem usa ou desenvolve o aplicativo.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Qual é a proposta?
+      description: Inclua alternativas, fontes oficiais e impactos em privacidade ou neutralidade.
+    validations:
+      required: true
