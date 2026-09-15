@@ -220,7 +220,7 @@ export function parseHistoricalCollectorArguments(
   let fromYear = 1946;
   let throughYear = currentYear;
   let sources: LegislativeSourceName[] = ["camara", "senado"];
-  let requestsPerMinute = 20;
+  let requestsPerMinute = 60;
   let once = false;
 
   for (const argument of args) {
@@ -250,8 +250,8 @@ export function parseHistoricalCollectorArguments(
   if (fromYear > throughYear) {
     throw new Error("--from cannot be greater than --through");
   }
-  if (!Number.isInteger(requestsPerMinute) || requestsPerMinute < 1 || requestsPerMinute > 20) {
-    throw new Error("--requests-per-minute must be between 1 and 20");
+  if (!Number.isInteger(requestsPerMinute) || requestsPerMinute < 1 || requestsPerMinute > 60) {
+    throw new Error("--requests-per-minute must be between 1 and 60");
   }
 
   return { fromYear, throughYear, sources, requestsPerMinute, once };

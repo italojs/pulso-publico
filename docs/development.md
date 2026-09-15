@@ -94,7 +94,7 @@ O ano inicial legislativo padrão é `LEGISLATIVE_HISTORY_START_YEAR=2019`. A co
 O coletor histórico de maior alcance tem tarefas, cursores, retomada e controle de armazenamento. Comece por uma unidade, não por uma execução contínua não supervisionada:
 
 ```bash
-npm run collect:history -- --from=2019 --through=2026 --source=all --requests-per-minute=20 --once
+npm run collect:history -- --from=2019 --through=2026 --source=all --requests-per-minute=60 --once
 npm run collect:status
 ```
 

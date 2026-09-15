@@ -57,14 +57,14 @@ O verificador imprime apenas nomes do banco/usuário, condição de superusuári
 
 ## Carga inicial e operação
 
-Depois do deploy saudável, execute nesta ordem, sempre com `.env.production.local`: sincronismo legislativo atual, sincronismo eleitoral de 2026, uma unidade do coletor histórico e então o coletor contínuo. O limite operacional é 20 requisições por minuto por fonte.
+Depois do deploy saudável, execute nesta ordem, sempre com `.env.production.local`: sincronismo legislativo atual, sincronismo eleitoral de 2026, uma unidade do coletor histórico e então o coletor contínuo. A prioridade é do ano mais recente para o mais antigo. O limite operacional é 60 requisições por minuto por fonte (uma requisição por segundo em cada fonte).
 
 ```sh
 npx tsx --env-file=.env.production.local scripts/sync.ts
 npx tsx --env-file=.env.production.local scripts/sync-election.ts
-npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20 --once
+npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=60 --once
 npx tsx --env-file=.env.production.local scripts/collect-status.ts
-npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=20
+npx tsx --env-file=.env.production.local scripts/collect-history.ts --from=1946 --through=2026 --source=all --requests-per-minute=60
 ```
 
 O status de armazenamento muda para aviso em 70%, crítico em 80% e interrompe a reserva de novas páginas em 90%. Lotes já persistidos e cursores continuam válidos para uma retomada posterior.

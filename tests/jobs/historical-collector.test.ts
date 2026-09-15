@@ -207,6 +207,16 @@ describe("runHistoricalCollector", () => {
 });
 
 describe("parseHistoricalCollectorArguments", () => {
+  it("defaults to one request per second for each official source", () => {
+    expect(parseHistoricalCollectorArguments([], 2026)).toMatchObject({
+      fromYear: 1946,
+      throughYear: 2026,
+      sources: ["camara", "senado"],
+      requestsPerMinute: 60,
+      once: false,
+    });
+  });
+
   it("parses the complete bounded command contract", () => {
     expect(parseHistoricalCollectorArguments([
       "--from=2019",
@@ -231,7 +241,7 @@ describe("parseHistoricalCollectorArguments", () => {
       "--through=2024",
     ], 2026)).toThrow("--from cannot be greater than --through");
     expect(() => parseHistoricalCollectorArguments([
-      "--requests-per-minute=21",
-    ], 2026)).toThrow("between 1 and 20");
+      "--requests-per-minute=61",
+    ], 2026)).toThrow("between 1 and 60");
   });
 });
