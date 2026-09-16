@@ -53,7 +53,14 @@ export async function loadBillGraph(
   }
 
   const individualVotes = await listPublishedIndividualVotes(adapter, voteEvents);
-  return { bill, authors, topics, movements, voteEvents, individualVotes };
+  const eventsWithPublishedVotes = new Set(individualVotes.map((vote) => vote.voteEventExternalId));
+  return {
+    bill, authors, topics, movements, individualVotes,
+    voteEvents: voteEvents.map((event) => ({
+      ...event,
+      isNominal: !event.isSecret && (event.isNominal || eventsWithPublishedVotes.has(event.externalId)),
+    })),
+  };
 }
 
 export async function persistHydratedBillGraph(

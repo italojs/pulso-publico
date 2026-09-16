@@ -23,7 +23,7 @@ export function ProjectCard({ project }: Readonly<{ project: SummarizedBillCard 
       </div>
       <StatusRail compact source={project.source} status={project.statusLabel} />
       <div className="projectCard__content">
-        {hasAiSummary ? <span className="aiLabel">Gerado por IA</span> : <span className="officialLabel">Título oficial</span>}
+        {!hasAiSummary ? <span className="officialLabel">Título oficial</span> : null}
         <h2>
           <a href={`/projetos/${project.source}/${project.externalId}`}>
             <span className="projectCard__code">{project.officialCode}</span>

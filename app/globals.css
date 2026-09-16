@@ -133,7 +133,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .siteFooter p { margin: 0; }
 
 .sourceBadge,
-.aiLabel,
 .officialLabel {
   display: inline-flex;
   align-items: center;
@@ -149,7 +148,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .sourceBadge__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
 .sourceBadge--senado .sourceBadge__dot { background: var(--blue); }
-.aiLabel { width: fit-content; padding: 5px 8px; border: 1px solid #c3a126; border-radius: 5px; color: #695409; background: #fff9dd; }
 .officialLabel { color: #66736d; }
 
 .statusRail {

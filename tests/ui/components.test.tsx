@@ -85,6 +85,18 @@ describe("civic interface components", () => {
     expect(screen.getByText(/Ana Cidadã/)).toBeInTheDocument();
   });
 
+  it("presents a summarized project without the AI badge", () => {
+    render(<ProjectCard project={{
+      ...card,
+      friendlyTitle: "Jornada de 40 horas semanais",
+      shortDescription: "Reduz a jornada e amplia o repouso semanal.",
+    }} />);
+
+    expect(screen.getByRole("link", { name: /Jornada de 40 horas semanais/ })).toBeInTheDocument();
+    expect(screen.getByText("Reduz a jornada e amplia o repouso semanal.")).toBeInTheDocument();
+    expect(screen.queryByText("Gerado por IA")).not.toBeInTheDocument();
+  });
+
   it("shows that official activity is unavailable when no official date exists", () => {
     const view = render(<ProjectCard project={{ ...card, latestActivityAt: null }} />);
 

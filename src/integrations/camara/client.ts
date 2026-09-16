@@ -82,6 +82,40 @@ function dateInSaoPaulo(value: Date) {
     .toString();
 }
 
+const movementIdentitySchema = z.object({
+  codTipoTramitacao: z.union([z.string(), z.number()]).nullish(),
+});
+
+function distinguishCollidingMovements(items: { movement: Movement; typeCode: string }[]): Movement[] {
+  const groups = new Map<string, Map<string, { signature: string; movement: Movement }>>();
+  for (const { movement, typeCode } of items) {
+    // Sequence/date/body is not unique in the official API. Exclude the check
+    // time so distinct acts keep their identities across repeated collections.
+    const { checkedAt: _checkedAt, ...content } = movement;
+    const signature = JSON.stringify(content);
+    const group = groups.get(movement.externalId) ?? new Map();
+    const previous = group.get(typeCode);
+    if (previous && previous.signature !== signature) {
+      throw new Error("Distinct Câmara acts share sequence, date, body and type; manual reconciliation required");
+    }
+    group.set(typeCode, { signature, movement });
+    groups.set(movement.externalId, group);
+  }
+
+  return [...groups.values()].flatMap((group) => {
+    const typeCodes = [...group.keys()].sort().reverse();
+    return typeCodes.map((typeCode, index) => {
+      const { movement } = group.get(typeCode)!;
+      // Preserve one legacy ID; otherwise an existing row would be orphaned
+      // when these records are upserted. Unambiguous IDs remain unchanged.
+      return index === 0 ? movement : {
+        ...movement,
+        externalId: `${movement.externalId}:tipo:${encodeURIComponent(typeCode)}`,
+      };
+    });
+  });
+}
+
 export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkBootstrap, LegislativeCatalogBootstrap, LegislativeVoteArchiveBootstrap {
   readonly source = "camara" as const;
   private readonly baseUrl: URL;
@@ -248,9 +282,15 @@ export class CamaraAdapter implements LegislativeSourceAdapter, LegislativeBulkB
   async listBillMovements(billExternalId: string): Promise<Movement[]> {
     const url = this.url(`proposicoes/${encodeURIComponent(billExternalId)}/tramitacoes`);
     const values = await this.fetchAllCollectionItems(url);
-    return this.mapCollection(url, values, (raw) =>
-      mapCamaraMovement(raw, billExternalId, this.now()),
-    );
+    try {
+      return distinguishCollidingMovements(this.mapCollection(url, values, (raw) => ({
+        movement: mapCamaraMovement(raw, billExternalId, this.now()),
+        typeCode: String(movementIdentitySchema.parse(raw).codTipoTramitacao ?? "sem-tipo"),
+      })));
+    } catch (error) {
+      if (error instanceof OfficialSourceError) throw error;
+      throw this.contractError(url, error);
+    }
   }
 
   async listBillVoteEvents(billExternalId: string): Promise<VoteEvent[]> {

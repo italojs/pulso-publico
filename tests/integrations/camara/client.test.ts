@@ -12,6 +12,91 @@ function jsonResponse(value: unknown) {
 }
 
 describe("CamaraAdapter", () => {
+  it("rejects genuinely ambiguous acts instead of silently overwriting one", async () => {
+    const movement = {
+      sequencia: 407, dataHora: "2026-05-27T15:00", siglaOrgao: "PLEN",
+      descricaoTramitacao: "Discussão (Plenário)", codTipoTramitacao: 222,
+      despacho: "Discussão em primeiro turno.",
+    };
+    const adapter = new CamaraAdapter({
+      baseUrl: "https://camara.test/api/v2",
+      now: () => new Date("2026-09-15T15:00:00Z"),
+      fetcher: async () => jsonResponse({ dados: [movement, { ...movement, despacho: "Outro ato de discussão." }], links: [] }),
+    });
+    await expect(adapter.listBillMovements("2233802")).rejects.toMatchObject({
+      name: "OfficialSourceError", retryable: false, status: null,
+    });
+  });
+
+  it("preserves distinct PEC acts sharing a sequence without changing unambiguous movement IDs", async () => {
+    const base = {
+      sequencia: 407,
+      dataHora: "2026-05-27T15:00",
+      siglaOrgao: "PLEN",
+      uriOrgao: "https://dadosabertos.camara.leg.br/api/v2/orgaos/180",
+      regime: "Especial",
+      descricaoSituacao: "Aguardando Envio ao Senado Federal",
+      codSituacao: 1293,
+      url: null,
+    };
+    const discussion = {
+      ...base,
+      descricaoTramitacao: "Discussão (Plenário)",
+      codTipoTramitacao: 222,
+      despacho: "Discussão em primeiro turno.",
+    };
+    const request = {
+      ...base,
+      descricaoTramitacao: "Aprovação de Requerimento",
+      codTipoTramitacao: 195,
+      despacho: "Aprovado o requerimento nº 3223/2026, que solicita dispensa de interstício.",
+    };
+    const unambiguous = { ...discussion, sequencia: 408, despacho: "Discussão em segundo turno." };
+    const collect = async (dados: unknown[], checkedAt: string) => {
+      const adapter = new CamaraAdapter({
+        baseUrl: "https://camara.test/api/v2",
+        now: () => new Date(checkedAt),
+        fetcher: async () => jsonResponse({ dados, links: [] }),
+      });
+      return adapter.listBillMovements("2233802");
+    };
+
+    const movements = await collect([request, discussion, discussion, unambiguous], "2026-09-15T15:00:00Z");
+    const reversed = await collect([unambiguous, discussion, request], "2026-09-16T15:00:00Z");
+
+    expect(movements).toHaveLength(3);
+    expect(new Set(movements.map((movement) => movement.externalId)).size).toBe(3);
+    expect(movements.find((movement) => movement.officialDescription === "Discussão em primeiro turno.")?.externalId)
+      .toBe("2233802:407:2026-05-27T15:00:PLEN");
+    expect(movements.find((movement) => movement.officialDescription === "Discussão em segundo turno.")?.externalId)
+      .toBe("2233802:408:2026-05-27T15:00:PLEN");
+    expect(movements.find((movement) => movement.officialDescription === request.despacho)?.externalId)
+      .toBe("2233802:407:2026-05-27T15:00:PLEN:tipo:195");
+    expect(movements.map(({ externalId, officialDescription }) => ({ externalId, officialDescription }))
+      .sort((a, b) => a.externalId.localeCompare(b.externalId)))
+      .toEqual(reversed.map(({ externalId, officialDescription }) => ({ externalId, officialDescription }))
+        .sort((a, b) => a.externalId.localeCompare(b.externalId)));
+
+    const corrected = await collect([
+      { ...request, despacho: "Aprovado o requerimento nº 3223/2026, com redação corrigida.", codSituacao: 926 },
+      discussion, unambiguous,
+    ], "2026-09-17T15:00:00Z");
+    const stored = new Map(movements.map((movement) => [movement.externalId, movement]));
+    for (const movement of corrected) stored.set(movement.externalId, movement);
+    expect(stored.size).toBe(3);
+    expect(stored.get("2233802:407:2026-05-27T15:00:PLEN:tipo:195")?.officialDescription)
+      .toBe("Aprovado o requerimento nº 3223/2026, com redação corrigida.");
+
+    const expanded = await collect([
+      discussion, request, unambiguous,
+      { ...discussion, codTipoTramitacao: 300, despacho: "Novo ato com a mesma sequência." },
+    ], "2026-09-18T15:00:00Z");
+    for (const movement of expanded) stored.set(movement.externalId, movement);
+    expect(stored.size).toBe(4);
+    expect([...stored.values()].map((movement) => movement.officialDescription).sort())
+      .toEqual([request.despacho, discussion.despacho, unambiguous.despacho, "Novo ato com a mesma sequência."].sort());
+  });
+
   it("finds a proposition by exact official type, number and year", async () => {
     const requestedUrls: URL[] = [];
     const adapter = new CamaraAdapter({
