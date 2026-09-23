@@ -59,7 +59,7 @@
     "react-dom": "19.2.8",
     "unzipper": "0.12.5",
     "web-push": "^3.6.7",
-    "zod": "4.5.4"
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",
